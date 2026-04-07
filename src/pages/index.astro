@@ -1,20 +1,44 @@
 ---
 const base = import.meta.env.BASE_URL;
-const salonName = "リラクゼーションサロン 和笑";
+const salonName = "サロン和笑〜Violane〜";
 const salonNameReading = "わしょう";
 const reserveUrl = "https://reserva.be/wasyou258";
-const tel = "000-0000-0000"; // ← 実際の電話番号に変更
+const tel = "080-6368-0753";
 ---
 
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
-    <link rel="icon" href={`${base}favicon.ico`} />
+    <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
+    <link rel="apple-touch-icon" href={`${base}favicon.jpg`} />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="generator" content={Astro.generator} />
-    <meta name="description" content="心と体を整える、至福のひとときを。もみほぐし・足つぼのリラクゼーションサロン 和笑（わしょう）。ネット予約受付中。" />
-    <title>{salonName}（{salonNameReading}）| リラクゼーションサロン</title>
+    <meta name="description" content="富山県高岡市野村にあるリラクゼーションサロン和笑〜Violane〜。もみほぐしやオイルケア・フットケア・ハンドケアで至福のひとときを。女性が安心して通える和モダンな癒やし空間です。駐車場完備。" />
+    <title>高岡市のマッサージならサロン和笑〜Violane〜 | 高岡駅車で9分</title>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HealthAndBeautyBusiness",
+      "name": "サロン和笑〜Violane〜",
+      "image": "https://shima-v.github.io/wasyo_astro/images/logo.jpg",
+      "url": "https://shima-v.github.io/wasyo_astro/",
+      "telephone": "080-6368-0753",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "野村1180-1",
+        "addressLocality": "高岡市",
+        "addressRegion": "富山県",
+        "addressCountry": "JP"
+      },
+      "openingHoursSpecification": [
+        {"@type":"OpeningHoursSpecification","dayOfWeek":["Monday","Tuesday","Wednesday","Thursday","Friday"],"opens":"10:30","closes":"14:30"},
+        {"@type":"OpeningHoursSpecification","dayOfWeek":["Monday","Tuesday","Wednesday","Thursday","Friday"],"opens":"16:30","closes":"21:00"},
+        {"@type":"OpeningHoursSpecification","dayOfWeek":["Saturday"],"opens":"10:30","closes":"14:30"},
+        {"@type":"OpeningHoursSpecification","dayOfWeek":["Saturday"],"opens":"16:30","closes":"18:30"}
+      ],
+      "priceRange": "¥1,000〜¥6,500"
+    }
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;600&family=Noto+Sans+JP:wght@300;400&display=swap" rel="stylesheet" />
@@ -27,8 +51,8 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     <header class="site-header">
       <div class="header-inner">
         <p class="header-logo">
-          <span class="logo-main">和笑</span>
-          <span class="logo-sub">リラクゼーションサロン</span>
+          <span class="logo-main">サロン和笑</span>
+          <span class="logo-sub">〜Violane〜</span>
         </p>
         <nav class="header-nav">
           <a href="#menu">メニュー</a>
@@ -47,8 +71,8 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     <section class="hero">
       <div class="hero-overlay"></div>
       <div class="hero-content">
-        <p class="hero-reading">{salonNameReading}</p>
-        <h1 class="hero-title">和笑</h1>
+        <h1 class="hero-title">サロン<ruby>和笑<rt>わしょう</rt></ruby></h1>
+        <p class="hero-violane">〜Violane〜</p>
         <p class="hero-tagline">心と体を整える、至福のひとときを。</p>
         <a href={reserveUrl} target="_blank" rel="noopener noreferrer" class="reserve-btn reserve-btn--hero">
           ネット予約はこちら
@@ -77,26 +101,52 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
       <div class="section-inner">
         <div class="section-heading">
           <span class="section-heading-en">CONCEPT</span>
-          <h2 class="section-heading-ja">私たちの想い</h2>
+          <h2 class="section-heading-ja">私の想い</h2>
         </div>
         <p class="concept-text">
-          日々の疲れ、体のこり、心のざわめき——<br />
-          「和笑」は、そんなあなたのためのサロンです。<br /><br />
-          心と体を整える、至福のひとときを。<br />
-          ふかぶかと息をついて、また明日へ歩き出す力を。
+          サロン和笑〜Violane〜は、女性のお客様に安心してお過ごしいただける、基本的に女性専用のサロンです。男性のお客様は、お知り合いの方からのご紹介に限り承っております。
         </p>
-        <!--
-          コンセプト画像を使う場合:
-          public/images/concept.jpg を配置してコメントを外す
+        <p class="concept-text">
+          「ここに来てよかった」と毎回思っていただけるよう、心を込めた施術と、くつろげる空間づくりを大切にしています。
+        </p>
         <img
-          src={`${base}images/concept.jpg`}
-          alt="サロンの内観"
+          src={`${base}images/naisou.jpg`}
+          alt="サロン和笑〜Violane〜の内装"
           class="concept-img"
           loading="lazy"
           width="800"
           height="450"
         />
-        -->
+      </div>
+    </section>
+
+    <!-- ============================================================
+         施術の特徴
+    ============================================================ -->
+    <section class="features" id="features">
+      <div class="section-inner">
+        <div class="section-heading">
+          <span class="section-heading-en">FEATURES</span>
+          <h2 class="section-heading-ja">施術の特徴</h2>
+        </div>
+        <div class="features-grid">
+          <div class="feature-card">
+            <h3 class="feature-card-title">もみほぐし</h3>
+            <p class="feature-card-desc">全身の筋肉をほぐし、血行を促進。肩こり・腰痛・疲労回復に。圧の強弱はお好みに合わせます。</p>
+          </div>
+          <div class="feature-card">
+            <h3 class="feature-card-title">オイルケア</h3>
+            <p class="feature-card-desc">厳選アロマオイルを使ったトリートメント。心身の緊張をほぐし、肌にうるおいを。</p>
+          </div>
+          <div class="feature-card">
+            <h3 class="feature-card-title">フットケア</h3>
+            <p class="feature-card-desc">足裏から膝下を丁寧にほぐし、むくみや疲れをリセット。立ち仕事や歩き疲れの方に。</p>
+          </div>
+          <div class="feature-card">
+            <h3 class="feature-card-title">ハンドケア</h3>
+            <p class="feature-card-desc">手指・手首・前腕を丁寧にケア。パソコン作業や家事で疲れた手に癒やしを。</p>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -110,52 +160,15 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
           <h2 class="section-heading-ja">メニュー・料金</h2>
         </div>
 
-        <!-- もみほぐし -->
-        <div class="menu-block">
-          <div class="menu-block-header">
-            <h3 class="menu-block-title">もみほぐし</h3>
-            <p class="menu-block-desc">全身のこりをほぐす、基本のボディケア。</p>
-          </div>
-          <table class="menu-table">
-            <thead>
-              <tr><th>時間</th><th>料金（税込）</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>15分</td><td>¥1,000</td></tr>
-              <tr><td>30分</td><td>¥2,000</td></tr>
-              <tr><td>45分</td><td>¥3,000</td></tr>
-              <tr><td>60分</td><td>¥4,000</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- 足つぼ -->
-        <div class="menu-block">
-          <div class="menu-block-header">
-            <h3 class="menu-block-title">足つぼ<span class="menu-block-title-note">（足裏〜膝下）</span></h3>
-            <p class="menu-block-desc">足裏から膝下をしっかりほぐし、全身をリセット。</p>
-          </div>
-          <table class="menu-table">
-            <thead>
-              <tr><th>時間</th><th>料金（税込）</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>20分</td><td>¥2,000</td></tr>
-              <tr><td>30分</td><td>¥3,000</td></tr>
-              <tr><td>45分</td><td>¥4,500</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- セットメニュー -->
+        <!-- セットメニュー（1番人気） -->
         <div class="menu-block menu-block--set">
           <div class="menu-block-header">
             <h3 class="menu-block-title">
-              <span class="set-badge">SET</span>
+              <span class="set-badge">1番人気</span>
               セットメニュー
-              <span class="menu-block-title-note">（もみほぐし＋足つぼ）</span>
+              <span class="menu-block-title-note">（もみほぐし＋オイルケアまたはフットケアまたはハンドケア）</span>
             </h3>
-            <p class="menu-block-desc">体と足、両方まとめてケアしたい方におすすめ。</p>
+            <p class="menu-block-desc">もみほぐしとオイルケア・フットケア・ハンドケアを組み合わせた特別コース。</p>
           </div>
           <table class="menu-table">
             <thead>
@@ -168,6 +181,95 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
               <tr><td>90分</td><td>¥6,500</td></tr>
             </tbody>
           </table>
+          <div class="review-block">
+            <blockquote class="review-quote">「肩と足が同時にほぐれて、一石二鳥！毎月来るのが楽しみです。」</blockquote>
+            <p class="review-author">50代・女性</p>
+            <blockquote class="review-quote">「長時間のデスクワーク後に来ると、別人のように体が楽になります。」</blockquote>
+            <p class="review-author">40代・女性</p>
+          </div>
+        </div>
+
+        <!-- もみほぐし -->
+        <div class="menu-block">
+          <div class="menu-block-header">
+            <h3 class="menu-block-title">もみほぐし</h3>
+            <p class="menu-block-desc">全身の筋肉をほぐし、血行を促進。肩こり・腰痛・疲労回復に。</p>
+          </div>
+          <table class="menu-table">
+            <thead>
+              <tr><th>時間</th><th>料金（税込）</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>15分</td><td>¥1,000</td></tr>
+              <tr><td>30分</td><td>¥2,000</td></tr>
+              <tr><td>45分</td><td>¥3,000</td></tr>
+              <tr><td>60分</td><td>¥4,000</td></tr>
+            </tbody>
+          </table>
+          <div class="review-block">
+            <blockquote class="review-quote">「ひどい肩こりで来ましたが、施術後はすっきり。よく眠れるようになりました。」</blockquote>
+            <p class="review-author">60代・女性</p>
+            <blockquote class="review-quote">「力加減を調整してもらえて、痛気持ちいい絶妙な施術でした。」</blockquote>
+            <p class="review-author">30代・女性</p>
+          </div>
+        </div>
+
+        <!-- オイルケア・フットケア・ハンドケア -->
+        <div class="menu-trio">
+          <div class="menu-block">
+            <div class="menu-block-header">
+              <h3 class="menu-block-title">オイルケア</h3>
+              <p class="menu-block-desc">厳選アロマオイルで心身の緊張をほぐします。</p>
+            </div>
+            <table class="menu-table">
+              <thead>
+                <tr><th>時間</th><th>料金（税込）</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>●分</td><td>¥●,●●●</td></tr>
+              </tbody>
+            </table>
+            <div class="review-block">
+              <blockquote class="review-quote">「オイルの香りに包まれてすっかりリラックス。肌もしっとりしました。」</blockquote>
+              <p class="review-author">40代・女性</p>
+            </div>
+          </div>
+          <div class="menu-block">
+            <div class="menu-block-header">
+              <h3 class="menu-block-title">フットケア</h3>
+              <p class="menu-block-desc">足裏から膝下を丁寧にほぐし、むくみをリセット。</p>
+            </div>
+            <table class="menu-table">
+              <thead>
+                <tr><th>時間</th><th>料金（税込）</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>●分</td><td>¥●,●●●</td></tr>
+              </tbody>
+            </table>
+            <div class="review-block">
+              <blockquote class="review-quote">「むくんでいた足が帰りには別人のように軽くなりました！」</blockquote>
+              <p class="review-author">60代・女性</p>
+            </div>
+          </div>
+          <div class="menu-block">
+            <div class="menu-block-header">
+              <h3 class="menu-block-title">ハンドケア</h3>
+              <p class="menu-block-desc">手指・手首・前腕を丁寧にケアします。</p>
+            </div>
+            <table class="menu-table">
+              <thead>
+                <tr><th>時間</th><th>料金（税込）</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>●分</td><td>¥●,●●●</td></tr>
+              </tbody>
+            </table>
+            <div class="review-block">
+              <blockquote class="review-quote">「手指のこわばりがほぐれ、あたたかくなりました。」</blockquote>
+              <p class="review-author">50代・女性</p>
+            </div>
+          </div>
         </div>
 
         <!-- メニュー下の予約ボタン -->
@@ -188,40 +290,75 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
           <span class="section-heading-en">ACCESS</span>
           <h2 class="section-heading-ja">アクセス・営業情報</h2>
         </div>
+        <div class="access-signboard">
+          <img src={`${base}images/logo.jpg`} alt="サロン和笑〜Violane〜の看板" class="signboard-img" loading="lazy" />
+          <p class="signboard-caption">この看板が目印です</p>
+        </div>
         <div class="access-grid">
           <dl class="access-info">
             <div class="access-row">
               <dt>住所</dt>
-              <dd>〒000-0000<br />○○県○○市○○町0-0-0</dd><!-- ← 変更 -->
+              <dd>富山県高岡市野村1180-1</dd>
             </div>
             <div class="access-row">
               <dt>電話</dt>
               <dd><a href={`tel:${tel}`}>{tel}</a></dd>
             </div>
-            <div class="access-row">
+            <div class="access-row access-row--full">
               <dt>営業時間</dt>
-              <dd>10:00 〜 21:00<br /><small>（最終受付 20:00）</small></dd><!-- ← 変更 -->
+              <dd>
+                <table class="hours-table">
+                  <thead>
+                    <tr><th>曜日</th><th>午前の部</th><th>午後の部</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>月〜金</td>
+                      <td>10:30〜14:30</td>
+                      <td>16:30〜21:00</td>
+                    </tr>
+                    <tr>
+                      <td>土</td>
+                      <td>10:30〜14:30</td>
+                      <td>16:30〜18:30</td>
+                    </tr>
+                    <tr class="closed-row">
+                      <td>日・祝・第4火</td>
+                      <td colspan="2">定休日</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </dd>
             </div>
             <div class="access-row">
               <dt>定休日</dt>
-              <dd>不定休</dd><!-- ← 変更 -->
+              <dd>日曜・祝日・第4火曜日・他</dd>
+            </div>
+            <div class="access-row">
+              <dt>受付</dt>
+              <dd>9:30〜18:00<br /><small>（閉店3時間前まで）</small></dd>
             </div>
             <div class="access-row">
               <dt>アクセス</dt>
-              <dd>○○駅 徒歩○分</dd><!-- ← 変更 -->
+              <dd>
+                <ul class="access-transport">
+                  <li><span class="transport-icon">&#128663;</span>JR高岡駅から<strong>車で9分</strong></li>
+                  <li><span class="transport-icon">&#128644;</span>越中中川駅から<strong>徒歩12分</strong></li>
+                  <li><span class="transport-icon">&#128652;</span>バス停「野村」から<strong>徒歩9分</strong></li>
+                </ul>
+              </dd>
             </div>
           </dl>
-          <!-- Googleマップ: src の URL をご自身のものに変更してください -->
           <div class="access-map">
             <iframe
-              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3240.827853475255!2d139.76703!3d35.68123!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMzXCsDQwJzUyLjQiTiAxMznCsDQ2JzAxLjMiRQ!5e0!3m2!1sja!2sjp!4v0000000000"
+              src="https://maps.google.com/maps?q=富山県高岡市野村1180-1&output=embed&hl=ja"
               width="100%"
-              height="320"
+              height="360"
               style="border:0;"
               allowfullscreen=""
               loading="lazy"
               referrerpolicy="no-referrer-when-downgrade"
-              title="和笑の地図"
+              title="サロン和笑〜Violane〜の地図"
             ></iframe>
           </div>
         </div>
@@ -234,13 +371,16 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     <footer class="site-footer">
       <div class="footer-inner">
         <p class="footer-logo">
-          <span class="footer-logo-main">和笑</span>
-          <span class="footer-logo-sub">リラクゼーションサロン</span>
+          <span class="footer-logo-main">サロン和笑</span>
+          <span class="footer-logo-sub">〜Violane〜</span>
         </p>
         <a href={reserveUrl} target="_blank" rel="noopener noreferrer" class="reserve-btn reserve-btn--footer">
           ネット予約はこちら
         </a>
-        <p class="footer-copy">&copy; {new Date().getFullYear()} リラクゼーションサロン 和笑. All rights reserved.</p>
+        <a href="https://lin.ee/7ZvbqEb" target="_blank" rel="noopener noreferrer" class="line-btn">
+          LINE でご予約・お問い合わせ
+        </a>
+        <p class="footer-copy">&copy; {new Date().getFullYear()} サロン和笑〜Violane〜. All rights reserved.</p>
       </div>
     </footer>
 
@@ -255,17 +395,18 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
 
   :root {
     /* ── カラーパレット ── */
-    --c-bg:         #f7f2eb;   /* 和紙ベージュ */
-    --c-surface:    #fdfaf4;   /* 白磁 */
-    --c-ink:        #2a1f14;   /* 墨茶 */
-    --c-muted:      #7a6a58;   /* 薄墨 */
-    --c-border:     #d9ccb5;   /* 枯草 */
-    --c-green:      #3a5c38;   /* 深緑（メインカラー） */
-    --c-green-lt:   #557850;   /* 若緑 */
-    --c-brown:      #5c3d1e;   /* 濃茶（アクセント） */
-    --c-brown-lt:   #8c6040;   /* 中茶 */
-    --c-reserve:    #4a7c45;   /* 予約ボタン緑 */
-    --c-reserve-hv: #3a6235;
+    --c-bg:           #FDF2F5;   /* 淡いピンク（ロゴ背景色） */
+    --c-surface:      #FFFFFF;   /* 白（カード・テーブル） */
+    --c-ink:          #2C1F3A;   /* 濃紫がかった黒（本文） */
+    --c-muted:        #7A6080;   /* 紫みグレー（補助テキスト） */
+    --c-border:       #E2D0D8;   /* ピンクがかったボーダー */
+    --c-purple:       #8B6080;   /* メインモーヴ（ベージュ+マゼンタ） */
+    --c-purple-lt:    #B09AB0;   /* 中間モーヴ */
+    --c-purple-dk:    #6B4860;   /* 濃いモーヴ（ホバー・セカンダリ） */
+    --c-purple-pale:  #C8A8C4;   /* 薄モーヴ（装飾・補助） */
+    --c-reserve:      #8B6080;   /* 予約ボタン色 */
+    --c-reserve-hv:   #6B4860;   /* 予約ボタンホバー */
+    --c-accent:       #F7E58E;   /* イエロー（アクセント・ドット） */
 
     /* ── タイポ ── */
     --f-serif: 'Noto Serif JP', 'YuMincho', 'Yu Mincho', serif;
@@ -279,11 +420,11 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
   html { scroll-behavior: smooth; }
 
   body {
-    font-family: var(--f-sans);
+    font-family: var(--f-serif);
     background: var(--c-bg);
     color: var(--c-ink);
-    line-height: 1.8;
-    font-size: 16px;
+    line-height: 2.0;
+    font-size: 18px;
   }
 
   /* ============================================================
@@ -293,7 +434,7 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     position: fixed;
     inset: 0 0 auto 0;
     z-index: 200;
-    background: rgba(253, 250, 244, 0.93);
+    background: rgba(255, 255, 255, 0.93);
     backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--c-border);
   }
@@ -318,8 +459,8 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     font-family: var(--f-serif);
     font-size: 1.35rem;
     font-weight: 600;
-    color: var(--c-green);
-    letter-spacing: 0.1em;
+    color: var(--c-purple);
+    letter-spacing: 0.06em;
   }
 
   .logo-sub {
@@ -342,13 +483,13 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     transition: color 0.2s;
   }
 
-  .header-nav a:hover { color: var(--c-green); }
+  .header-nav a:hover { color: var(--c-purple); }
 
   .nav-reserve {
     padding: 0.45em 1.1em;
     background: var(--c-reserve);
     color: #fff !important;
-    border-radius: 2px;
+    border-radius: 20px;
     font-weight: 600;
     font-size: 0.8rem;
     letter-spacing: 0.05em;
@@ -369,7 +510,7 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     font-family: var(--f-serif);
     font-weight: 600;
     letter-spacing: 0.1em;
-    border-radius: 2px;
+    border-radius: 24px;
     transition: background 0.25s, transform 0.15s;
   }
 
@@ -410,7 +551,7 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     background: var(--c-reserve);
     color: #fff;
     font-size: 1.05rem;
-    box-shadow: 0 4px 20px rgba(58, 92, 56, 0.3);
+    box-shadow: 0 4px 20px rgba(139, 96, 128, 0.3);
   }
 
   .reserve-btn--large:hover { background: var(--c-reserve-hv); transform: translateY(-2px); }
@@ -449,10 +590,10 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     */
     background: linear-gradient(
       150deg,
-      #1c3a1a 0%,
-      #2d5028 35%,
-      #3a5c38 60%,
-      #5c3d1e 100%
+      #1F1130 0%,
+      #3D2654 35%,
+      #5D4266 60%,
+      #7A5C8A 100%
     );
   }
 
@@ -484,20 +625,32 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     gap: 1.1rem;
   }
 
-  .hero-reading {
-    font-family: var(--f-serif);
-    font-size: 0.85rem;
-    letter-spacing: 0.5em;
-    color: rgba(255,255,255,0.7);
-  }
-
   .hero-title {
     font-family: var(--f-serif);
-    font-size: clamp(3.5rem, 14vw, 6rem);
+    font-size: clamp(2.4rem, 10vw, 4.5rem);
     font-weight: 600;
     letter-spacing: 0.2em;
     text-shadow: 0 2px 30px rgba(0,0,0,0.4);
-    line-height: 1;
+    line-height: 1.5;
+  }
+
+  .hero-title ruby { ruby-align: center; }
+
+  .hero-title rt {
+    font-family: var(--f-serif);
+    font-size: 0.3em;
+    font-weight: 300;
+    letter-spacing: 0.35em;
+    color: rgba(255,255,255,0.65);
+  }
+
+  .hero-violane {
+    font-family: var(--f-serif);
+    font-size: clamp(1rem, 3vw, 1.3rem);
+    font-weight: 300;
+    letter-spacing: 0.25em;
+    color: rgba(255,255,255,0.75);
+    margin-top: -0.3rem;
   }
 
   .hero-tagline {
@@ -545,7 +698,7 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
      予約バナー帯
   ============================================================ */
   .reserve-banner {
-    background: var(--c-brown);
+    background: var(--c-purple);
     padding: 1.2rem 1.5rem;
     display: flex;
     align-items: center;
@@ -576,11 +729,25 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
   }
 
   .section-heading-en {
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.7rem;
     font-size: 0.7rem;
     letter-spacing: 0.35em;
-    color: var(--c-brown-lt);
+    color: var(--c-purple-pale);
     margin-bottom: 0.6rem;
+  }
+
+  .section-heading-en::before,
+  .section-heading-en::after {
+    content: '';
+    display: block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--c-accent);
+    flex-shrink: 0;
   }
 
   .section-heading-ja {
@@ -600,9 +767,9 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     bottom: 0;
     left: 50%;
     transform: translateX(-50%);
-    width: 2.5rem;
+    width: 3.5rem;
     height: 2px;
-    background: linear-gradient(to right, var(--c-green), var(--c-brown-lt));
+    background: linear-gradient(to right, var(--c-purple), var(--c-accent));
   }
 
   /* ============================================================
@@ -610,8 +777,8 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
   ============================================================ */
   .concept {
     background: var(--c-surface);
-    border-top: 1px solid var(--c-border);
-    border-bottom: 1px solid var(--c-border);
+    border-top: double 5px var(--c-purple);
+    border-bottom: double 5px var(--c-purple);
   }
 
   .concept-text {
@@ -625,12 +792,16 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     margin: 0 auto;
   }
 
+  .concept-text + .concept-text {
+    margin-top: 1.8rem;
+  }
+
   .concept-img {
     display: block;
     width: 100%;
     max-width: 720px;
     margin: 2.5rem auto 0;
-    border-radius: 2px;
+    border-radius: 12px;
     box-shadow: 0 6px 30px rgba(0,0,0,0.12);
     object-fit: cover;
     aspect-ratio: 16/9;
@@ -645,18 +816,18 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     margin-bottom: 3rem;
     background: var(--c-surface);
     border: 1px solid var(--c-border);
-    border-top: 3px solid var(--c-green);
-    border-radius: 0 0 2px 2px;
+    border-top: 3px solid var(--c-purple);
+    border-radius: 0 0 12px 12px;
     overflow: hidden;
   }
 
   .menu-block--set {
-    border-top-color: var(--c-brown);
+    border-top-color: var(--c-purple-dk);
   }
 
   .menu-block-header {
     padding: 1.1rem 1.4rem 0.8rem;
-    background: #f3ede3;
+    background: #F7EEF2;
     border-bottom: 1px solid var(--c-border);
   }
 
@@ -664,7 +835,7 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     font-family: var(--f-serif);
     font-size: 1.1rem;
     font-weight: 600;
-    color: var(--c-green);
+    color: var(--c-purple);
     letter-spacing: 0.08em;
     display: flex;
     align-items: center;
@@ -672,7 +843,7 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     flex-wrap: wrap;
   }
 
-  .menu-block--set .menu-block-title { color: var(--c-brown); }
+  .menu-block--set .menu-block-title { color: var(--c-purple-dk); }
 
   .menu-block-title-note {
     font-size: 0.78rem;
@@ -684,7 +855,7 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
   .set-badge {
     display: inline-block;
     padding: 0.1em 0.55em;
-    background: var(--c-brown);
+    background: var(--c-purple-dk);
     color: #fff;
     font-size: 0.65rem;
     font-family: var(--f-sans);
@@ -696,7 +867,7 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
 
   .menu-block-desc {
     margin-top: 0.3rem;
-    font-size: 0.8rem;
+    font-size: 0.9rem;
     color: var(--c-muted);
     letter-spacing: 0.04em;
   }
@@ -715,7 +886,7 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
   }
 
   .menu-table thead tr {
-    background: var(--c-green);
+    background: var(--c-purple);
     color: #fff;
     font-family: var(--f-serif);
     font-weight: 400;
@@ -724,12 +895,12 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
   }
 
   .menu-block--set .menu-table thead tr {
-    background: var(--c-brown);
+    background: var(--c-purple-dk);
   }
 
   .menu-table tbody tr:last-child td { border-bottom: none; }
-  .menu-table tbody tr:nth-child(even) { background: #faf5ee; }
-  .menu-table tbody tr:hover { background: #f0e8d8; }
+  .menu-table tbody tr:nth-child(even) { background: #FAF0F5; }
+  .menu-table tbody tr:hover { background: #F0E0EC; }
 
   .menu-table td:first-child {
     color: var(--c-ink);
@@ -739,7 +910,7 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
   .menu-table td:last-child {
     font-family: var(--f-serif);
     font-size: 1rem;
-    color: var(--c-brown);
+    color: var(--c-purple-dk);
     font-weight: 600;
     white-space: nowrap;
     text-align: right;
@@ -756,7 +927,7 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
   ============================================================ -->
   .access {
     background: var(--c-surface);
-    border-top: 1px solid var(--c-border);
+    border-top: double 5px var(--c-purple);
   }
 
   .access-grid {
@@ -766,20 +937,37 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     align-items: start;
   }
 
+  .access-info {
+    background: var(--c-bg);
+    border: 1px solid var(--c-border);
+    border-radius: 12px;
+    padding: 0.2rem 1.4rem;
+  }
+
   .access-row {
     display: grid;
     grid-template-columns: 5.5em 1fr;
     gap: 0.4rem 0.8rem;
     padding: 0.9rem 0;
     border-bottom: 1px solid var(--c-border);
-    font-size: 0.88rem;
+    font-size: 1rem;
   }
 
   .access-row:first-child { border-top: 1px solid var(--c-border); }
 
+  /* 営業時間：テーブルを全幅で表示 */
+  .access-row--full {
+    grid-template-columns: 1fr;
+  }
+
+  .access-row--full dt {
+    margin-bottom: 0.5rem;
+  }
+
   .access-row dt {
     font-family: var(--f-serif);
-    color: var(--c-muted);
+    color: var(--c-purple);
+    font-weight: 600;
     letter-spacing: 0.05em;
     white-space: nowrap;
     padding-top: 0.1em;
@@ -796,26 +984,80 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
   }
 
   .access-row dd a {
-    color: var(--c-brown);
+    color: var(--c-purple-dk);
     text-decoration: none;
     font-weight: 600;
   }
 
   .access-map {
-    border-radius: 2px;
+    border: 2px solid var(--c-border);
+    border-radius: 12px;
     overflow: hidden;
     box-shadow: 0 2px 20px rgba(0,0,0,0.1);
+  }
+
+  .hours-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 1rem;
+    margin: 0.2rem 0;
+  }
+
+  .hours-table th,
+  .hours-table td {
+    padding: 0.75em 1.2em;
+    border: 1px solid var(--c-border);
+    text-align: center;
+    line-height: 1.5;
+  }
+
+  .hours-table thead tr {
+    background: var(--c-purple);
+    color: #fff;
+    font-family: var(--f-serif);
+    font-size: 0.9rem;
+    letter-spacing: 0.06em;
+  }
+
+  .hours-table tbody tr:nth-child(odd) { background: var(--c-surface); }
+  .hours-table tbody tr:nth-child(even) { background: #FAF0F5; }
+
+  .hours-table .closed-row td {
+    color: var(--c-muted);
+    font-style: italic;
+  }
+
+  .access-transport {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .access-transport li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5em;
+    font-size: 1rem;
+    line-height: 1.6;
+  }
+
+  .access-transport .transport-icon {
+    font-size: 1.2em;
+    flex-shrink: 0;
   }
 
   /* ============================================================
      フッター
   ============================================================ */
   .site-footer {
-    background: #1e160d;
+    background: #1A0F24;
     color: rgba(255,255,255,0.55);
     text-align: center;
     padding: 2.5rem 1.5rem;
-    border-top: 3px solid var(--c-green);
+    border-top: 3px solid var(--c-accent);
   }
 
   .footer-inner {
@@ -852,10 +1094,164 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
   }
 
   /* ============================================================
+     施術の特徴
+  ============================================================ */
+  .features {
+    background: var(--c-surface);
+    border-top: double 5px var(--c-purple);
+    border-bottom: double 5px var(--c-purple);
+  }
+
+  .features-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+
+  .feature-card {
+    background: var(--c-bg);
+    border: 1px solid var(--c-border);
+    border-top: 3px solid var(--c-purple);
+    border-radius: 0 0 12px 12px;
+    padding: 1.4rem 1.5rem;
+  }
+
+  .feature-card-title {
+    font-family: var(--f-serif);
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--c-purple);
+    letter-spacing: 0.08em;
+    margin-bottom: 0.6rem;
+  }
+
+  .feature-card-desc {
+    font-size: 0.9rem;
+    color: var(--c-muted);
+    line-height: 1.9;
+    letter-spacing: 0.04em;
+  }
+
+  /* ============================================================
+     お客様の声
+  ============================================================ */
+  .review-block {
+    padding: 1rem 1.4rem 1.2rem;
+    background: #FAF0F5;
+    border-top: 1px solid var(--c-border);
+  }
+
+  .review-quote {
+    font-family: var(--f-serif);
+    font-size: 0.88rem;
+    color: var(--c-muted);
+    line-height: 1.9;
+    letter-spacing: 0.04em;
+    border-left: 3px solid var(--c-purple-pale);
+    padding-left: 0.8em;
+    margin: 0.6rem 0 0.2rem;
+  }
+
+  .review-quote:first-child { margin-top: 0; }
+
+  .review-author {
+    font-size: 0.78rem;
+    color: var(--c-purple-lt);
+    text-align: right;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.6rem;
+  }
+
+  /* ============================================================
+     メニュー3列（オイル・フット・ハンド）
+  ============================================================ */
+  .menu-trio {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1.25rem;
+    margin-bottom: 3rem;
+  }
+
+  .menu-trio .menu-block {
+    margin-bottom: 0;
+  }
+
+  /* ============================================================
+     アクセス：看板写真
+  ============================================================ */
+  .access-signboard {
+    text-align: center;
+    margin-bottom: 2rem;
+  }
+
+  .signboard-img {
+    max-width: 320px;
+    width: 100%;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+  }
+
+  .signboard-caption {
+    margin-top: 0.8rem;
+    font-family: var(--f-serif);
+    font-size: 1rem;
+    color: var(--c-purple);
+    letter-spacing: 0.1em;
+  }
+
+  /* ============================================================
+     LINEボタン
+  ============================================================ */
+  .line-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.8em 2em;
+    background: #06C755;
+    color: #fff;
+    border-radius: 24px;
+    font-family: var(--f-serif);
+    font-weight: 600;
+    font-size: 0.9rem;
+    letter-spacing: 0.05em;
+    text-decoration: none;
+    min-height: 44px;
+    transition: background 0.2s;
+  }
+
+  .line-btn:hover { background: #05a849; }
+
+  /* ============================================================
+     予約ボタン：最小タップサイズ確保
+  ============================================================ */
+  .reserve-btn { min-height: 44px; }
+
+  /* ============================================================
      レスポンシブ
   ============================================================ */
   @media (max-width: 700px) {
-    .header-nav a:not(.nav-reserve) { display: none; }
+    /* ヘッダー：スタック型（常時全ナビ表示） */
+    .header-inner {
+      flex-direction: column;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.5rem 1rem;
+    }
+
+    .header-logo { align-items: center; }
+
+    .header-nav {
+      gap: 0.8rem;
+      font-size: 0.82rem;
+    }
+
+    .nav-reserve {
+      font-size: 0.78rem;
+      padding: 0.38em 0.9em;
+    }
+
+    /* ヒーロー：スタックヘッダー分の上部余白を追加 */
+    .hero-content { padding-top: 9rem; }
 
     .access-grid { grid-template-columns: 1fr; }
 
@@ -865,5 +1261,9 @@ const tel = "000-0000-0000"; // ← 実際の電話番号に変更
     .menu-table td { padding: 0.75em 1em; font-size: 0.85rem; }
 
     .menu-table td:last-child { padding-right: 1em; }
+
+    .features-grid { grid-template-columns: 1fr; }
+
+    .menu-trio { grid-template-columns: 1fr; }
   }
 </style>
