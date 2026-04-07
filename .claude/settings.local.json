@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(find . -not -path */node_modules/* -not -path */.git/*)",
-      "Bash(grep -v '^$')"
-    ]
-  }
-}
