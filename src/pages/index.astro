@@ -40,6 +40,15 @@ const tel = "080-6368-0753";
       "priceRange": "¥1,000〜¥6,500"
     }
     </script>
+    <!-- OGP -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="高岡市のマッサージならサロン和笑〜Violane〜 | 高岡駅車で9分" />
+    <meta property="og:description" content="富山県高岡市野村にあるリラクゼーションサロン和笑〜Violane〜。もみほぐし・オイルケア・フットケア・ハンドケアで至福のひとときを。女性専用の和モダンな癒やし空間。" />
+    <meta property="og:url" content="https://wasyo.jp/" />
+    <meta property="og:image" content="https://wasyo.jp/images/logo.jpg" />
+    <meta property="og:locale" content="ja_JP" />
+    <meta name="twitter:card" content="summary_large_image" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;600&family=Noto+Sans+JP:wght@300;400&display=swap" rel="stylesheet" />
@@ -56,9 +65,9 @@ const tel = "080-6368-0753";
           <span class="logo-sub">〜Violane〜</span>
         </p>
         <nav class="header-nav">
-          <a href="#menu">メニュー</a>
-          <a href="#access">アクセス</a>
-          <a href={reserveUrl} target="_blank" rel="noopener noreferrer" class="nav-reserve">ネット予約</a>
+          <a href="#features" class="nav-link">施術内容</a>
+          <a href="#menu" class="nav-link">お品書き</a>
+          <a href="#access" class="nav-link">アクセス</a>
         </nav>
       </div>
     </header>
@@ -71,10 +80,14 @@ const tel = "080-6368-0753";
     ============================================================ -->
     <section class="hero">
       <div class="hero-overlay"></div>
+      <!-- 巨大透過テキスト（画面両端で見切れる大胆デザイン） -->
+      <div class="hero-bg-text" aria-hidden="true">
+        <span class="hero-bg-text-line">ちいさな幸福</span>
+        <span class="hero-bg-text-line">くつろぎ空間</span>
+      </div>
       <div class="hero-content">
         <h1 class="hero-title">サロン<ruby>和笑<rt>わしょう</rt></ruby></h1>
         <p class="hero-violane">〜Violane〜</p>
-        <p class="hero-tagline">心と体を整える、至福のひとときを。</p>
         <a href={reserveUrl} target="_blank" rel="noopener noreferrer" class="reserve-btn reserve-btn--hero">
           ネット予約はこちら
         </a>
@@ -85,15 +98,7 @@ const tel = "080-6368-0753";
       </div>
     </section>
 
-    <!-- ============================================================
-         予約バナー（ヒーロー直下の帯）
-    ============================================================ -->
-    <div class="reserve-banner">
-      <p class="reserve-banner-text">ご予約はかんたん・24時間いつでも</p>
-      <a href={reserveUrl} target="_blank" rel="noopener noreferrer" class="reserve-btn reserve-btn--banner">
-        ネット予約はこちら
-      </a>
-    </div>
+    <div class="divider-koshi" aria-hidden="true"></div>
 
     <!-- ============================================================
          コンセプト
@@ -104,9 +109,6 @@ const tel = "080-6368-0753";
           <span class="section-heading-en">CONCEPT</span>
           <h2 class="section-heading-ja">私の想い</h2>
         </div>
-        <p class="concept-text">
-          サロン和笑〜Violane〜は、女性のお客様に安心してお過ごしいただける、基本的に女性専用のサロンです。男性のお客様は、お知り合いの方からのご紹介に限り承っております。
-        </p>
         <p class="concept-text">
           「ここに来てよかった」と毎回思っていただけるよう、心を込めた施術と、くつろげる空間づくりを大切にしています。
         </p>
@@ -120,6 +122,41 @@ const tel = "080-6368-0753";
         />
       </div>
     </section>
+
+    <div class="divider-koshi" aria-hidden="true"></div>
+
+    <!-- ============================================================
+         こんなお客様に ＋ ご注意
+    ============================================================ -->
+    <section class="for-whom">
+      <div class="section-inner">
+        <div class="section-heading">
+          <span class="section-heading-en">FOR YOU</span>
+          <h2 class="section-heading-ja">こんなお客様に</h2>
+        </div>
+        <ul class="for-whom-list">
+          <li class="for-whom-item">
+            <span class="for-whom-dot" aria-hidden="true"></span>
+            <p>自分に合ったリラクゼーションサロンを見つけたい方</p>
+          </li>
+          <li class="for-whom-item">
+            <span class="for-whom-dot" aria-hidden="true"></span>
+            <p>大切な時間を心身共に、心からくつろぎたい方</p>
+          </li>
+          <li class="for-whom-item">
+            <span class="for-whom-dot" aria-hidden="true"></span>
+            <p>もみほぐしやオイルケアで日々の疲れをスッキリしたい方</p>
+          </li>
+        </ul>
+        <div class="caution-box">
+          <p class="caution-title">ご注意</p>
+          <p class="caution-text">当店は女性専用のリラクゼーションサロンです。</p>
+          <p class="caution-text">男性のお客様は、安全性を考慮し「ご紹介のみ」のご予約となります。何卒ご了承ください。</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider-koshi" aria-hidden="true"></div>
 
     <!-- ============================================================
          施術の特徴
@@ -151,136 +188,120 @@ const tel = "080-6368-0753";
       </div>
     </section>
 
+    <div class="divider-koshi" aria-hidden="true"></div>
+
     <!-- ============================================================
-         メニュー表
+         お品書き（メニュー・料金）
     ============================================================ -->
     <section class="menu" id="menu">
-      <div class="section-inner">
+      <!-- 背景キャッチコピー（薄く大きく） -->
+      <div class="menu-bg-catchcopy" aria-hidden="true">
+        <span>ちいさな幸福</span>
+        <span>くつろぎ空間</span>
+      </div>
+
+      <div class="section-inner menu-inner">
         <div class="section-heading">
           <span class="section-heading-en">MENU &amp; PRICE</span>
-          <h2 class="section-heading-ja">メニュー・料金</h2>
+          <h2 class="section-heading-ja">お品書き</h2>
         </div>
 
-        <!-- セットメニュー（1番人気） -->
-        <div class="menu-block menu-block--set">
-          <div class="menu-block-header">
-            <h3 class="menu-block-title">
-              <span class="set-badge">1番人気</span>
-              セットメニュー
-              <span class="menu-block-title-note">（もみほぐし＋オイルケアまたはフットケアまたはハンドケア）</span>
-            </h3>
-            <p class="menu-block-desc">もみほぐしとオイルケア・フットケア・ハンドケアを組み合わせた特別コース。</p>
+        <!-- ① ダブルコース（おすすめ） -->
+        <div class="oshinagaki-section">
+          <div class="oshinagaki-label">
+            <span class="oshinagaki-num">一</span>
+            <span class="oshinagaki-recommended-badge">おすすめ</span>
           </div>
-          <table class="menu-table">
-            <thead>
-              <tr><th>時間</th><th>料金（税込）</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>45分</td><td>¥3,500</td></tr>
-              <tr><td>60分</td><td>¥4,500</td></tr>
-              <tr><td>75分</td><td>¥5,500</td></tr>
-              <tr><td>90分</td><td>¥6,500</td></tr>
-            </tbody>
-          </table>
-          <div class="review-block">
-            <blockquote class="review-quote">「肩と足が同時にほぐれて、一石二鳥！毎月来るのが楽しみです。」</blockquote>
-            <p class="review-author">50代・女性</p>
-            <blockquote class="review-quote">「長時間のデスクワーク後に来ると、別人のように体が楽になります。」</blockquote>
-            <p class="review-author">40代・女性</p>
+          <h3 class="oshinagaki-title">ダブルコース</h3>
+          <p class="oshinagaki-subtitle">全身もみほぐし＋オイルケアを一度に体験</p>
+          <div class="oshinagaki-cards">
+            <div class="oshinagaki-card">
+              <div class="card-accent-line"></div>
+              <p class="card-name">全身もみほぐし<br /><small>＋部位オイルケア</small></p>
+              <p class="card-time">70分</p>
+              <p class="card-price">¥4,300</p>
+            </div>
+            <div class="oshinagaki-card">
+              <div class="card-accent-line"></div>
+              <p class="card-name">全身もみほぐし<br /><small>＋全身オイルケア</small></p>
+              <p class="card-time">90分</p>
+              <p class="card-price">¥5,500</p>
+            </div>
           </div>
+          <p class="oshinagaki-note">※オイルケアは臀部・腹部・鼠蹊部は致しません</p>
         </div>
 
-        <!-- もみほぐし -->
-        <div class="menu-block">
-          <div class="menu-block-header">
-            <h3 class="menu-block-title">もみほぐし</h3>
-            <p class="menu-block-desc">全身の筋肉をほぐし、血行を促進。肩こり・腰痛・疲労回復に。</p>
+        <!-- ② シンプルコース -->
+        <div class="oshinagaki-section">
+          <div class="oshinagaki-label">
+            <span class="oshinagaki-num">二</span>
           </div>
-          <table class="menu-table">
-            <thead>
-              <tr><th>時間</th><th>料金（税込）</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>15分</td><td>¥1,000</td></tr>
-              <tr><td>30分</td><td>¥2,000</td></tr>
-              <tr><td>45分</td><td>¥3,000</td></tr>
-              <tr><td>60分</td><td>¥4,000</td></tr>
-            </tbody>
-          </table>
-          <div class="review-block">
-            <blockquote class="review-quote">「ひどい肩こりで来ましたが、施術後はすっきり。よく眠れるようになりました。」</blockquote>
-            <p class="review-author">60代・女性</p>
-            <blockquote class="review-quote">「力加減を調整してもらえて、痛気持ちいい絶妙な施術でした。」</blockquote>
-            <p class="review-author">30代・女性</p>
-          </div>
-        </div>
-
-        <!-- オイルケア・フットケア・ハンドケア -->
-        <div class="menu-trio">
-          <div class="menu-block">
-            <div class="menu-block-header">
-              <h3 class="menu-block-title">オイルケア</h3>
-              <p class="menu-block-desc">厳選アロマオイルで心身の緊張をほぐします。</p>
+          <h3 class="oshinagaki-title">シンプルコース</h3>
+          <div class="oshinagaki-cards">
+            <div class="oshinagaki-card oshinagaki-card--wide">
+              <div class="card-accent-line"></div>
+              <p class="card-name">全身もみほぐし</p>
+              <div class="card-prices-grid">
+                <div class="price-row">
+                  <span class="price-time">30分 <span class="badge-firsttime">初回40分</span></span>
+                  <span class="price-val">¥3,300</span>
+                </div>
+                <div class="price-row">
+                  <span class="price-time">50分 <span class="badge-firsttime">初回60分</span></span>
+                  <span class="price-val">¥4,000</span>
+                </div>
+                <div class="price-row">
+                  <span class="price-time">70分</span>
+                  <span class="price-val">¥4,400</span>
+                </div>
+                <div class="price-row">
+                  <span class="price-time">100分</span>
+                  <span class="price-val">¥5,500</span>
+                </div>
+              </div>
             </div>
-            <table class="menu-table">
-              <thead>
-                <tr><th>時間</th><th>料金（税込）</th></tr>
-              </thead>
-              <tbody>
-                <tr><td>●分</td><td>¥●,●●●</td></tr>
-              </tbody>
-            </table>
-            <div class="review-block">
-              <blockquote class="review-quote">「オイルの香りに包まれてすっかりリラックス。肌もしっとりしました。」</blockquote>
-              <p class="review-author">40代・女性</p>
-            </div>
-          </div>
-          <div class="menu-block">
-            <div class="menu-block-header">
-              <h3 class="menu-block-title">フットケア</h3>
-              <p class="menu-block-desc">足裏から膝下を丁寧にほぐし、むくみをリセット。</p>
-            </div>
-            <table class="menu-table">
-              <thead>
-                <tr><th>時間</th><th>料金（税込）</th></tr>
-              </thead>
-              <tbody>
-                <tr><td>●分</td><td>¥●,●●●</td></tr>
-              </tbody>
-            </table>
-            <div class="review-block">
-              <blockquote class="review-quote">「むくんでいた足が帰りには別人のように軽くなりました！」</blockquote>
-              <p class="review-author">60代・女性</p>
-            </div>
-          </div>
-          <div class="menu-block">
-            <div class="menu-block-header">
-              <h3 class="menu-block-title">ハンドケア</h3>
-              <p class="menu-block-desc">手指・手首・前腕を丁寧にケアします。</p>
-            </div>
-            <table class="menu-table">
-              <thead>
-                <tr><th>時間</th><th>料金（税込）</th></tr>
-              </thead>
-              <tbody>
-                <tr><td>●分</td><td>¥●,●●●</td></tr>
-              </tbody>
-            </table>
-            <div class="review-block">
-              <blockquote class="review-quote">「手指のこわばりがほぐれ、あたたかくなりました。」</blockquote>
-              <p class="review-author">50代・女性</p>
+            <div class="oshinagaki-card">
+              <div class="card-accent-line"></div>
+              <p class="card-name">全身オイルケア</p>
+              <p class="card-time">80分</p>
+              <p class="card-price">¥6,600</p>
             </div>
           </div>
         </div>
 
-        <!-- メニュー下の予約ボタン -->
-        <div class="menu-reserve">
-          <a href={reserveUrl} target="_blank" rel="noopener noreferrer" class="reserve-btn reserve-btn--large">
-            ネット予約はこちら
-          </a>
+        <!-- ③ プチコース -->
+        <div class="oshinagaki-section">
+          <div class="oshinagaki-label">
+            <span class="oshinagaki-num">三</span>
+          </div>
+          <h3 class="oshinagaki-title">プチコース</h3>
+          <p class="oshinagaki-subtitle">1部位重点ケア</p>
+          <div class="oshinagaki-cards">
+            <div class="oshinagaki-card">
+              <div class="card-accent-line"></div>
+              <p class="card-name">フットケア</p>
+              <p class="card-time">30分</p>
+              <p class="card-price">¥3,300</p>
+            </div>
+            <div class="oshinagaki-card">
+              <div class="card-accent-line"></div>
+              <p class="card-name">ハンドケア</p>
+              <p class="card-time">30分</p>
+              <p class="card-price">¥3,300</p>
+            </div>
+            <div class="oshinagaki-card">
+              <div class="card-accent-line"></div>
+              <p class="card-name">ヘッド&amp;リフトアップ<br /><small>顎ほぐし</small></p>
+              <p class="card-time">30分</p>
+              <p class="card-price">¥3,500</p>
+            </div>
+          </div>
         </div>
+
       </div>
     </section>
+
+    <div class="divider-koshi" aria-hidden="true"></div>
 
     <!-- ============================================================
          アクセス
@@ -292,8 +313,10 @@ const tel = "080-6368-0753";
           <h2 class="section-heading-ja">アクセス・営業情報</h2>
         </div>
         <div class="access-signboard">
-          <img src={`${base}images/logo.jpg`} alt="サロン和笑〜Violane〜の看板" class="signboard-img" loading="lazy" />
-          <p class="signboard-caption">この看板が目印です</p>
+          <div class="signboard-wrap">
+            <img src={`${base}images/logo.jpg`} alt="サロン和笑〜Violane〜の看板" class="signboard-img" loading="lazy" />
+            <span class="signboard-badge">この看板が目印です</span>
+          </div>
         </div>
         <div class="access-grid">
           <dl class="access-info">
@@ -375,18 +398,48 @@ const tel = "080-6368-0753";
           <span class="footer-logo-main">サロン和笑</span>
           <span class="footer-logo-sub">〜Violane〜</span>
         </p>
-        <a href={reserveUrl} target="_blank" rel="noopener noreferrer" class="reserve-btn reserve-btn--footer">
-          ネット予約はこちら
-        </a>
         <a href="https://lin.ee/7ZvbqEb" target="_blank" rel="noopener noreferrer" class="line-btn">
           LINE でご予約・お問い合わせ
+        </a>
+        <a href="https://www.instagram.com/wasyou258/" target="_blank" rel="noopener noreferrer" class="instagram-btn">
+          Instagram @wasyou258
         </a>
         <p class="footer-copy">&copy; {new Date().getFullYear()} サロン和笑〜Violane〜. All rights reserved.</p>
       </div>
     </footer>
 
+    <!-- ============================================================
+         スマホ追従ナビ（モバイルのみ表示）
+    ============================================================ -->
+    <nav class="mobile-sticky-nav" aria-label="予約ナビゲーション">
+      <a href={`tel:${tel}`} class="sticky-nav-btn sticky-nav-btn--tel">
+        &#128222; 電話予約
+      </a>
+      <a href={reserveUrl} target="_blank" rel="noopener noreferrer" class="sticky-nav-btn sticky-nav-btn--reserve">
+        ネット予約
+      </a>
+    </nav>
+
   </body>
 </html>
+
+<script>
+  const observer = new IntersectionObserver(
+    (entries) => entries.forEach((e) => {
+      if (e.isIntersecting) {
+        e.target.classList.add('is-visible');
+        observer.unobserve(e.target);
+      }
+    }),
+    { threshold: 0.12 }
+  );
+
+  document.querySelectorAll('.feature-card, .menu-block, .section-heading')
+    .forEach((el, i) => {
+      (el as HTMLElement).style.transitionDelay = `${i * 0.07}s`;
+      observer.observe(el);
+    });
+</script>
 
 <style>
   /* ============================================================
@@ -403,11 +456,14 @@ const tel = "080-6368-0753";
     --c-border:       #E2D0D8;   /* ピンクがかったボーダー */
     --c-purple:       #8B6080;   /* メインモーヴ（ベージュ+マゼンタ） */
     --c-purple-lt:    #B09AB0;   /* 中間モーヴ */
-    --c-purple-dk:    #6B4860;   /* 濃いモーヴ（ホバー・セカンダリ） */
+    --c-purple-dk:    #3E2B4A;   /* 濃モーヴ（ホバー・セカンダリ） */
     --c-purple-pale:  #C8A8C4;   /* 薄モーヴ（装飾・補助） */
     --c-reserve:      #8B6080;   /* 予約ボタン色 */
-    --c-reserve-hv:   #6B4860;   /* 予約ボタンホバー */
-    --c-accent:       #F7E58E;   /* イエロー（アクセント・ドット） */
+    --c-reserve-hv:   #3E2B4A;   /* 予約ボタンホバー */
+    --c-accent:       #C9A84C;   /* ゴールド（アクセント・ドット） */
+    --c-brown:        #4A3728;   /* ダークブラウン（区切り・フッター） */
+    --c-brown-lt:     #8B6A50;   /* ミディアムブラウン（ルーバーライン） */
+    --c-glow:         rgba(201,168,76,0.12); /* ゴールドグロー */
 
     /* ── タイポ ── */
     --f-serif: 'Noto Serif JP', 'YuMincho', 'Yu Mincho', serif;
@@ -428,6 +484,77 @@ const tel = "080-6368-0753";
     font-size: 18px;
   }
 
+  /* 和紙テクスチャ：40px間隔の薄い縦罫線 */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image:
+      repeating-linear-gradient(
+        90deg,
+        transparent,
+        transparent 39px,
+        rgba(74,55,40,0.04) 39px,
+        rgba(74,55,40,0.04) 40px
+      );
+  }
+
+  /* 画面四隅のオリエンタルグロー */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(ellipse 60% 40% at 0% 0%,   rgba(201,168,76,0.07) 0%, transparent 70%),
+      radial-gradient(ellipse 60% 40% at 100% 100%, rgba(93,66,102,0.06) 0%, transparent 70%);
+  }
+
+  /* ============================================================
+     格子・ルーバー区切り
+  ============================================================ */
+  .divider-koshi {
+    height: 20px;
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(
+      to right,
+      transparent,
+      rgba(74,55,40,0.08) 20%,
+      rgba(74,55,40,0.08) 80%,
+      transparent
+    );
+  }
+
+  .divider-koshi::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      90deg,
+      transparent 0px,
+      transparent 11px,
+      rgba(139,106,80,0.25) 11px,
+      rgba(139,106,80,0.25) 12px
+    );
+  }
+
+  .divider-koshi::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--c-accent);
+    box-shadow: -18px 0 0 var(--c-accent), 18px 0 0 var(--c-accent);
+  }
+
   /* ============================================================
      ヘッダー
   ============================================================ */
@@ -435,9 +562,9 @@ const tel = "080-6368-0753";
     position: fixed;
     inset: 0 0 auto 0;
     z-index: 200;
-    background: rgba(255, 255, 255, 0.93);
+    background: rgba(250, 246, 240, 0.95);
     backdrop-filter: blur(10px);
-    border-bottom: 1px solid var(--c-border);
+    border-bottom: 1px solid var(--c-brown-lt);
   }
 
   .header-inner {
@@ -473,31 +600,28 @@ const tel = "080-6368-0753";
   .header-nav {
     display: flex;
     align-items: center;
-    gap: 1.25rem;
+    gap: 0.25rem;
     font-size: 0.85rem;
   }
 
-  .header-nav a {
+  /* タップ44px以上確保・フィードバック付きナビリンク */
+  .nav-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0 0.9em;
     color: var(--c-ink);
     text-decoration: none;
-    letter-spacing: 0.05em;
-    transition: color 0.2s;
+    font-family: var(--f-serif);
+    letter-spacing: 0.1em;
+    border-radius: 8px;
+    transition: color 0.2s, background-color 0.2s;
   }
 
-  .header-nav a:hover { color: var(--c-purple); }
-
-  .nav-reserve {
-    padding: 0.45em 1.1em;
-    background: var(--c-reserve);
-    color: #fff !important;
-    border-radius: 20px;
-    font-weight: 600;
-    font-size: 0.8rem;
-    letter-spacing: 0.05em;
-    transition: background 0.2s !important;
-  }
-
-  .nav-reserve:hover { background: var(--c-reserve-hv) !important; }
+  .nav-link:hover { color: var(--c-purple); background-color: rgba(139,96,128,0.07); }
+  .nav-link:active { background-color: rgba(139,96,128,0.18); opacity: 0.8; }
 
   /* ============================================================
      予約ボタン 共通
@@ -512,14 +636,33 @@ const tel = "080-6368-0753";
     font-weight: 600;
     letter-spacing: 0.1em;
     border-radius: 24px;
-    transition: background 0.25s, transform 0.15s;
+    transition: background 0.25s, transform 0.15s, box-shadow 0.3s;
+    position: relative;
+    overflow: hidden;
   }
+
+  /* 内側から光が広がるホバーエフェクト */
+  .reserve-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 50% 130%, rgba(201,168,76,0.45) 0%, transparent 65%);
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+  }
+
+  .reserve-btn:hover::before { opacity: 1; }
 
   .reserve-btn::after {
     content: '›';
     font-size: 1.1em;
     font-weight: 300;
+    position: relative;
+    z-index: 1;
   }
+
+  .reserve-btn > * { position: relative; z-index: 1; }
 
   /* ヒーロー内 */
   .reserve-btn--hero {
@@ -654,15 +797,36 @@ const tel = "080-6368-0753";
     margin-top: -0.3rem;
   }
 
-  .hero-tagline {
-    font-family: var(--f-serif);
-    font-size: clamp(0.9rem, 2.5vw, 1.1rem);
-    letter-spacing: 0.1em;
-    color: rgba(255,255,255,0.88);
-    padding: 0.5rem 1.5rem;
-    border-top: 1px solid rgba(255,255,255,0.3);
-    border-bottom: 1px solid rgba(255,255,255,0.3);
+  /* 巨大縦書き透過テキスト（左右に見切れる大胆デザイン） */
+  .hero-bg-text {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+    padding: 0;
   }
+
+  .hero-bg-text-line {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    font-family: var(--f-serif);
+    font-size: clamp(4rem, 18vw, 14rem);
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.055);
+    letter-spacing: 0.15em;
+    white-space: nowrap;
+    line-height: 1;
+  }
+
+  /* 左端の文字を少し画面外へはみ出させる */
+  .hero-bg-text-line:nth-child(1) { transform: translateX(-18%); }
+  /* 右端の文字も少し画面外へ */
+  .hero-bg-text-line:nth-child(2) { transform: translateX(18%); }
 
   /* スクロール誘導 */
   .hero-scroll {
@@ -774,12 +938,42 @@ const tel = "080-6368-0753";
   }
 
   /* ============================================================
+     スクロールアニメーション
+  ============================================================ */
+  .feature-card,
+  .menu-block,
+  .section-heading {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity 0.7s ease, transform 0.7s ease;
+  }
+
+  .feature-card.is-visible,
+  .menu-block.is-visible,
+  .section-heading.is-visible {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* ============================================================
      コンセプト
   ============================================================ */
   .concept {
     background: var(--c-surface);
     border-top: double 5px var(--c-purple);
     border-bottom: double 5px var(--c-purple);
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* ソフトグロー */
+  .concept::before {
+    content: '';
+    position: absolute;
+    top: -80px; left: -80px;
+    width: 420px; height: 420px;
+    background: radial-gradient(circle, var(--c-glow) 0%, transparent 70%);
+    pointer-events: none;
   }
 
   .concept-text {
@@ -811,7 +1005,20 @@ const tel = "080-6368-0753";
   /* ============================================================
      メニュー
   ============================================================ */
-  .menu { background: var(--c-bg); }
+  .menu {
+    background: var(--c-bg);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .menu::after {
+    content: '';
+    position: absolute;
+    bottom: -60px; right: -60px;
+    width: 360px; height: 360px;
+    background: radial-gradient(circle, rgba(93,66,102,0.07) 0%, transparent 70%);
+    pointer-events: none;
+  }
 
   .menu-block {
     margin-bottom: 3rem;
@@ -1054,7 +1261,7 @@ const tel = "080-6368-0753";
      フッター
   ============================================================ */
   .site-footer {
-    background: #1A0F24;
+    background: linear-gradient(135deg, #2A1A0E 0%, #1A0F24 100%);
     color: rgba(255,255,255,0.55);
     text-align: center;
     padding: 2.5rem 1.5rem;
@@ -1185,19 +1392,118 @@ const tel = "080-6368-0753";
     margin-bottom: 2rem;
   }
 
+  .signboard-wrap {
+    display: inline-block;
+    position: relative;
+  }
+
   .signboard-img {
     max-width: 320px;
     width: 100%;
     border-radius: 12px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+    display: block;
   }
 
-  .signboard-caption {
-    margin-top: 0.8rem;
+  /* 強調バッジ：写真の下端に重なる */
+  .signboard-badge {
+    position: absolute;
+    bottom: -1px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--c-purple);
+    color: #fff;
     font-family: var(--f-serif);
-    font-size: 1rem;
-    color: var(--c-purple);
-    letter-spacing: 0.1em;
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    padding: 0.45em 1.4em;
+    border-radius: 0 0 10px 10px;
+    white-space: nowrap;
+    box-shadow: 0 3px 12px rgba(93,66,102,0.35);
+  }
+
+  /* ============================================================
+     こんなお客様に
+  ============================================================ */
+  .for-whom {
+    background: var(--c-surface);
+    border-top: double 5px var(--c-purple);
+    border-bottom: double 5px var(--c-purple);
+  }
+
+  .for-whom-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 2.5rem;
+  }
+
+  .for-whom-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    background: linear-gradient(to right, rgba(201,168,76,0.06), transparent);
+    border: 1px solid var(--c-border);
+    border-left: 3px solid var(--c-accent);
+    border-radius: 0 10px 10px 0;
+    padding: 1.1rem 1.4rem;
+    font-family: var(--f-serif);
+    font-size: clamp(0.95rem, 2.5vw, 1.05rem);
+    color: var(--c-ink);
+    letter-spacing: 0.05em;
+    line-height: 1.8;
+  }
+
+  .for-whom-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--c-accent);
+    margin-top: 0.55em;
+  }
+
+  /* ご注意ボックス */
+  .caution-box {
+    background: linear-gradient(135deg, rgba(139,96,128,0.10) 0%, rgba(62,43,74,0.08) 100%);
+    border: 1px solid var(--c-purple-pale);
+    border-top: 2px solid var(--c-accent);   /* ゴールドライン */
+    border-radius: 0 0 12px 12px;
+    padding: 1.5rem 1.8rem;
+    text-align: center;
+    box-shadow: inset 0 1px 0 rgba(201,168,76,0.15), 0 2px 16px rgba(93,66,102,0.08);
+  }
+
+  .caution-title {
+    font-family: var(--f-serif);
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.28em;
+    color: var(--c-purple-dk);
+    margin-bottom: 0.9rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+  }
+
+  .caution-title::before,
+  .caution-title::after {
+    content: '';
+    display: block;
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right, transparent, var(--c-accent), transparent);
+  }
+
+  .caution-text {
+    font-family: var(--f-serif);
+    font-size: clamp(0.88rem, 2vw, 0.95rem);
+    color: var(--c-muted);
+    letter-spacing: 0.04em;
+    line-height: 2;
   }
 
   /* ============================================================
@@ -1223,6 +1529,28 @@ const tel = "080-6368-0753";
   .line-btn:hover { background: #05a849; }
 
   /* ============================================================
+     Instagramボタン
+  ============================================================ */
+  .instagram-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.8em 2em;
+    background: linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045);
+    color: #fff;
+    border-radius: 24px;
+    font-family: var(--f-serif);
+    font-weight: 600;
+    font-size: 0.9rem;
+    letter-spacing: 0.05em;
+    text-decoration: none;
+    min-height: 44px;
+    transition: opacity 0.2s, transform 0.15s;
+  }
+
+  .instagram-btn:hover { opacity: 0.88; transform: translateY(-1px); }
+
+  /* ============================================================
      予約ボタン：最小タップサイズ確保
   ============================================================ */
   .reserve-btn { min-height: 44px; }
@@ -1246,11 +1574,6 @@ const tel = "080-6368-0753";
       font-size: 0.82rem;
     }
 
-    .nav-reserve {
-      font-size: 0.78rem;
-      padding: 0.38em 0.9em;
-    }
-
     /* ヒーロー：スタックヘッダー分の上部余白を追加 */
     .hero-content { padding-top: 9rem; }
 
@@ -1265,6 +1588,290 @@ const tel = "080-6368-0753";
 
     .features-grid { grid-template-columns: 1fr; }
 
+    .for-whom-item { padding: 0.9rem 1rem; }
+    .caution-box { padding: 1.2rem 1rem; }
+
     .menu-trio { grid-template-columns: 1fr; }
+
+    /* お品書きカード：スマホで縦積み */
+    .oshinagaki-cards { flex-direction: column; }
+    .oshinagaki-card--wide { flex: none; min-width: 0; }
+    .oshinagaki-card { min-width: 0; }
+  }
+
+  /* ============================================================
+     お品書きスタイル
+  ============================================================ */
+
+  /* メニューsection内で section-inner を relative コンテキストに */
+  .menu-inner {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* 背景キャッチコピー（薄く大きく縦書き） */
+  .menu-bg-catchcopy {
+    position: absolute;
+    top: 50%;
+    right: -1rem;
+    transform: translateY(-50%);
+    display: flex;
+    gap: 1rem;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+  }
+
+  .menu-bg-catchcopy span {
+    writing-mode: vertical-rl;
+    font-family: var(--f-serif);
+    font-size: clamp(4rem, 12vw, 9rem);
+    color: var(--c-purple);
+    opacity: 0.055;
+    letter-spacing: 0.15em;
+    line-height: 1;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  /* お品書きブロック */
+  .oshinagaki-section {
+    position: relative;
+    z-index: 1;
+    margin-bottom: 2.5rem;
+    padding: 1.8rem 1.6rem 1.6rem;
+    background: rgba(255, 255, 255, 0.75);
+    border: 1px solid var(--c-border);
+    border-radius: 12px;
+    backdrop-filter: blur(6px);
+    box-shadow: 0 2px 16px rgba(0,0,0,0.05);
+  }
+
+  /* 漢数字ラベル行 */
+  .oshinagaki-label {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.3rem;
+  }
+
+  .oshinagaki-num {
+    font-family: var(--f-serif);
+    font-size: 1.4rem;
+    color: var(--c-accent);
+    line-height: 1;
+    font-weight: 600;
+  }
+
+  .oshinagaki-recommended-badge {
+    font-size: 0.68rem;
+    letter-spacing: 0.18em;
+    background: var(--c-purple);
+    color: #fff;
+    padding: 0.2em 0.75em;
+    border-radius: 2px;
+    font-family: var(--f-serif);
+  }
+
+  .oshinagaki-title {
+    font-family: var(--f-serif);
+    font-size: clamp(1.1rem, 3vw, 1.4rem);
+    font-weight: 600;
+    color: var(--c-purple-dk);
+    letter-spacing: 0.12em;
+    margin-bottom: 0.25rem;
+    border-left: 3px solid var(--c-accent);
+    padding-left: 0.65rem;
+  }
+
+  .oshinagaki-subtitle {
+    font-size: 0.83rem;
+    color: var(--c-muted);
+    letter-spacing: 0.06em;
+    margin-bottom: 1.2rem;
+    margin-left: 0.65rem;
+  }
+
+  .oshinagaki-note {
+    font-size: 0.78rem;
+    color: var(--c-muted);
+    margin-top: 1rem;
+    padding-left: 0.8rem;
+    border-left: 2px solid var(--c-border);
+    line-height: 1.7;
+  }
+
+  /* カードコンテナ（等高） */
+  .oshinagaki-cards {
+    display: flex;
+    gap: 1.1rem;
+    align-items: stretch;
+  }
+
+  /* カード */
+  .oshinagaki-card {
+    flex: 1;
+    min-width: 160px;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    border-radius: 10px;
+    padding: 1.1rem 1.2rem 1.1rem 1.5rem;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  }
+
+  /* 縦書き風ゴールド＋モーヴのアクセントライン */
+  .card-accent-line {
+    position: absolute;
+    left: 0;
+    top: 14px;
+    bottom: 14px;
+    width: 3px;
+    background: linear-gradient(to bottom, var(--c-accent), var(--c-purple-pale));
+    border-radius: 2px;
+  }
+
+  .card-name {
+    font-family: var(--f-serif);
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--c-ink);
+    letter-spacing: 0.05em;
+    line-height: 1.6;
+  }
+
+  .card-name small {
+    display: block;
+    font-size: 0.82em;
+    color: var(--c-muted);
+    font-weight: 400;
+  }
+
+  .card-time {
+    font-size: 0.82rem;
+    color: var(--c-muted);
+    letter-spacing: 0.05em;
+  }
+
+  .card-price {
+    font-family: var(--f-serif);
+    font-size: 1.35rem;
+    font-weight: 600;
+    color: var(--c-purple-dk);
+    letter-spacing: 0.04em;
+    margin-top: auto;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--c-border);
+  }
+
+  /* ワイドカード（シンプルコース・全身もみほぐし） */
+  .oshinagaki-card--wide {
+    flex: 2;
+    min-width: 240px;
+  }
+
+  /* 料金グリッド */
+  .card-prices-grid {
+    display: flex;
+    flex-direction: column;
+    margin-top: auto;
+    border-top: 1px solid var(--c-border);
+    padding-top: 0.5rem;
+  }
+
+  .price-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid rgba(226,208,216,0.5);
+    font-size: 0.9rem;
+  }
+
+  .price-row:last-child { border-bottom: none; }
+
+  .price-time {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--c-ink);
+  }
+
+  .price-val {
+    font-family: var(--f-serif);
+    font-weight: 600;
+    color: var(--c-purple-dk);
+  }
+
+  /* 初回バッジ */
+  .badge-firsttime {
+    display: inline-block;
+    font-size: 0.65rem;
+    background: var(--c-accent);
+    color: var(--c-brown);
+    font-weight: 700;
+    padding: 0.18em 0.55em;
+    border-radius: 3px;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+    white-space: nowrap;
+    line-height: 1.4;
+  }
+
+  /* ============================================================
+     スマホ追従ナビ
+  ============================================================ */
+  .mobile-sticky-nav {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 300;
+    padding: 0.5rem 0.75rem calc(0.5rem + env(safe-area-inset-bottom));
+    background: rgba(26, 15, 36, 0.96);
+    backdrop-filter: blur(10px);
+    border-top: 2px solid var(--c-accent);
+    gap: 0.6rem;
+  }
+
+  @media (max-width: 700px) {
+    .mobile-sticky-nav { display: flex; }
+    body { padding-bottom: 72px; }
+  }
+
+  .sticky-nav-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: 0.75rem 0.5rem;
+    border-radius: 8px;
+    font-family: var(--f-serif);
+    font-weight: 600;
+    font-size: 0.88rem;
+    letter-spacing: 0.06em;
+    text-decoration: none;
+    min-height: 48px;
+    transition: opacity 0.2s, transform 0.15s;
+  }
+
+  .sticky-nav-btn:hover { opacity: 0.85; }
+  .sticky-nav-btn:active { transform: scale(0.97); }
+
+  .sticky-nav-btn--tel {
+    background: rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.9);
+    border: 1px solid rgba(255,255,255,0.2);
+  }
+
+  .sticky-nav-btn--reserve {
+    background: var(--c-purple);
+    color: #fff;
+    border: 1px solid var(--c-purple-pale);
   }
 </style>
