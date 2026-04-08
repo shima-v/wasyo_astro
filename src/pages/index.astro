@@ -21,31 +21,51 @@ const tel = "080-6368-0753";
       "@context": "https://schema.org",
       "@type": "HealthAndBeautyBusiness",
       "name": "サロン和笑〜Violane〜",
-      "image": "https://shima-v.github.io/wasyo_astro/images/logo.jpg",
-      "url": "https://shima-v.github.io/wasyo_astro/",
+      "alternateName": "和笑",
+      "description": "富山県高岡市野村のリラクゼーションサロン。全身もみほぐし・オイルケア・フットケア・ハンドケアを提供する女性専用サロン。",
+      "image": "https://wwwasyo.com/images/logo.jpg",
+      "url": "https://wwwasyo.com/",
       "telephone": "080-6368-0753",
       "address": {
         "@type": "PostalAddress",
         "streetAddress": "野村1180-1",
         "addressLocality": "高岡市",
         "addressRegion": "富山県",
+        "postalCode": "933-0803",
         "addressCountry": "JP"
       },
+      "geo": {
+        "@type": "GeoCoordinates",
+        "latitude": 36.7490,
+        "longitude": 137.0290
+      },
       "openingHoursSpecification": [
-        {"@type":"OpeningHoursSpecification","dayOfWeek":["Monday","Tuesday","Wednesday","Thursday","Friday"],"opens":"10:30","closes":"14:30"},
-        {"@type":"OpeningHoursSpecification","dayOfWeek":["Monday","Tuesday","Wednesday","Thursday","Friday"],"opens":"16:30","closes":"21:00"},
-        {"@type":"OpeningHoursSpecification","dayOfWeek":["Saturday"],"opens":"10:30","closes":"14:30"},
-        {"@type":"OpeningHoursSpecification","dayOfWeek":["Saturday"],"opens":"16:30","closes":"18:30"}
+        {
+          "@type": "OpeningHoursSpecification",
+          "dayOfWeek": ["Monday","Tuesday","Wednesday","Thursday","Friday"],
+          "opens": "10:00",
+          "closes": "20:00"
+        },
+        {
+          "@type": "OpeningHoursSpecification",
+          "dayOfWeek": ["Saturday"],
+          "opens": "10:00",
+          "closes": "20:00"
+        }
       ],
-      "priceRange": "¥1,000〜¥6,500"
+      "priceRange": "¥3,300〜¥6,600",
+      "currenciesAccepted": "JPY",
+      "paymentAccepted": "Cash",
+      "hasMap": "https://maps.google.com/maps?q=富山県高岡市野村1180-1",
+      "sameAs": ["https://reserva.be/wasyou258", "https://www.instagram.com/wasyou258/"]
     }
     </script>
     <!-- OGP -->
     <meta property="og:type" content="website" />
     <meta property="og:title" content="高岡市のマッサージならサロン和笑〜Violane〜 | 高岡駅車で9分" />
     <meta property="og:description" content="富山県高岡市野村にあるリラクゼーションサロン和笑〜Violane〜。もみほぐし・オイルケア・フットケア・ハンドケアで至福のひとときを。女性専用の和モダンな癒やし空間。" />
-    <meta property="og:url" content="https://wasyo.jp/" />
-    <meta property="og:image" content="https://wasyo.jp/images/logo.jpg" />
+    <meta property="og:url" content="https://wwwasyo.com/" />
+    <meta property="og:image" content="https://wwwasyo.com/images/logo.jpg" />
     <meta property="og:locale" content="ja_JP" />
     <meta name="twitter:card" content="summary_large_image" />
 
@@ -333,34 +353,37 @@ const tel = "080-6368-0753";
               <dd>
                 <table class="hours-table">
                   <thead>
-                    <tr><th>曜日</th><th>午前の部</th><th>午後の部</th></tr>
+                    <tr><th>曜日</th><th>営業時間</th></tr>
                   </thead>
                   <tbody>
                     <tr>
                       <td>月〜金</td>
-                      <td>10:30〜14:30</td>
-                      <td>16:30〜21:00</td>
+                      <td>10:00〜20:00</td>
                     </tr>
                     <tr>
-                      <td>土</td>
-                      <td>10:30〜14:30</td>
-                      <td>16:30〜18:30</td>
+                      <td>土<small class="hours-note">（第2・第4のみ）</small></td>
+                      <td>10:00〜20:00</td>
                     </tr>
                     <tr class="closed-row">
-                      <td>日・祝・第4火</td>
-                      <td colspan="2">定休日</td>
+                      <td>日・祝</td>
+                      <td>休日</td>
                     </tr>
                   </tbody>
                 </table>
+                <p class="hours-supplement">※第1・第3・第5土曜日は休業です</p>
               </dd>
             </div>
             <div class="access-row">
               <dt>定休日</dt>
-              <dd>日曜・祝日・第4火曜日・他</dd>
+              <dd>日曜・祝日・第1第3第5土曜日</dd>
             </div>
-            <div class="access-row">
-              <dt>受付</dt>
-              <dd>9:30〜18:00<br /><small>（閉店3時間前まで）</small></dd>
+            <div class="access-row access-row--full">
+              <dt>当日予約・<br />土曜受付</dt>
+              <dd class="tel-notice">
+                当日予約、および営業日以外の土曜日の受付については、<br class="br-pc" />
+                <strong><a href={`tel:${tel}`}>お電話（{tel}）</a></strong>にて承っております。<br />
+                お気軽にご相談ください。
+              </dd>
             </div>
             <div class="access-row">
               <dt>アクセス</dt>
@@ -804,29 +827,31 @@ const tel = "080-6368-0753";
     display: flex;
     flex-direction: row;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;          /* 上端を基準に配置 */
+    padding-top: clamp(3rem, 8svh, 6rem); /* 上部が見切れない余白 */
     pointer-events: none;
     z-index: 0;
     overflow: hidden;
-    padding: 0;
   }
 
   .hero-bg-text-line {
     writing-mode: vertical-rl;
     text-orientation: mixed;
     font-family: var(--f-serif);
-    font-size: clamp(4rem, 18vw, 14rem);
+    font-size: clamp(3rem, 15vw, 11rem); /* 上部確保のためやや縮小 */
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.055);
+    color: rgba(201, 168, 76, 0.13);   /* 白→ゴールド */
     letter-spacing: 0.15em;
     white-space: nowrap;
     line-height: 1;
+    max-height: calc(100svh - 8rem);   /* 下端は溢れてOK、上は守る */
+    overflow: hidden;
   }
 
-  /* 左端の文字を少し画面外へはみ出させる */
-  .hero-bg-text-line:nth-child(1) { transform: translateX(-18%); }
-  /* 右端の文字も少し画面外へ */
-  .hero-bg-text-line:nth-child(2) { transform: translateX(18%); }
+  /* 左の文字を画面左端からはみ出させる（左右のみ） */
+  .hero-bg-text-line:nth-child(1) { transform: translateX(-15%); }
+  /* 右の文字を画面右端からはみ出させる */
+  .hero-bg-text-line:nth-child(2) { transform: translateX(15%); }
 
   /* スクロール誘導 */
   .hero-scroll {
@@ -1233,6 +1258,45 @@ const tel = "080-6368-0753";
   .hours-table .closed-row td {
     color: var(--c-muted);
     font-style: italic;
+  }
+
+  .hours-note {
+    display: block;
+    font-size: 0.75em;
+    color: var(--c-muted);
+    margin-top: 0.15em;
+    letter-spacing: 0.02em;
+    font-style: normal;
+  }
+
+  .hours-supplement {
+    font-size: 0.78rem;
+    color: var(--c-muted);
+    margin-top: 0.5rem;
+    letter-spacing: 0.03em;
+  }
+
+  /* 当日予約・電話案内 */
+  .tel-notice {
+    font-family: var(--f-serif);
+    font-size: 0.92rem;
+    color: var(--c-ink);
+    line-height: 2;
+    letter-spacing: 0.03em;
+  }
+
+  .tel-notice strong a {
+    color: var(--c-purple-dk);
+    text-decoration: none;
+    font-weight: 700;
+    border-bottom: 1.5px solid var(--c-accent);
+    padding-bottom: 0.05em;
+  }
+
+  .tel-notice strong a:hover { color: var(--c-purple); }
+
+  @media (max-width: 700px) {
+    .br-pc { display: none; }
   }
 
   .access-transport {
