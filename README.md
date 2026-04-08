@@ -2,7 +2,7 @@
 
 富山県高岡市のリラクゼーションサロン **サロン和笑〜Violane〜** の公式 Web サイトです。
 
-**公開 URL:** https://wasyo.jp/
+**公開 URL:** https://wwwasyo.com/
 
 ---
 
@@ -81,7 +81,7 @@ pnpm preview    # ビルド済みをローカルでプレビュー
 
 ## デプロイ
 
-`main` ブランチへの push で GitHub Actions が自動起動し、GitHub Pages へデプロイされます。カスタムドメイン（`wasyo.jp`）は `public/CNAME` で設定しています。
+`main` ブランチへの push で GitHub Actions が自動起動し、GitHub Pages へデプロイされます。カスタムドメイン（`wwwasyo.com`）は `public/CNAME` で設定しています。
 
 ---
 
@@ -94,4 +94,4 @@ pnpm preview    # ビルド済みをローカルでプレビュー
 - [x] 和×アジアンラグジュアリーへの全面リデザイン
 - [x] お品書きスタイルのメニュー刷新（最新料金・初回バッジ）
 - [x] スマホ追従ナビ（電話予約・ネット予約の固定2ボタン）
-- [x] カスタムドメイン（wasyo.jp）への移行
+- [x] カスタムドメイン（wwwasyo.com）への移行
