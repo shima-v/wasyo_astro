@@ -1,0 +1,153 @@
+# 予約機能の追加プラン（サロン和笑〜Violane〜）
+
+> 進捗管理は [`WBS.md`](./WBS.md) を参照。
+
+## Context（なぜ作るか）
+
+現在のサイト（`src/pages/index.astro` 単一ファイル / Astro 静的サイト / GitHub Pages → `wwwasyo.com`）の予約は、外部サービス **RESERVA**（`https://reserva.be/wasyou258`）への外部リンクで完結している。今回、**サイト内に独自の本格予約システム**を追加する。あわせて **本番/開発の環境分離** を整備する。
+
+ヒアリングで固まった要件:
+
+| 項目 | 決定 |
+|------|------|
+| 方向性 | リアルタイム空き枠表示＋仮予約→承認の本格予約 |
+| 構成 | **静的サイト維持＋Google Apps Script(GAS)バックエンド** |
+| 空き枠管理 | オーナーが**専用管理画面**で空き枠を設定 |
+| 確定フロー | 全員「**仮予約**」→ 店が**承認**して確定 |
+| サロンへの通知 | **LINE Messaging API** |
+| 男性紹介制 | **フォームで制御**（性別／男性は紹介者必須＋承認制） |
+| お客様への通知 | **LINE自動通知**＋ LINE非ユーザー向けに**メール枠**も用意 |
+| キャンセル・変更 | **オンラインで可能**に |
+| 予約枠 | **メニュー連動＋30分刻み開始**、施術者1名（重複不可） |
+| 受付期間 | **当日は電話のまま**・オンラインは**翌日以降** |
+| RESERVA | **当面は併存**（移行期間） |
+| 個人情報 | **開発者管理の独自DBは作らない**。保存先は**サロン所有の Google（カレンダー＋顧客台帳シート）と LINE のみ** |
+| 新規/常連判定 | **顧客台帳で判定し、メニューの「初回40分/初回60分」料金を自動適用** |
+| 管理・承認 | **Googleアカウントログイン**＋ LINE通知のボタンからも承認 |
+| 予約ルール | 推奨デフォルト：1ヶ月先まで・前日まで受付・前日までキャンセル可 |
+| 環境管理 | **本番/開発を完全分離**（ブランチ・デプロイ先・GAS・カレンダー・LINE すべて別） |
+
+**重要な前提**: 「リアルタイム空き枠＋承認＋通知＋オンライン変更」は静的サイト単体では不可能。サーバー処理（GAS）と保存先（サロンの Google）が必須。
+
+### 個人情報（PII）の正確な扱い
+- GAS は**フォーム送信のPIIをコードとして受け取り処理する**（＝GASを通る）。隠さず明記する。
+- **永続保存先はサロン所有の Google（カレンダーのイベント＋顧客台帳シート）と LINE のみ**。開発者/第三者が管理する独立DBや解析基盤は作らない。
+- フロント（Astro静的）・GitHub・Cloudflare には PII を保存しない（通信の中継のみ）。
+- **LINE userId** はお客様通知と新規/常連判定のため**顧客台帳（サロンGoogle内）に保持**する。
+- 取得時はフォームに**取扱い注意書き＋同意チェック必須**。保存先・利用目的（予約管理・連絡・初回判定）を明記。
+
+---
+
+## 推奨アーキテクチャ
+
+```
+[お客様ブラウザ]                         [オーナー]
+  Astro静的サイト                         Googleアカウントでログイン
+  /reserve（予約UI）  ──fetch──┐         ＋ LINE通知の承認ボタン
+  /reserve/manage（変更/取消）  │              │
+                                ▼              ▼
+                       ┌──────────────────────────────┐
+                       │  Google Apps Script Web App   │  ← バックエンド（無料・サロンのGoogle配下）
+                       │  空き枠計算/仮予約/承認/取消   │
+                       │  /変更/通知/新規判定/管理画面  │
+                       └───┬──────────┬──────────┬────┘
+                  予約=ｲﾍﾞﾝﾄ │   顧客台帳 │   通知   │
+                            ▼          ▼          ▼
+                   Googleカレンダー  顧客台帳ｼｰﾄ   LINE Messaging API
+                  （サロン所有＝保存先）（新規/常連） （店へpush・承認ボタン）
+                                                   ＋ メール / LINE（客へ）
+```
+
+- **フロント**: 現状の Astro 静的サイトのまま。新ページが GAS エンドポイントを `fetch` で呼ぶ。
+- **バックエンド**: GAS Web App（`doGet`/`doPost` のアクション分岐）。サロンの Google アカウント配下にデプロイ。
+- **保存先**: サロンの **Google カレンダー**（仮予約/確定イベント。PIIは説明欄・非公開 extendedProperties）＋ **顧客台帳シート**（新規/常連判定用）。
+- **匿名トークン**: オンライン変更/取消・通知用の乱数トークンをイベントに保存。トークン→イベントはカレンダー検索で解決。
+
+### なぜ GAS か
+無料・常時稼働・オーナーの Google で認証/カレンダー/メールが完結。「Googleログイン」「データはサロン所有」「独自DB無し」を自然に満たす。LINE 通知内の HMAC 署名付きリンクでログイン無し承認も可能。
+> 将来 CORS/機能が窮屈になれば **Cloudflare Workers + KV** に退避可能（本プランでは採用せず記載のみ）。
+
+---
+
+## データモデル（独自DBなし・サロンGoogle内）
+
+- **空き枠設定**（PIIなし / Script Properties or 設定シート）
+  - 営業時間ルール: 月〜金 10:00–20:00、土は第2・第4のみ 10:00–20:00、日祝・第1/3/5土は休（現サイト記載に準拠）。
+  - 例外開閉: 特定日時の手動オープン/クローズ（管理画面で設定）。
+- **予約**（Google カレンダーのイベント＝サロン所有）
+  - タイトル: `【仮】メニュー / お名前` → 承認で `【確定】…`。
+  - 時間: 開始（30分刻み）〜 開始＋メニュー所要時間（＋前後バッファ任意）。施術者1名→**同時間帯の重複不可**（`LockService`＋作成直前再検証）。
+  - 非公開プロパティ/説明: 氏名・電話・メール・性別・紹介者・LINE userId・メニュー・初回フラグ・トークン・ステータス。
+- **顧客台帳シート**（サロン所有 / 新規/常連判定）
+  - 列: キー（LINE userId／電話／メール）・初回日・来店回数・最終来店・表示名。
+  - createBooking 時にキー照合 → 既存なし＝**新規**。確定時に来店回数を更新。
+
+---
+
+## 新規/常連判定と初回料金（自動適用）
+
+- キー: **LINE userId**（LINE連携時）。非LINEは**電話/メール**で照合。
+- `src/data/menu.js` に各メニューの **通常＋初回** を定義（例: 全身もみほぐし 通常30分¥3,300 → 初回40分¥3,300 / 通常50分¥4,000 → 初回60分¥4,000）。
+- フロント: 判定結果（新規）なら初回料金・初回時間を表示。**GAS 側でも再判定**して確定（フロント値は信用しない）。
+- 限界: 別端末/別連絡先は新規扱いになり得る → 店が承認時に補正可能（運用で許容）。
+
+---
+
+## 環境管理（本番/開発を完全分離）
+
+### ブランチ戦略
+- `main` → **本番(production)**。既存 GitHub Actions → GitHub Pages → `wwwasyo.com`。
+- `develop` → **開発(development)**。Cloudflare Pages が自動ビルド/デプロイ（プレビューURL）。
+- 作業は feature ブランチ → `develop` に PR → 検証後 `main` へ。
+
+### デプロイ先
+| 資源 | dev | prod |
+|------|-----|------|
+| フロント | **Cloudflare Pages**（`develop`） | GitHub Pages → `wwwasyo.com`（`main`） |
+| GASプロジェクト | `wasyo-reserve-dev` | `wasyo-reserve-prod` |
+| Web App URL | dev exec URL | prod exec URL |
+| Googleカレンダー | 予約-dev | 予約-prod |
+| LINE Messaging API | devチャネル | prodチャネル |
+| LINE Login | devチャネル | prodチャネル |
+| 顧客台帳シート | dev sheet | prod sheet |
+| 設定の持ち場 | `.env.development` / Cloudflare 環境変数 | GitHub Actions env / repo secret |
+
+### 設定の切り替え
+- フロント: GAS URL・LINE Login channel 等を `import.meta.env.PUBLIC_*` で注入。`src/data/config.js` が読む。
+  - ローカル/dev: `.env.development`（dev値）。Cloudflare Pages はプロジェクト環境変数（dev値）。
+  - 本番: GitHub Actions の env（repo secret の prod値）。
+- `astro.config.mjs`: `site` を環境で切替（本番=`wwwasyo.com`、dev=Cloudflare の `*.pages.dev`）。`base` は `'/'` 維持。
+- GAS: 各プロジェクトの **Script Properties** に LINE トークン・カレンダーID・管理者メール許可リスト・HMAC secret を環境別に格納。
+- `gas/` をリポジトリで版管理。**clasp** のターゲット切替（`.clasp.dev.json` / `.clasp.prod.json`）で dev/prod に push/deploy。
+
+---
+
+## 作るもの（概要）
+
+1. **GAS バックエンド**（`gas/`）: `getAvailability` / `createBooking` / `approveBooking` / `declineBooking` / `cancelBooking` / `changeBooking` / `getSlotConfig` / `setSlotConfig`、HMAC 署名、HTML 管理画面。
+2. **フロント**（Astro 静的）: `src/pages/reserve/index.astro`、`src/pages/reserve/manage.astro`、`src/data/menu.js`、`src/data/config.js`。
+3. **管理画面**（GAS HTML Service）: 空き枠開閉＋承認/辞退、Google ログイン。
+4. **既存サイト統合**: CTA を `/reserve` へ、RESERVA フォールバック。
+5. **外部セットアップ**（手順案内・手動）: LINE×2系統×dev/prod、Google カレンダー/台帳×dev/prod、GAS×2、Cloudflare Pages。
+
+詳細タスクは [`WBS.md`](./WBS.md) を参照。
+
+---
+
+## 既知のリスクと対策
+1. **GAS の CORS**: POST は `Content-Type: text/plain`、GET は単純リクエストでプリフライト回避。問題化したら Cloudflare Workers プロキシへ退避。
+2. **LINE Login セットアップ負荷**: MVP は「メール既定・LINE連携は任意」で段階導入可。
+3. **同時予約競合**: 施術者1名・低トラフィック → `LockService`＋直前再検証で十分。
+4. **新規/常連判定の取りこぼし**: 別連絡先は新規扱い → 承認時に店が補正。
+
+---
+
+## 検証（エンドツーエンド・dev 環境）
+1. `pnpm dev` で `/reserve`：メニュー→日付→空き枠（dev GAS 接続）表示を確認。
+2. 仮予約送信 → **dev カレンダーに「【仮】」イベント**＋顧客台帳に行追加を確認。
+3. **新規/常連判定**：初回は初回料金、2回目以降は通常料金になることを確認。
+4. **店の dev LINE に通知**＋承認/辞退ボタンで「【確定】」化/削除を確認。
+5. 客への通知（LINE userId 有→LINE、無→メール）受信確認。
+6. 管理URL（トークン）から**キャンセル・変更**がカレンダー/空き枠に反映されることを確認。
+7. 男性時の**紹介者必須**、当日枠が出ない（翌日以降）、1ヶ月超が出ない、重複枠が塞がることを確認。
+8. `pnpm build` 成功＋Cloudflare Pages(dev) で実URL動作確認 → `main` 反映後 prod 動作確認。

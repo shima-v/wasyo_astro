@@ -1,0 +1,582 @@
+/**
+ * サロン和笑〜Violane〜 予約システム バックエンド（Google Apps Script）
+ *
+ * 役割: 空き枠計算 / 仮予約作成 / 承認・辞退 / キャンセル・変更 / 新規・常連判定 / 通知。
+ * 保存先はサロン所有の Google（予約カレンダー＋顧客台帳シート）と LINE のみ。独自DBは持たない。
+ *
+ * 設定は「スクリプト プロパティ」(docs/SETUP.md F) を参照。
+ * フロントは POST を Content-Type: text/plain で送り CORS プリフライトを回避する。
+ *
+ * ※メニュー定義は src/data/menu.js と二重管理。変更時は両方を更新すること。
+ */
+
+// ============================================================
+// 設定・定数
+// ============================================================
+
+/** 営業ルール（フロント src/data/config.js の BOOKING_RULES とそろえる） */
+var RULES = {
+  openTime: '10:00',
+  closeTime: '20:00',
+  slotStepMin: 30,
+  leadTimeDays: 1, // 当日不可・翌日以降
+  maxAdvanceDays: 30,
+  cleanupBufferMin: 0,
+  cancelDeadlineDays: 1,
+};
+
+/** メニュー（src/data/menu.js のミラー）。firstTime は新規(初回)時の上書き。 */
+var MENU = {
+  'double-momi-part-oil-70': { name: '全身もみほぐし＋部位オイルケア', durationMin: 70, price: 4300 },
+  'double-momi-full-oil-90': { name: '全身もみほぐし＋全身オイルケア', durationMin: 90, price: 5500 },
+  'simple-momi-30': { name: '全身もみほぐし 30分', durationMin: 30, price: 3300, firstTime: { durationMin: 40, price: 3300 } },
+  'simple-momi-50': { name: '全身もみほぐし 50分', durationMin: 50, price: 4000, firstTime: { durationMin: 60, price: 4000 } },
+  'simple-momi-70': { name: '全身もみほぐし 70分', durationMin: 70, price: 4400 },
+  'simple-momi-100': { name: '全身もみほぐし 100分', durationMin: 100, price: 5500 },
+  'simple-oil-80': { name: '全身オイルケア', durationMin: 80, price: 6600 },
+  'petit-foot-30': { name: 'フットケア', durationMin: 30, price: 3300 },
+  'petit-hand-30': { name: 'ハンドケア', durationMin: 30, price: 3300 },
+  'petit-head-30': { name: 'ヘッド&リフトアップ（顎ほぐし）', durationMin: 30, price: 3500 },
+};
+
+var TZ = 'Asia/Tokyo';
+var STATUS = { PENDING: 'pending', CONFIRMED: 'confirmed' };
+
+function prop_(key) {
+  return PropertiesService.getScriptProperties().getProperty(key) || '';
+}
+
+// ============================================================
+// ルーティング（doGet / doPost）
+// ============================================================
+
+function doGet(e) {
+  var action = (e && e.parameter && e.parameter.action) || '';
+  try {
+    switch (action) {
+      case 'availability':
+        return json_(getAvailability_(e.parameter));
+      case 'booking': // 管理ページ：トークンで予約内容取得
+        return json_(getBookingByToken_(e.parameter.token));
+      case 'approve': // LINE通知の署名リンクから承認
+        return html_(handleSignedDecision_(e.parameter, true));
+      case 'decline':
+        return html_(handleSignedDecision_(e.parameter, false));
+      case 'admin': // 管理パネル（別デプロイ：executeAs=アクセスユーザー / アクセス=自分のみ）
+        return HtmlService.createHtmlOutputFromFile('admin')
+          .setTitle('予約管理 — サロン和笑〜Violane〜')
+          .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+      default:
+        return json_({ ok: false, error: 'unknown_action' });
+    }
+  } catch (err) {
+    return json_({ ok: false, error: String(err) });
+  }
+}
+
+function doPost(e) {
+  var body = {};
+  try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); } catch (_) {}
+  var action = body.action || '';
+  try {
+    switch (action) {
+      // 一般（お客様）
+      case 'createBooking': return json_(createBooking_(body));
+      case 'cancelBooking': return json_(cancelBooking_(body));
+      case 'changeBooking': return json_(changeBooking_(body));
+      // 管理（Googleログイン必須）
+      case 'getSlotConfig': return json_(requireAdmin_(adminGetSlotConfig_));
+      case 'setSlotConfig': return json_(requireAdmin_(function () { return adminSetSlotConfig_(body); }));
+      case 'listPending': return json_(requireAdmin_(adminListPending_));
+      case 'adminDecision': return json_(requireAdmin_(function () { return adminDecision_(body); }));
+      default: return json_({ ok: false, error: 'unknown_action' });
+    }
+  } catch (err) {
+    return json_({ ok: false, error: String(err) });
+  }
+}
+
+function json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function html_(message) {
+  var page = '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<div style="font-family:sans-serif;max-width:480px;margin:3rem auto;padding:1.5rem;text-align:center;line-height:1.8">' +
+    message + '</div>';
+  return HtmlService.createHtmlOutput(page);
+}
+
+// ============================================================
+// 空き枠計算
+// ============================================================
+
+/**
+ * @param {Object} p { menuId, from?, to?, isFirstTime? }
+ * @returns {{ok:boolean, menuId:string, durationMin:number, days:Array}}
+ */
+function getAvailability_(p) {
+  var menu = MENU[p.menuId];
+  if (!menu) return { ok: false, error: 'invalid_menu' };
+  var isFirst = String(p.isFirstTime || '') === '1';
+  var dur = effectiveMenu_(menu, isFirst).durationMin;
+
+  var today = startOfDay_(new Date());
+  var from = p.from ? parseDate_(p.from) : addDays_(today, RULES.leadTimeDays);
+  var minFrom = addDays_(today, RULES.leadTimeDays);
+  if (from < minFrom) from = minFrom;
+  var to = p.to ? parseDate_(p.to) : addDays_(today, RULES.maxAdvanceDays);
+  var maxTo = addDays_(today, RULES.maxAdvanceDays);
+  if (to > maxTo) to = maxTo;
+
+  var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
+  var config = readSlotConfig_();
+  var days = [];
+
+  for (var d = new Date(from); d <= to; d = addDays_(d, 1)) {
+    var dateStr = fmt_(d, 'yyyy-MM-dd');
+    if (!isOpenDay_(d, config)) continue;
+    var busy = cal ? cal.getEvents(startOfDay_(d), addDays_(startOfDay_(d), 1)).map(function (ev) {
+      return { start: ev.getStartTime().getTime(), end: ev.getEndTime().getTime() };
+    }) : [];
+    var times = [];
+    var candidates = candidateStarts_(d, dur);
+    for (var i = 0; i < candidates.length; i++) {
+      var s = candidates[i];
+      var slotEnd = new Date(s.getTime() + dur * 60000);
+      if (isClosedSlot_(dateStr, fmt_(s, 'HH:mm'), config)) continue;
+      if (overlapsBusy_(s, slotEnd, busy)) continue;
+      times.push(fmt_(s, 'HH:mm'));
+    }
+    if (times.length) days.push({ date: dateStr, times: times });
+  }
+  return { ok: true, menuId: p.menuId, durationMin: dur, isFirstTime: isFirst, days: days };
+}
+
+/** その日が営業日か（曜日ルール＋手動 closedDates） */
+function isOpenDay_(d, config) {
+  var dateStr = fmt_(d, 'yyyy-MM-dd');
+  if (config.closedDates && config.closedDates.indexOf(dateStr) >= 0) return false;
+  if (config.openDates && config.openDates.indexOf(dateStr) >= 0) return true; // 臨時営業
+  var dow = d.getDay(); // 0=日, 6=土
+  if (dow === 0) return false; // 日曜休
+  if (dow === 6) {
+    var nth = Math.ceil(d.getDate() / 7);
+    return nth === 2 || nth === 4; // 第2・第4土のみ営業
+  }
+  return true; // 月〜金
+}
+
+/** 30分刻みの開始候補（営業時間内で施術が閉店までに終わるもの） */
+function candidateStarts_(d, dur) {
+  var open = atTime_(d, RULES.openTime);
+  var close = atTime_(d, RULES.closeTime);
+  var lastStart = new Date(close.getTime() - dur * 60000);
+  var out = [];
+  for (var t = new Date(open); t <= lastStart; t = new Date(t.getTime() + RULES.slotStepMin * 60000)) {
+    out.push(new Date(t));
+  }
+  return out;
+}
+
+function overlapsBusy_(s, e, busy) {
+  var buf = RULES.cleanupBufferMin * 60000;
+  for (var i = 0; i < busy.length; i++) {
+    if (s.getTime() < busy[i].end + buf && e.getTime() + buf > busy[i].start) return true;
+  }
+  return false;
+}
+
+function isClosedSlot_(dateStr, hhmm, config) {
+  return !!(config.closedSlots && config.closedSlots[dateStr] && config.closedSlots[dateStr].indexOf(hhmm) >= 0);
+}
+
+// ============================================================
+// 予約作成（仮予約）
+// ============================================================
+
+function createBooking_(b) {
+  var menu = MENU[b.menuId];
+  if (!menu) return { ok: false, error: 'invalid_menu' };
+  if (!b.name || !b.contactMethod) return { ok: false, error: 'missing_required' };
+  if (b.contactMethod === 'email' && !b.email) return { ok: false, error: 'missing_email' };
+  if (b.contactMethod === 'line' && !b.lineUserId && !b.email) return { ok: false, error: 'missing_contact' };
+  if (b.gender === 'male' && !b.referrer) return { ok: false, error: 'referrer_required' };
+  if (!b.date || !b.time) return { ok: false, error: 'missing_slot' };
+
+  // リードタイム・受付上限の検証
+  var start = atTime_(parseDate_(b.date), b.time);
+  var today = startOfDay_(new Date());
+  if (start < addDays_(today, RULES.leadTimeDays)) return { ok: false, error: 'too_soon' };
+  if (start > addDays_(today, RULES.maxAdvanceDays + 1)) return { ok: false, error: 'too_far' };
+
+  // 新規/常連判定 → 初回料金確定
+  var ledgerKey = ledgerKey_(b);
+  var isFirst = ledgerKey ? !ledgerLookup_(ledgerKey) : true;
+  var eff = effectiveMenu_(menu, isFirst);
+  var end = new Date(start.getTime() + eff.durationMin * 60000);
+
+  var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
+  if (!cal) return { ok: false, error: 'calendar_not_configured' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  var token, ev;
+  try {
+    // 直前再検証（重複・休枠）
+    var config = readSlotConfig_();
+    if (!isOpenDay_(start, config) || isClosedSlot_(b.date, b.time, config)) {
+      return { ok: false, error: 'slot_closed' };
+    }
+    var busy = cal.getEvents(startOfDay_(start), addDays_(startOfDay_(start), 1)).map(function (e) {
+      return { start: e.getStartTime().getTime(), end: e.getEndTime().getTime() };
+    });
+    if (overlapsBusy_(start, end, busy)) return { ok: false, error: 'slot_taken' };
+
+    token = Utilities.getUuid();
+    ev = cal.createEvent('【仮】' + menu.name + ' / ' + b.name, start, end);
+    setEventProps_(ev, {
+      token: token, status: STATUS.PENDING, menuId: b.menuId,
+      name: b.name, phone: b.phone || '', email: b.email || '',
+      gender: b.gender || '', referrer: b.referrer || '',
+      lineUserId: b.lineUserId || '', isFirstTime: String(isFirst),
+      price: String(eff.price), note: b.note || '',
+    });
+    try { ev.setColor(CalendarApp.EventColor.ORANGE); } catch (_) {}
+  } finally {
+    lock.releaseLock();
+  }
+
+  // 通知
+  notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst);
+  notifyCustomer_(b, '【仮予約を受付ました】\n' + bookingSummary_(menu, start, eff, isFirst) +
+    '\nサロンの確認後、確定のご連絡をいたします。\n予約の確認・変更・取消: ' + manageUrl_(token));
+
+  return {
+    ok: true, token: token, status: STATUS.PENDING,
+    isFirstTime: isFirst, durationMin: eff.durationMin, price: eff.price,
+    manageUrl: manageUrl_(token),
+  };
+}
+
+// ============================================================
+// 承認・辞退
+// ============================================================
+
+/** LINE署名リンク経由（GET）。HTMLを返す。 */
+function handleSignedDecision_(p, approve) {
+  if (!verifySig_('decision:' + p.token, p.sig)) return '署名が無効です。';
+  var r = decide_(p.token, approve);
+  if (!r.ok) return 'エラー: ' + r.error;
+  return approve ? '予約を<b>確定</b>しました。お客様へ通知済みです。' : '予約を<b>辞退</b>しました。お客様へ通知済みです。';
+}
+
+/** 管理画面経由（POST・要Googleログイン） */
+function adminDecision_(b) {
+  return decide_(b.token, !!b.approve);
+}
+
+function decide_(token, approve) {
+  var found = findEventByToken_(token);
+  if (!found) return { ok: false, error: 'not_found' };
+  var ev = found.event, props = found.props;
+  var menu = MENU[props.menuId] || { name: props.menuId };
+  if (approve) {
+    ev.setTitle('【確定】' + menu.name + ' / ' + props.name);
+    setEventProps_(ev, { status: STATUS.CONFIRMED });
+    try { ev.setColor(CalendarApp.EventColor.GREEN); } catch (_) {}
+    ledgerUpsert_(props, ev.getStartTime());
+    notifyCustomerProps_(props, '【ご予約が確定しました】\n' +
+      bookingSummary_(menu, ev.getStartTime(), { durationMin: durationMin_(ev), price: Number(props.price || 0) }, props.isFirstTime === 'true') +
+      '\nご来店をお待ちしております。');
+  } else {
+    notifyCustomerProps_(props, '【ご予約を承れませんでした】\n申し訳ございませんが、今回はご予約をお受けできませんでした。詳しくはお問い合わせください。');
+    ev.deleteEvent();
+  }
+  return { ok: true, status: approve ? STATUS.CONFIRMED : 'declined' };
+}
+
+// ============================================================
+// キャンセル・変更（お客様・トークン）
+// ============================================================
+
+function cancelBooking_(b) {
+  var found = findEventByToken_(b.token);
+  if (!found) return { ok: false, error: 'not_found' };
+  if (!withinCancelDeadline_(found.event.getStartTime())) return { ok: false, error: 'too_late' };
+  var props = found.props;
+  var menu = MENU[props.menuId] || { name: props.menuId };
+  found.event.deleteEvent();
+  notifyOwner_('【お客様がキャンセルしました】\n' + props.name + ' 様 / ' + menu.name);
+  notifyCustomerProps_(props, '【ご予約をキャンセルしました】\nまたのご利用をお待ちしております。');
+  return { ok: true };
+}
+
+function changeBooking_(b) {
+  var found = findEventByToken_(b.token);
+  if (!found) return { ok: false, error: 'not_found' };
+  if (!withinCancelDeadline_(found.event.getStartTime())) return { ok: false, error: 'too_late' };
+  if (!b.date || !b.time) return { ok: false, error: 'missing_slot' };
+  var props = found.props;
+  var menu = MENU[props.menuId];
+  if (!menu) return { ok: false, error: 'invalid_menu' };
+  var eff = effectiveMenu_(menu, props.isFirstTime === 'true');
+  var start = atTime_(parseDate_(b.date), b.time);
+  var end = new Date(start.getTime() + eff.durationMin * 60000);
+
+  var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var busy = cal.getEvents(startOfDay_(start), addDays_(startOfDay_(start), 1)).filter(function (e) {
+      return e.getId() !== found.event.getId();
+    }).map(function (e) { return { start: e.getStartTime().getTime(), end: e.getEndTime().getTime() }; });
+    if (overlapsBusy_(start, end, busy)) return { ok: false, error: 'slot_taken' };
+    found.event.setTime(start, end);
+    // 変更後は再承認のため仮に戻す
+    found.event.setTitle('【仮】' + menu.name + ' / ' + props.name);
+    setEventProps_(found.event, { status: STATUS.PENDING });
+    try { found.event.setColor(CalendarApp.EventColor.ORANGE); } catch (_) {}
+  } finally {
+    lock.releaseLock();
+  }
+  notifyOwner_('【お客様が日時変更（要再承認）】\n' + props.name + ' 様 / ' + menu.name + '\n新日時: ' + fmt_(start, 'M/d(E) HH:mm'));
+  notifyCustomerProps_(props, '【日時変更を受付ました】\n' + bookingSummary_(menu, start, eff, props.isFirstTime === 'true') + '\nサロンの確認後、確定のご連絡をいたします。');
+  return { ok: true, status: STATUS.PENDING };
+}
+
+function getBookingByToken_(token) {
+  var found = findEventByToken_(token);
+  if (!found) return { ok: false, error: 'not_found' };
+  var p = found.props, menu = MENU[p.menuId] || { name: p.menuId };
+  return {
+    ok: true, menuId: p.menuId, menuName: menu.name, name: p.name, status: p.status,
+    isFirstTime: p.isFirstTime === 'true',
+    date: fmt_(found.event.getStartTime(), 'yyyy-MM-dd'), time: fmt_(found.event.getStartTime(), 'HH:mm'),
+    durationMin: durationMin_(found.event), price: Number(p.price || 0),
+    canCancel: withinCancelDeadline_(found.event.getStartTime()),
+  };
+}
+
+// ============================================================
+// 管理（Googleログイン必須）
+// ============================================================
+
+function requireAdmin_(fn) {
+  var email = Session.getActiveUser().getEmail();
+  var allow = prop_('ADMIN_EMAILS').split(',').map(function (s) { return s.trim(); });
+  if (!email || allow.indexOf(email) < 0) return { ok: false, error: 'forbidden' };
+  return fn();
+}
+
+// ---- 管理パネル（admin.html）用の公開ラッパ ----
+// 末尾アンダースコアの関数は google.script.run から呼べないため、公開名で薄くラップする。
+// 管理デプロイ（executeAs=アクセスユーザー）下では Session.getActiveUser() が
+// アクセス中の管理者本人になるため requireAdmin_ が機能する。
+function adminApiGetConfig() { return requireAdmin_(adminGetSlotConfig_); }
+function adminApiSetConfig(config) {
+  return requireAdmin_(function () { return adminSetSlotConfig_({ config: config }); });
+}
+function adminApiListPending() { return requireAdmin_(adminListPending_); }
+function adminApiDecision(token, approve) {
+  return requireAdmin_(function () { return adminDecision_({ token: token, approve: !!approve }); });
+}
+
+function adminGetSlotConfig_() { return { ok: true, config: readSlotConfig_() }; }
+
+function adminSetSlotConfig_(b) {
+  var cfg = b.config || {};
+  PropertiesService.getScriptProperties().setProperty('SLOT_CONFIG', JSON.stringify(cfg));
+  return { ok: true };
+}
+
+function adminListPending_() {
+  var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
+  var from = new Date();
+  var to = addDays_(startOfDay_(from), RULES.maxAdvanceDays + 1);
+  var list = cal.getEvents(from, to).filter(function (ev) {
+    return getEventProp_(ev, 'status') === STATUS.PENDING;
+  }).map(function (ev) {
+    var p = getEventProps_(ev);
+    var menu = MENU[p.menuId] || { name: p.menuId };
+    return {
+      token: p.token, name: p.name, menuName: menu.name,
+      date: fmt_(ev.getStartTime(), 'yyyy-MM-dd'), time: fmt_(ev.getStartTime(), 'HH:mm'),
+      gender: p.gender, referrer: p.referrer, isFirstTime: p.isFirstTime === 'true',
+      phone: p.phone, email: p.email, note: p.note,
+    };
+  });
+  return { ok: true, pending: list };
+}
+
+// ============================================================
+// 顧客台帳（新規/常連判定）
+// ============================================================
+
+function ledgerKey_(b) {
+  if (b.lineUserId) return 'line:' + b.lineUserId;
+  if (b.phone) return 'phone:' + normalizePhone_(b.phone);
+  if (b.email) return 'email:' + String(b.email).trim().toLowerCase();
+  return '';
+}
+
+function ledgerSheet_() {
+  var id = prop_('LEDGER_SHEET_ID');
+  if (!id) return null;
+  return SpreadsheetApp.openById(id).getSheets()[0];
+}
+
+/** キーに該当する行（1始まり）を返す。無ければ 0。 */
+function ledgerLookup_(key) {
+  var sh = ledgerSheet_();
+  if (!sh) return 0;
+  var values = sh.getDataRange().getValues();
+  for (var r = 1; r < values.length; r++) {
+    if (String(values[r][0]) === key) return r + 1;
+  }
+  return 0;
+}
+
+function ledgerUpsert_(props, visitDate) {
+  var sh = ledgerSheet_();
+  if (!sh) return;
+  var key = props.lineUserId ? 'line:' + props.lineUserId
+    : props.phone ? 'phone:' + normalizePhone_(props.phone)
+      : props.email ? 'email:' + String(props.email).trim().toLowerCase() : '';
+  if (!key) return;
+  var type = key.split(':')[0];
+  var row = ledgerLookup_(key);
+  var dateStr = fmt_(visitDate, 'yyyy-MM-dd');
+  if (row) {
+    var count = Number(sh.getRange(row, 5).getValue() || 0) + 1;
+    sh.getRange(row, 5).setValue(count);
+    sh.getRange(row, 6).setValue(dateStr);
+  } else {
+    sh.appendRow([key, type, props.name || '', dateStr, 1, dateStr, '']);
+  }
+}
+
+// ============================================================
+// 通知（LINE / メール）
+// ============================================================
+
+function notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst) {
+  var sig = sign_('decision:' + token);
+  var base = ScriptApp.getService().getUrl();
+  var approve = base + '?action=approve&token=' + token + '&sig=' + encodeURIComponent(sig);
+  var decline = base + '?action=decline&token=' + token + '&sig=' + encodeURIComponent(sig);
+  var msg = '【新規 仮予約】\n' +
+    'お名前: ' + b.name + (isFirst ? '（新規）' : '（常連）') + '\n' +
+    bookingSummary_(menu, start, eff, isFirst) + '\n' +
+    '性別: ' + (b.gender === 'male' ? '男性' : '女性') + (b.gender === 'male' ? '\n紹介者: ' + b.referrer : '') + '\n' +
+    '連絡: ' + (b.phone || '') + ' ' + (b.email || '') + '\n' +
+    (b.note ? '要望: ' + b.note + '\n' : '') +
+    '\n✅承認: ' + approve + '\n❌辞退: ' + decline;
+  notifyOwner_(msg);
+}
+
+function notifyOwner_(text) {
+  linePush_(prop_('LINE_OWNER_USER_ID'), text);
+}
+
+function notifyCustomer_(b, text) {
+  if (b.lineUserId) linePush_(b.lineUserId, text);
+  else if (b.email) sendMail_(b.email, 'サロン和笑〜Violane〜 ご予約', text);
+}
+
+function notifyCustomerProps_(props, text) {
+  if (props.lineUserId) linePush_(props.lineUserId, text);
+  else if (props.email) sendMail_(props.email, 'サロン和笑〜Violane〜 ご予約', text);
+}
+
+function linePush_(to, text) {
+  var token = prop_('LINE_CHANNEL_ACCESS_TOKEN');
+  if (!token || !to) return;
+  try {
+    UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + token },
+      payload: JSON.stringify({ to: to, messages: [{ type: 'text', text: text }] }),
+      muteHttpExceptions: true,
+    });
+  } catch (err) { console.error('linePush_ failed: ' + err); }
+}
+
+function sendMail_(to, subject, body) {
+  try { MailApp.sendEmail(to, subject, body); } catch (err) { console.error('sendMail_ failed: ' + err); }
+}
+
+function bookingSummary_(menu, start, eff, isFirst) {
+  return 'メニュー: ' + menu.name + (isFirst && eff.durationMin ? '（初回）' : '') + '\n' +
+    '日時: ' + fmt_(start, 'M/d(E) HH:mm') + '〜（' + eff.durationMin + '分）\n' +
+    '料金: ¥' + Number(eff.price).toLocaleString('ja-JP');
+}
+
+// ============================================================
+// イベント・プロパティ / ユーティリティ
+// ============================================================
+
+function setEventProps_(ev, obj) {
+  Object.keys(obj).forEach(function (k) { ev.setTag(k, String(obj[k])); });
+}
+function getEventProp_(ev, key) { return ev.getTag(key) || ''; }
+function getEventProps_(ev) {
+  var keys = ['token', 'status', 'menuId', 'name', 'phone', 'email', 'gender', 'referrer', 'lineUserId', 'isFirstTime', 'price', 'note'];
+  var o = {};
+  keys.forEach(function (k) { o[k] = ev.getTag(k) || ''; });
+  return o;
+}
+
+function findEventByToken_(token) {
+  if (!token) return null;
+  var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
+  if (!cal) return null;
+  var from = addDays_(startOfDay_(new Date()), -1);
+  var to = addDays_(startOfDay_(new Date()), RULES.maxAdvanceDays + 2);
+  var events = cal.getEvents(from, to);
+  for (var i = 0; i < events.length; i++) {
+    if (events[i].getTag('token') === token) return { event: events[i], props: getEventProps_(events[i]) };
+  }
+  return null;
+}
+
+function durationMin_(ev) {
+  return Math.round((ev.getEndTime().getTime() - ev.getStartTime().getTime()) / 60000);
+}
+
+function effectiveMenu_(menu, isFirst) {
+  if (isFirst && menu.firstTime) return { durationMin: menu.firstTime.durationMin, price: menu.firstTime.price };
+  return { durationMin: menu.durationMin, price: menu.price };
+}
+
+function readSlotConfig_() {
+  try { return JSON.parse(prop_('SLOT_CONFIG') || '{}'); } catch (_) { return {}; }
+}
+
+function manageUrl_(token) {
+  var base = prop_('FRONT_BASE_URL').replace(/\/$/, '');
+  return base + '/reserve/manage/?token=' + token;
+}
+
+function withinCancelDeadline_(start) {
+  var today = startOfDay_(new Date());
+  return start >= addDays_(today, RULES.cancelDeadlineDays);
+}
+
+function normalizePhone_(p) { return String(p).replace(/[^0-9]/g, ''); }
+
+// HMAC 署名（base64url）
+function sign_(data) {
+  var raw = Utilities.computeHmacSha256Signature(data, prop_('HMAC_SECRET'));
+  return Utilities.base64EncodeWebSafe(raw);
+}
+function verifySig_(data, sig) { return sig && sign_(data) === sig; }
+
+// 日付ユーティリティ（スクリプトTZ=Asia/Tokyo 前提）
+function fmt_(d, pat) { return Utilities.formatDate(d, TZ, pat); }
+function parseDate_(s) { var a = s.split('-'); return new Date(Number(a[0]), Number(a[1]) - 1, Number(a[2])); }
+function atTime_(d, hhmm) { var a = hhmm.split(':'); var x = new Date(d); x.setHours(Number(a[0]), Number(a[1]), 0, 0); return x; }
+function startOfDay_(d) { var x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
+function addDays_(d, n) { var x = new Date(d); x.setDate(x.getDate() + n); return x; }

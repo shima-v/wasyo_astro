@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <base target="_top" />
+  <style>
+    :root {
+      --c-bg: #FDF2F5;
+      --c-surface: #FFFFFF;
+      --c-ink: #2C1F3A;
+      --c-muted: #7A6080;
+      --c-border: #E2D0D8;
+      --c-purple: #8B6080;
+      --c-purple-dk: #6B4860;
+      --c-accent: #F7E58E;
+      --c-ok: #2E7D5B;
+      --c-ng: #B23A48;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+      color: var(--c-ink);
+      background: var(--c-bg);
+      line-height: 1.7;
+      -webkit-text-size-adjust: 100%;
+    }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 1.25rem 1rem 4rem; }
+    header h1 { font-size: 1.25rem; margin: .25rem 0 .15rem; }
+    header p { margin: 0 0 1rem; color: var(--c-muted); font-size: .85rem; }
+    section {
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
+      border-radius: 12px;
+      padding: 1rem 1rem 1.25rem;
+      margin-bottom: 1.25rem;
+    }
+    h2 {
+      font-size: 1.05rem;
+      margin: 0 0 .75rem;
+      padding-bottom: .5rem;
+      border-bottom: 1px solid var(--c-border);
+      display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+    }
+    h3 { font-size: .9rem; margin: 1rem 0 .4rem; color: var(--c-purple-dk); }
+    button {
+      font-family: inherit;
+      border: none;
+      border-radius: 24px;
+      padding: .5rem 1.1rem;
+      min-height: 40px;
+      font-size: .9rem;
+      cursor: pointer;
+      background: var(--c-purple);
+      color: #fff;
+      transition: background .15s;
+    }
+    button:hover { background: var(--c-purple-dk); }
+    button:disabled { opacity: .5; cursor: default; }
+    button.ghost { background: transparent; color: var(--c-purple-dk); border: 1px solid var(--c-border); }
+    button.sm { min-height: 32px; padding: .25rem .8rem; font-size: .8rem; }
+    button.ok { background: var(--c-ok); }
+    button.ng { background: var(--c-ng); }
+    input[type="date"], input[type="time"], textarea {
+      font-family: inherit; font-size: .9rem;
+      padding: .45rem .55rem;
+      border: 1px solid var(--c-border);
+      border-radius: 8px;
+      background: #fff; color: var(--c-ink);
+    }
+    .card {
+      border: 1px solid var(--c-border);
+      border-radius: 10px;
+      padding: .75rem .85rem;
+      margin-bottom: .75rem;
+      background: #fff;
+    }
+    .card .title { font-weight: 600; margin-bottom: .25rem; }
+    .card dl { display: grid; grid-template-columns: auto 1fr; gap: .1rem .6rem; margin: .35rem 0; font-size: .85rem; }
+    .card dt { color: var(--c-muted); white-space: nowrap; }
+    .card dd { margin: 0; }
+    .card .actions { display: flex; gap: .5rem; margin-top: .6rem; }
+    .badge { display: inline-block; font-size: .72rem; padding: .1rem .5rem; border-radius: 12px; vertical-align: middle; margin-left: .35rem; }
+    .badge.first { background: var(--c-accent); color: #5a4a00; }
+    .badge.male { background: #E5E0F0; color: #4a3a70; }
+    .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .35rem 0; }
+    .chip {
+      display: inline-flex; align-items: center; gap: .35rem;
+      background: var(--c-bg); border: 1px solid var(--c-border);
+      border-radius: 16px; padding: .2rem .35rem .2rem .65rem; font-size: .82rem;
+    }
+    .chip button { background: none; color: var(--c-ng); min-height: auto; padding: 0 .2rem; font-size: 1rem; line-height: 1; border-radius: 50%; }
+    .chip button:hover { background: rgba(178,58,72,.12); }
+    .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .4rem 0; }
+    .muted { color: var(--c-muted); font-size: .85rem; }
+    .empty { color: var(--c-muted); font-size: .9rem; padding: .5rem 0; }
+    #toast {
+      position: fixed; left: 50%; bottom: 1.25rem; transform: translateX(-50%);
+      background: var(--c-ink); color: #fff; padding: .6rem 1.1rem; border-radius: 24px;
+      font-size: .85rem; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 10;
+      max-width: 90vw;
+    }
+    #toast.show { opacity: 1; }
+    .spin { color: var(--c-muted); font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>予約管理</h1>
+      <p>サロン和笑〜Violane〜 ／ ログイン中のGoogleアカウントで操作します</p>
+    </header>
+
+    <!-- 仮予約一覧 -->
+    <section>
+      <h2>
+        仮予約の承認
+        <button class="ghost sm" id="reloadPending" type="button">再読込</button>
+      </h2>
+      <div id="pendingArea"><div class="spin">読み込み中…</div></div>
+    </section>
+
+    <!-- 空き枠の開閉設定 -->
+    <section>
+      <h2>
+        空き枠の開閉設定
+        <button class="sm" id="saveConfig" type="button">保存</button>
+      </h2>
+      <p class="muted">通常の営業日（月〜金・第2/第4土）に対する例外を設定します。保存するまで反映されません。</p>
+
+      <h3>臨時休業日（この日を終日クローズ）</h3>
+      <div class="chips" id="closedDatesChips"></div>
+      <div class="row">
+        <input type="date" id="closedDateInput" />
+        <button class="ghost sm" id="addClosedDate" type="button">休業日を追加</button>
+      </div>
+
+      <h3>臨時営業日（休みの日を終日オープン）</h3>
+      <div class="chips" id="openDatesChips"></div>
+      <div class="row">
+        <input type="date" id="openDateInput" />
+        <button class="ghost sm" id="addOpenDate" type="button">営業日を追加</button>
+      </div>
+
+      <h3>時間枠クローズ（特定の日の特定開始時刻だけ閉じる）</h3>
+      <div id="closedSlotsArea"></div>
+      <div class="row">
+        <input type="date" id="slotDateInput" />
+        <input type="time" id="slotTimeInput" step="1800" />
+        <button class="ghost sm" id="addClosedSlot" type="button">枠を閉じる</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    // 設定の作業コピー
+    var config = { closedDates: [], openDates: [], closedSlots: {} };
+
+    // ---- 共通ヘルパ ----
+    function toast(msg) {
+      var t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      clearTimeout(toast._t);
+      toast._t = setTimeout(function () { t.classList.remove('show'); }, 2600);
+    }
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+      });
+    }
+    function el(id) { return document.getElementById(id); }
+
+    // ============================================================
+    // 仮予約一覧
+    // ============================================================
+    function loadPending() {
+      el('pendingArea').innerHTML = '<div class="spin">読み込み中…</div>';
+      google.script.run
+        .withSuccessHandler(renderPending)
+        .withFailureHandler(function (err) {
+          el('pendingArea').innerHTML = '<div class="empty">取得に失敗しました: ' + esc(err && err.message) + '</div>';
+        })
+        .adminApiListPending();
+    }
+
+    function renderPending(res) {
+      var area = el('pendingArea');
+      if (!res || !res.ok) {
+        area.innerHTML = '<div class="empty">' + (res && res.error === 'forbidden'
+          ? 'このGoogleアカウントには管理権限がありません（ADMIN_EMAILS を確認）。'
+          : '取得に失敗しました。') + '</div>';
+        return;
+      }
+      var list = res.pending || [];
+      if (!list.length) { area.innerHTML = '<div class="empty">承認待ちの仮予約はありません。</div>'; return; }
+      area.innerHTML = list.map(function (p) {
+        var badges = (p.isFirstTime ? '<span class="badge first">新規</span>' : '')
+          + (p.gender === 'male' ? '<span class="badge male">男性</span>' : '');
+        var contact = [p.phone, p.email].filter(Boolean).map(esc).join(' / ');
+        return '<div class="card" data-token="' + esc(p.token) + '">'
+          + '<div class="title">' + esc(p.name) + ' 様' + badges + '</div>'
+          + '<dl>'
+          + '<dt>メニュー</dt><dd>' + esc(p.menuName) + '</dd>'
+          + '<dt>日時</dt><dd>' + esc(p.date) + ' ' + esc(p.time) + '</dd>'
+          + (p.gender === 'male' ? '<dt>紹介者</dt><dd>' + esc(p.referrer || '（未記入）') + '</dd>' : '')
+          + (contact ? '<dt>連絡先</dt><dd>' + contact + '</dd>' : '')
+          + (p.note ? '<dt>ご要望</dt><dd>' + esc(p.note) + '</dd>' : '')
+          + '</dl>'
+          + '<div class="actions">'
+          + '<button class="ok sm" type="button" data-act="approve">承認して確定</button>'
+          + '<button class="ng sm" type="button" data-act="decline">辞退</button>'
+          + '</div></div>';
+      }).join('');
+    }
+
+    function decide(token, approve, btn) {
+      var card = btn.closest('.card');
+      var btns = card.querySelectorAll('button');
+      btns.forEach(function (b) { b.disabled = true; });
+      google.script.run
+        .withSuccessHandler(function (res) {
+          if (res && res.ok) {
+            toast(approve ? '確定しました（お客様へ通知済み）' : '辞退しました（お客様へ通知済み）');
+            card.parentNode.removeChild(card);
+            if (!el('pendingArea').querySelector('.card')) {
+              el('pendingArea').innerHTML = '<div class="empty">承認待ちの仮予約はありません。</div>';
+            }
+          } else {
+            toast('失敗: ' + ((res && res.error) || '不明なエラー'));
+            btns.forEach(function (b) { b.disabled = false; });
+          }
+        })
+        .withFailureHandler(function (err) {
+          toast('通信エラー: ' + (err && err.message));
+          btns.forEach(function (b) { b.disabled = false; });
+        })
+        .adminApiDecision(token, approve);
+    }
+
+    el('pendingArea').addEventListener('click', function (e) {
+      var btn = e.target.closest('button[data-act]');
+      if (!btn) return;
+      var token = btn.closest('.card').getAttribute('data-token');
+      var approve = btn.getAttribute('data-act') === 'approve';
+      if (!approve && !confirm('この仮予約を辞退します。お客様へ通知されます。よろしいですか？')) return;
+      decide(token, approve, btn);
+    });
+    el('reloadPending').addEventListener('click', loadPending);
+
+    // ============================================================
+    // 空き枠の開閉設定
+    // ============================================================
+    function loadConfig() {
+      google.script.run
+        .withSuccessHandler(function (res) {
+          if (res && res.ok && res.config) {
+            config.closedDates = res.config.closedDates || [];
+            config.openDates = res.config.openDates || [];
+            config.closedSlots = res.config.closedSlots || {};
+          }
+          renderConfig();
+        })
+        .withFailureHandler(function () { renderConfig(); })
+        .adminApiGetConfig();
+    }
+
+    function dateChip(value, listName) {
+      return '<span class="chip">' + esc(value)
+        + '<button type="button" data-list="' + listName + '" data-val="' + esc(value) + '">×</button></span>';
+    }
+
+    function renderConfig() {
+      config.closedDates.sort();
+      config.openDates.sort();
+      el('closedDatesChips').innerHTML = config.closedDates.length
+        ? config.closedDates.map(function (d) { return dateChip(d, 'closedDates'); }).join('')
+        : '<span class="muted">なし</span>';
+      el('openDatesChips').innerHTML = config.openDates.length
+        ? config.openDates.map(function (d) { return dateChip(d, 'openDates'); }).join('')
+        : '<span class="muted">なし</span>';
+
+      var dates = Object.keys(config.closedSlots).filter(function (d) {
+        return config.closedSlots[d] && config.closedSlots[d].length;
+      }).sort();
+      el('closedSlotsArea').innerHTML = dates.length ? dates.map(function (d) {
+        var times = config.closedSlots[d].slice().sort();
+        return '<div class="row"><strong style="min-width:6.5em">' + esc(d) + '</strong><div class="chips">'
+          + times.map(function (t) {
+            return '<span class="chip">' + esc(t)
+              + '<button type="button" data-slot-date="' + esc(d) + '" data-slot-time="' + esc(t) + '">×</button></span>';
+          }).join('') + '</div></div>';
+      }).join('') : '<div class="muted">なし</div>';
+    }
+
+    // 日付チップ削除
+    el('closedDatesChips').addEventListener('click', removeDateChip);
+    el('openDatesChips').addEventListener('click', removeDateChip);
+    function removeDateChip(e) {
+      var b = e.target.closest('button[data-list]'); if (!b) return;
+      var list = b.getAttribute('data-list'), val = b.getAttribute('data-val');
+      config[list] = config[list].filter(function (v) { return v !== val; });
+      renderConfig();
+    }
+
+    // 時間枠チップ削除
+    el('closedSlotsArea').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-slot-date]'); if (!b) return;
+      var d = b.getAttribute('data-slot-date'), t = b.getAttribute('data-slot-time');
+      config.closedSlots[d] = (config.closedSlots[d] || []).filter(function (v) { return v !== t; });
+      if (!config.closedSlots[d].length) delete config.closedSlots[d];
+      renderConfig();
+    });
+
+    // 追加ボタン
+    el('addClosedDate').addEventListener('click', function () {
+      var v = el('closedDateInput').value; if (!v) return;
+      if (config.closedDates.indexOf(v) < 0) config.closedDates.push(v);
+      el('closedDateInput').value = ''; renderConfig();
+    });
+    el('addOpenDate').addEventListener('click', function () {
+      var v = el('openDateInput').value; if (!v) return;
+      if (config.openDates.indexOf(v) < 0) config.openDates.push(v);
+      el('openDateInput').value = ''; renderConfig();
+    });
+    el('addClosedSlot').addEventListener('click', function () {
+      var d = el('slotDateInput').value, t = el('slotTimeInput').value;
+      if (!d || !t) { toast('日付と時刻を指定してください'); return; }
+      t = t.slice(0, 5); // HH:mm
+      config.closedSlots[d] = config.closedSlots[d] || [];
+      if (config.closedSlots[d].indexOf(t) < 0) config.closedSlots[d].push(t);
+      el('slotTimeInput').value = ''; renderConfig();
+    });
+
+    // 保存
+    el('saveConfig').addEventListener('click', function () {
+      var btn = el('saveConfig'); btn.disabled = true;
+      google.script.run
+        .withSuccessHandler(function (res) {
+          btn.disabled = false;
+          toast(res && res.ok ? '保存しました' : '保存に失敗: ' + ((res && res.error) || '不明'));
+        })
+        .withFailureHandler(function (err) {
+          btn.disabled = false; toast('通信エラー: ' + (err && err.message));
+        })
+        .adminApiSetConfig(config);
+    });
+
+    // 初期ロード
+    loadPending();
+    loadConfig();
+  </script>
+</body>
+</html>

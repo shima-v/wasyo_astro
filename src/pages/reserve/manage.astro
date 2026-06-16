@@ -1,0 +1,323 @@
+---
+import { RESERVE_API } from '../../data/config.js';
+
+const _base = import.meta.env.BASE_URL;
+const base = _base.endsWith('/') ? _base : _base + '/';
+const salonName = 'サロン和笑〜Violane〜';
+const tel = '090-9095-6034';
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>ご予約の確認・変更 | {salonName}</title>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="home-link" href={base}>‹ {salonName}</a>
+      <span class="head-title">ご予約の確認</span>
+    </header>
+
+    <main class="wrap">
+      <div id="loading" class="status">予約内容を読み込んでいます…</div>
+      <div id="notfound" class="status err" hidden>
+        ご予約が見つかりませんでした。リンクが正しいかご確認ください。<br />
+        お困りの際はお電話（<a href={`tel:${tel}`}>{tel}</a>）でお問い合わせください。
+      </div>
+
+      <section class="card" id="detail" hidden>
+        <h2>ご予約内容</h2>
+        <div id="statusBadge"></div>
+        <dl class="detail-dl">
+          <dt>メニュー</dt><dd id="d-menu"></dd>
+          <dt>日時</dt><dd id="d-when"></dd>
+          <dt>料金</dt><dd id="d-price"></dd>
+          <dt>お名前</dt><dd id="d-name"></dd>
+        </dl>
+
+        <div id="deadlineNote" class="note" hidden>
+          変更・キャンセルは前日までにお願いいたします。期限を過ぎているため、オンラインでの変更はできません。
+          お電話（<a href={`tel:${tel}`}>{tel}</a>）でご相談ください。
+        </div>
+
+        <div id="actions" class="actions" hidden>
+          <button type="button" class="reserve-btn ghost" id="toggleChange">日時を変更する</button>
+          <button type="button" class="reserve-btn danger" id="cancelBtn">予約をキャンセルする</button>
+        </div>
+
+        <!-- 変更 UI -->
+        <div id="changeBox" class="change-box" hidden>
+          <h3>新しい日時を選ぶ</h3>
+          <div id="slotStatus" class="status">空き状況を確認しています…</div>
+          <div id="dateList" class="date-list"></div>
+          <div id="timeList" class="time-list"></div>
+          <div id="changeError" class="err-box" hidden></div>
+          <button type="button" class="reserve-btn" id="confirmChange" disabled>この日時に変更する（再承認）</button>
+          <p class="hint">変更後はサロンの再確認のうえ、確定のご連絡をいたします。</p>
+        </div>
+      </section>
+
+      <section class="card done" id="result" hidden>
+        <div class="done-mark" id="resultMark">✓</div>
+        <h2 id="resultTitle"></h2>
+        <p id="resultBody"></p>
+        <a class="reserve-btn ghost" href={base}>トップへ戻る</a>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>{salonName}</p>
+      <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
+    </footer>
+
+    <script define:vars={{ RESERVE_API }}>
+      const WD = ['日', '月', '火', '水', '木', '金', '土'];
+      const $ = (s) => document.querySelector(s);
+      const params = new URLSearchParams(location.search);
+      const token = params.get('token') || '';
+      const state = { booking: null, days: [], date: null, time: null };
+
+      const fmtYen = (n) => '¥' + Number(n).toLocaleString('ja-JP');
+      const fmtDateLabel = (ymd) => {
+        const [y, m, d] = ymd.split('-').map(Number);
+        const dt = new Date(y, m - 1, d);
+        return `${m}/${d}(${WD[dt.getDay()]})`;
+      };
+
+      async function postAction(payload) {
+        const res = await fetch(RESERVE_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload),
+        });
+        return res.json();
+      }
+
+      function showResult(ok, title, body) {
+        $('#detail').hidden = true;
+        $('#resultMark').textContent = ok ? '✓' : '！';
+        $('#resultTitle').textContent = title;
+        $('#resultBody').textContent = body;
+        $('#result').hidden = false;
+        $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      // ---- 初期読み込み ----
+      async function load() {
+        if (!token || !RESERVE_API) {
+          $('#loading').hidden = true;
+          $('#notfound').hidden = false;
+          return;
+        }
+        try {
+          const res = await fetch(`${RESERVE_API}?action=booking&token=${encodeURIComponent(token)}`);
+          const data = await res.json();
+          if (!data.ok) throw new Error('not_found');
+          state.booking = data;
+          renderDetail(data);
+        } catch (e) {
+          $('#loading').hidden = true;
+          $('#notfound').hidden = false;
+        }
+      }
+
+      function renderDetail(b) {
+        $('#loading').hidden = true;
+        $('#detail').hidden = false;
+        const confirmed = b.status === 'confirmed';
+        $('#statusBadge').innerHTML = confirmed
+          ? '<span class="badge ok">確定済み</span>'
+          : '<span class="badge pending">仮予約（確認中）</span>';
+        $('#d-menu').textContent = b.menuName + (b.isFirstTime ? '（初回）' : '');
+        $('#d-when').textContent = `${fmtDateLabel(b.date)} ${b.time}〜（${b.durationMin}分）`;
+        $('#d-price').textContent = fmtYen(b.price);
+        $('#d-name').textContent = b.name + ' 様';
+        if (b.canCancel) {
+          $('#actions').hidden = false;
+        } else {
+          $('#deadlineNote').hidden = false;
+        }
+      }
+
+      // ---- キャンセル ----
+      $('#cancelBtn').addEventListener('click', async () => {
+        if (!confirm('このご予約をキャンセルします。よろしいですか？')) return;
+        const btn = $('#cancelBtn');
+        btn.disabled = true;
+        const r = await postAction({ action: 'cancelBooking', token });
+        if (r.ok) {
+          showResult(true, 'キャンセルしました', 'ご予約をキャンセルいたしました。またのご利用をお待ちしております。');
+        } else if (r.error === 'too_late') {
+          btn.disabled = false;
+          showResult(false, '期限切れ', 'キャンセル期限（前日まで）を過ぎています。お電話でご相談ください。');
+        } else {
+          btn.disabled = false;
+          showResult(false, 'エラー', 'キャンセルできませんでした。時間をおいて再度お試しください。');
+        }
+      });
+
+      // ---- 変更 ----
+      $('#toggleChange').addEventListener('click', () => {
+        const box = $('#changeBox');
+        box.hidden = !box.hidden;
+        if (!box.hidden && !state.days.length) loadAvailability();
+      });
+
+      async function loadAvailability() {
+        const status = $('#slotStatus');
+        status.textContent = '空き状況を確認しています…';
+        const isFirst = state.booking.isFirstTime ? '1' : '0';
+        const url = `${RESERVE_API}?action=availability&menuId=${encodeURIComponent(state.booking.menuId)}&isFirstTime=${isFirst}`;
+        try {
+          const res = await fetch(url);
+          const data = await res.json();
+          if (!data.ok) throw new Error('err');
+          state.days = data.days || [];
+          renderDates();
+        } catch (e) {
+          status.textContent = '空き状況を取得できませんでした。';
+        }
+      }
+
+      function renderDates() {
+        const dl = $('#dateList');
+        if (!state.days.length) {
+          $('#slotStatus').textContent = '現在ご予約可能な空き枠がありません。';
+          return;
+        }
+        $('#slotStatus').textContent = '新しい日付を選んでください。';
+        dl.innerHTML = state.days
+          .map((d) => `<button type="button" class="date-btn" data-date="${d.date}">${fmtDateLabel(d.date)}</button>`)
+          .join('');
+        dl.querySelectorAll('.date-btn').forEach((bn) => {
+          bn.addEventListener('click', () => {
+            state.date = bn.dataset.date;
+            state.time = null;
+            $('#confirmChange').disabled = true;
+            dl.querySelectorAll('.date-btn').forEach((x) => x.classList.toggle('active', x === bn));
+            renderTimes();
+          });
+        });
+      }
+
+      function renderTimes() {
+        const tl = $('#timeList');
+        const day = state.days.find((d) => d.date === state.date);
+        tl.innerHTML =
+          '<div class="time-label">開始時刻</div>' +
+          day.times.map((t) => `<button type="button" class="time-btn" data-time="${t}">${t}</button>`).join('');
+        tl.querySelectorAll('.time-btn').forEach((bn) => {
+          bn.addEventListener('click', () => {
+            state.time = bn.dataset.time;
+            tl.querySelectorAll('.time-btn').forEach((x) => x.classList.toggle('active', x === bn));
+            $('#confirmChange').disabled = false;
+          });
+        });
+      }
+
+      $('#confirmChange').addEventListener('click', async () => {
+        if (!state.date || !state.time) return;
+        const btn = $('#confirmChange');
+        btn.disabled = true;
+        const r = await postAction({ action: 'changeBooking', token, date: state.date, time: state.time });
+        if (r.ok) {
+          showResult(true, '日時を変更しました',
+            `新しい日時：${fmtDateLabel(state.date)} ${state.time}〜。サロンの再確認のうえ、確定のご連絡をいたします。`);
+        } else {
+          btn.disabled = false;
+          const e = $('#changeError');
+          e.hidden = false;
+          e.textContent =
+            r.error === 'slot_taken' ? 'その時間はちょうど埋まってしまいました。別の時間をお選びください。' :
+            r.error === 'too_late' ? '変更期限（前日まで）を過ぎています。' :
+            '変更できませんでした。別の時間をお試しください。';
+        }
+      });
+
+      load();
+    </script>
+
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      :root {
+        --c-bg: #FDF2F5; --c-surface: #FFFFFF; --c-ink: #2C1F3A; --c-muted: #7A6080;
+        --c-border: #E2D0D8; --c-purple: #8B6080; --c-purple-lt: #B09AB0; --c-purple-dk: #3E2B4A;
+        --c-reserve: #8B6080; --c-reserve-hv: #3E2B4A; --c-accent: #C9A84C;
+        --f-serif: 'Noto Serif JP', 'YuMincho', 'Yu Mincho', serif;
+      }
+      body { font-family: var(--f-serif); background: var(--c-bg); color: var(--c-ink); line-height: 1.9; font-size: 16px; }
+      a { color: var(--c-purple-dk); }
+      .site-header {
+        position: sticky; top: 0; z-index: 10;
+        display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+        padding: .7rem 1rem; background: rgba(253,242,245,.92); backdrop-filter: blur(6px);
+        border-bottom: 1px solid var(--c-border);
+      }
+      .home-link { text-decoration: none; color: var(--c-purple-dk); font-size: .9rem; }
+      .head-title { font-size: .9rem; color: var(--c-muted); }
+      .wrap { max-width: 600px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+
+      .status { color: var(--c-muted); font-size: .92rem; padding: .5rem 0; }
+      .status.err { color: #8E2230; }
+
+      .card {
+        background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 12px;
+        padding: 1.1rem 1rem 1.3rem; margin-bottom: 1.25rem;
+      }
+      .card > h2 { font-size: 1.1rem; margin-bottom: .8rem; padding-bottom: .55rem; border-bottom: 1px solid var(--c-border); }
+      .card h3 { font-size: .98rem; color: var(--c-purple-dk); margin: 1rem 0 .5rem; }
+
+      .badge { display: inline-block; font-size: .8rem; padding: .15rem .7rem; border-radius: 14px; margin-bottom: .8rem; }
+      .badge.ok { background: #E2F0E8; color: #2E7D5B; }
+      .badge.pending { background: #F6EFC9; color: #8a6d1a; }
+
+      .detail-dl { display: grid; grid-template-columns: auto 1fr; gap: .25rem .9rem; font-size: .95rem; }
+      .detail-dl dt { color: var(--c-muted); white-space: nowrap; }
+      .detail-dl dd { margin: 0; }
+
+      .note {
+        margin-top: 1rem; font-size: .88rem; color: var(--c-muted);
+        background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 8px; padding: .7rem .8rem;
+      }
+      .hint { font-size: .8rem; color: var(--c-muted); margin-top: .5rem; }
+
+      .actions { display: flex; flex-direction: column; gap: .6rem; margin-top: 1.2rem; }
+
+      .reserve-btn {
+        display: inline-flex; align-items: center; justify-content: center; width: 100%;
+        font-family: inherit; font-size: 1rem; cursor: pointer; background: var(--c-reserve); color: #fff;
+        border: none; border-radius: 24px; padding: .75rem 1.2rem; min-height: 48px; text-decoration: none;
+        transition: background .15s, transform .15s;
+      }
+      .reserve-btn:hover { background: var(--c-reserve-hv); transform: translateY(-1px); }
+      .reserve-btn:disabled { opacity: .55; cursor: default; transform: none; }
+      .reserve-btn.ghost { background: transparent; color: var(--c-purple-dk); border: 1px solid var(--c-border); }
+      .reserve-btn.danger { background: transparent; color: #B23A48; border: 1px solid #E3B5BC; }
+      .reserve-btn.danger:hover { background: #FBEAEC; }
+
+      .change-box { margin-top: 1.2rem; border-top: 1px dashed var(--c-border); padding-top: 1rem; }
+      .date-list, .time-list { display: flex; flex-wrap: wrap; gap: .45rem; margin-bottom: 1rem; }
+      .date-btn, .time-btn {
+        font-family: inherit; font-size: .9rem; cursor: pointer; border: 1px solid var(--c-border);
+        background: #fff; color: var(--c-ink); border-radius: 8px; padding: .45rem .7rem; min-height: 40px;
+      }
+      .date-btn:hover, .time-btn:hover { border-color: var(--c-purple-lt); }
+      .date-btn.active, .time-btn.active { background: var(--c-purple); color: #fff; border-color: var(--c-purple); }
+      .time-label { width: 100%; font-size: .85rem; color: var(--c-muted); margin-bottom: .15rem; }
+      .err-box { background: #FBEAEC; border: 1px solid #E3B5BC; color: #8E2230; border-radius: 8px; padding: .6rem .8rem; font-size: .9rem; margin-bottom: 1rem; }
+
+      .done { text-align: center; }
+      .done-mark {
+        width: 3rem; height: 3rem; margin: 0 auto .5rem; border-radius: 50%; background: var(--c-purple);
+        color: #fff; font-size: 1.5rem; display: flex; align-items: center; justify-content: center;
+      }
+      .done p { margin: .8rem 0 1rem; }
+
+      .site-footer { text-align: center; color: var(--c-muted); font-size: .82rem; padding: 1.5rem 1rem 2.5rem; }
+      .site-footer .small { font-size: .78rem; }
+    </style>
+  </body>
+</html>

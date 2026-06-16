@@ -2,6 +2,11 @@
 
 このファイルは、リポジトリ内のコードを扱う Claude Code (claude.ai/code) 向けのガイダンスを提供します。
 
+## 設計・進捗ドキュメント
+
+- 予約機能の設計プラン: ./RESERVATION_PLAN.md
+- 予約機能の WBS（進捗管理）: ./WBS.md
+
 ## コマンド
 
 ```bash

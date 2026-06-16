@@ -1,0 +1,565 @@
+---
+import { MENU, MENU_GROUPS, formatYen } from '../../data/menu.js';
+import {
+  RESERVE_API,
+  BOOKING_RULES,
+  GENDERS,
+  CONTACT_METHODS,
+} from '../../data/config.js';
+
+const _base = import.meta.env.BASE_URL;
+const base = _base.endsWith('/') ? _base : _base + '/';
+const salonName = 'サロン和笑〜Violane〜';
+const tel = '090-9095-6034';
+
+// コース区分ごとにメニューをまとめる
+const groupOrder = ['double', 'simple', 'petit'];
+const grouped = groupOrder.map((g) => ({
+  key: g,
+  group: MENU_GROUPS[g],
+  items: MENU.filter((m) => m.group === g),
+}));
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>ご予約 | {salonName}</title>
+    <meta name="description" content="サロン和笑〜Violane〜 のオンライン予約。メニューと日時を選んでお申し込みいただけます。" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="home-link" href={base}>‹ {salonName}</a>
+      <span class="head-title">オンラインご予約</span>
+    </header>
+
+    <main class="wrap">
+      <p class="lead">
+        ご希望のメニューと日時をお選びください。お申し込みは「仮予約」です。サロンが内容を確認のうえ、確定のご連絡をいたします。
+      </p>
+      <p class="note-today">
+        ※ 当日のご予約はお電話（<a href={`tel:${tel}`}>{tel}</a>）で承ります。オンラインは翌日以降・1ヶ月先までです。
+      </p>
+
+      <!-- STEP 1: メニュー -->
+      <section class="step">
+        <h2><span class="step-no">1</span> メニューを選ぶ</h2>
+        {grouped.map((g) => (
+          <div class="menu-group">
+            <h3>{g.group.label}{g.group.desc ? <small>{g.group.desc}</small> : null}</h3>
+            <div class="menu-list">
+              {g.items.map((m) => (
+                <label class="menu-item">
+                  <input
+                    type="radio"
+                    name="menu"
+                    value={m.id}
+                    data-name={m.name}
+                    data-duration={m.durationMin}
+                    data-price={m.price}
+                    data-firsttime={m.firstTime ? m.firstTime.label : ''}
+                    data-hasfirst={m.firstTime ? '1' : '0'}
+                  />
+                  <span class="menu-body">
+                    <span class="menu-name">{m.name}</span>
+                    <span class="menu-meta">
+                      {m.durationMin}分 / {formatYen(m.price)}
+                      {m.firstTime ? <em class="first-tag">初回 {m.firstTime.label}・料金そのまま</em> : null}
+                    </span>
+                    {m.note ? <span class="menu-note">{m.note}</span> : null}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </section>
+
+      <!-- STEP 2: 日時 -->
+      <section class="step" id="step-date" hidden>
+        <h2><span class="step-no">2</span> 日時を選ぶ</h2>
+        <div id="slotStatus" class="slot-status">メニューを選ぶと空き状況を表示します。</div>
+        <div id="dateList" class="date-list"></div>
+        <div id="timeList" class="time-list"></div>
+      </section>
+
+      <!-- STEP 3: お客様情報 -->
+      <section class="step" id="step-form" hidden>
+        <h2><span class="step-no">3</span> お客様情報</h2>
+        <form id="reserveForm" novalidate>
+          <div class="field">
+            <label for="f-name">お名前 <span class="req">必須</span></label>
+            <input type="text" id="f-name" name="name" autocomplete="name" required />
+          </div>
+
+          <div class="field">
+            <label for="f-phone">電話番号 <span class="req">必須</span></label>
+            <input type="tel" id="f-phone" name="phone" inputmode="tel" autocomplete="tel" placeholder="09012345678" required />
+            <small class="hint">当日のご連絡・初回／常連の判定に使用します。</small>
+          </div>
+
+          <div class="field">
+            <label for="f-email">メールアドレス <span class="req">必須</span></label>
+            <input type="email" id="f-email" name="email" inputmode="email" autocomplete="email" required />
+            <small class="hint">ご予約の確認・確定のご連絡をお送りします。</small>
+          </div>
+
+          <div class="field">
+            <span class="field-label">ご希望の連絡方法</span>
+            <div class="radio-row">
+              {CONTACT_METHODS.map((c, i) => (
+                <label class="radio-pill">
+                  <input type="radio" name="contactMethod" value={c.value} checked={i === CONTACT_METHODS.length - 1} />
+                  <span>{c.label}</span>
+                </label>
+              ))}
+            </div>
+            <small class="hint">LINEでの自動連絡は順次対応予定です。当面は確認をメールでお送りします。</small>
+          </div>
+
+          <div class="field">
+            <span class="field-label">性別 <span class="req">必須</span></span>
+            <div class="radio-row">
+              {GENDERS.map((g) => (
+                <label class="radio-pill">
+                  <input type="radio" name="gender" value={g.value} required />
+                  <span>{g.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div class="field" id="referrer-field" hidden>
+            <label for="f-referrer">ご紹介者のお名前 <span class="req">必須</span></label>
+            <input type="text" id="f-referrer" name="referrer" />
+            <small class="hint">男性のお客様はご紹介制です。ご紹介者のお名前をご記入ください。</small>
+          </div>
+
+          <div class="field">
+            <label for="f-note">ご要望（任意）</label>
+            <textarea id="f-note" name="note" rows="3"></textarea>
+          </div>
+
+          <div class="field consent">
+            <label class="check">
+              <input type="checkbox" id="f-consent" required />
+              <span>
+                入力内容（お名前・連絡先・性別・ご要望）を、予約管理・ご連絡・初回／常連判定の目的で
+                当サロンが利用することに同意します。情報は当サロンの Google（予約カレンダー・顧客台帳）と
+                通知サービス内でのみ管理します。
+              </span>
+            </label>
+          </div>
+
+          <div id="formError" class="form-error" hidden></div>
+
+          <div class="summary" id="summary" hidden>
+            <div class="summary-row"><span>メニュー</span><strong id="sum-menu"></strong></div>
+            <div class="summary-row"><span>日時</span><strong id="sum-when"></strong></div>
+            <div class="summary-row"><span>目安料金</span><strong id="sum-price"></strong></div>
+            <p class="summary-note" id="sum-firstnote" hidden></p>
+          </div>
+
+          <button type="submit" class="reserve-btn" id="submitBtn">この内容で仮予約する</button>
+        </form>
+      </section>
+
+      <!-- 完了 -->
+      <section class="step done" id="step-done" hidden>
+        <div class="done-mark">✓</div>
+        <h2>仮予約を受け付けました</h2>
+        <div class="done-body" id="doneBody"></div>
+        <a class="reserve-btn ghost" href={base}>トップへ戻る</a>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>{salonName}</p>
+      <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
+    </footer>
+
+    <script define:vars={{ RESERVE_API, BOOKING_RULES }}>
+      const WD = ['日', '月', '火', '水', '木', '金', '土'];
+      const state = { menu: null, date: null, time: null, days: [] };
+
+      const $ = (s) => document.querySelector(s);
+      const esc = (s) =>
+        String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      const fmtYen = (n) => '¥' + Number(n).toLocaleString('ja-JP');
+      const fmtDateLabel = (ymd) => {
+        const [y, m, d] = ymd.split('-').map(Number);
+        const dt = new Date(y, m - 1, d);
+        return `${m}/${d}(${WD[dt.getDay()]})`;
+      };
+
+      // ---- メニュー選択 ----
+      document.querySelectorAll('input[name="menu"]').forEach((r) => {
+        r.addEventListener('change', () => {
+          const el = r;
+          state.menu = {
+            id: el.value,
+            name: el.dataset.name,
+            durationMin: Number(el.dataset.duration),
+            price: Number(el.dataset.price),
+            hasFirst: el.dataset.hasfirst === '1',
+            firstLabel: el.dataset.firsttime,
+          };
+          state.date = null;
+          state.time = null;
+          $('#step-date').hidden = false;
+          $('#step-date').scrollIntoView({ behavior: 'smooth', block: 'start' });
+          loadAvailability();
+          updateSummary();
+        });
+      });
+
+      // ---- 空き枠取得 ----
+      async function loadAvailability() {
+        const status = $('#slotStatus');
+        $('#dateList').innerHTML = '';
+        $('#timeList').innerHTML = '';
+        status.textContent = '空き状況を確認しています…';
+        if (!RESERVE_API) {
+          status.textContent = '予約システムが未設定です（PUBLIC_RESERVE_API）。';
+          return;
+        }
+        // firstTime 候補メニューは長い所要時間でも収まる枠だけ表示する（料金は同額）
+        const isFirst = state.menu.hasFirst ? '1' : '0';
+        const url = `${RESERVE_API}?action=availability&menuId=${encodeURIComponent(state.menu.id)}&isFirstTime=${isFirst}`;
+        try {
+          const res = await fetch(url);
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || 'error');
+          state.days = data.days || [];
+          renderDates();
+        } catch (e) {
+          status.textContent = '空き状況を取得できませんでした。時間をおいて再度お試しください。';
+        }
+      }
+
+      function renderDates() {
+        const status = $('#slotStatus');
+        const dl = $('#dateList');
+        if (!state.days.length) {
+          status.textContent = '現在ご予約可能な空き枠がありません。お手数ですがお電話でお問い合わせください。';
+          return;
+        }
+        status.textContent = '日付を選んでください。';
+        dl.innerHTML = state.days
+          .map((d) => `<button type="button" class="date-btn" data-date="${d.date}">${fmtDateLabel(d.date)}</button>`)
+          .join('');
+        dl.querySelectorAll('.date-btn').forEach((b) => {
+          b.addEventListener('click', () => {
+            state.date = b.dataset.date;
+            state.time = null;
+            dl.querySelectorAll('.date-btn').forEach((x) => x.classList.toggle('active', x === b));
+            renderTimes();
+            updateSummary();
+          });
+        });
+      }
+
+      function renderTimes() {
+        const tl = $('#timeList');
+        const day = state.days.find((d) => d.date === state.date);
+        if (!day) { tl.innerHTML = ''; return; }
+        tl.innerHTML =
+          '<div class="time-label">開始時刻</div>' +
+          day.times.map((t) => `<button type="button" class="time-btn" data-time="${t}">${t}</button>`).join('');
+        tl.querySelectorAll('.time-btn').forEach((b) => {
+          b.addEventListener('click', () => {
+            state.time = b.dataset.time;
+            tl.querySelectorAll('.time-btn').forEach((x) => x.classList.toggle('active', x === b));
+            $('#step-form').hidden = false;
+            $('#step-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            updateSummary();
+          });
+        });
+      }
+
+      // ---- フォーム挙動 ----
+      // 性別が男性なら紹介者必須
+      document.querySelectorAll('input[name="gender"]').forEach((r) => {
+        r.addEventListener('change', () => {
+          const male = document.querySelector('input[name="gender"]:checked')?.value === 'male';
+          $('#referrer-field').hidden = !male;
+          $('#f-referrer').required = male;
+        });
+      });
+
+      function updateSummary() {
+        const s = $('#summary');
+        if (!state.menu || !state.date || !state.time) { s.hidden = true; return; }
+        s.hidden = false;
+        $('#sum-menu').textContent = state.menu.name;
+        $('#sum-when').textContent = `${fmtDateLabel(state.date)} ${state.time}〜`;
+        $('#sum-price').textContent = `${fmtYen(state.menu.price)}（${state.menu.durationMin}分）`;
+        const fn = $('#sum-firstnote');
+        if (state.menu.hasFirst) {
+          fn.hidden = false;
+          fn.textContent = `初回のお客様は「${state.menu.firstLabel}」となります（料金は同額）。判定はサロンで行います。`;
+        } else {
+          fn.hidden = true;
+        }
+      }
+
+      function showError(msg) {
+        const e = $('#formError');
+        e.textContent = msg;
+        e.hidden = false;
+        e.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      // ---- 送信 ----
+      $('#reserveForm').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        $('#formError').hidden = true;
+
+        if (!state.menu || !state.date || !state.time) { showError('メニューと日時をお選びください。'); return; }
+        const name = $('#f-name').value.trim();
+        const phone = $('#f-phone').value.trim();
+        const email = $('#f-email').value.trim();
+        const gender = document.querySelector('input[name="gender"]:checked')?.value || '';
+        const contactMethod = document.querySelector('input[name="contactMethod"]:checked')?.value || 'email';
+        const referrer = $('#f-referrer').value.trim();
+        const note = $('#f-note').value.trim();
+
+        if (!name) return showError('お名前をご入力ください。');
+        if (!phone) return showError('電話番号をご入力ください。');
+        if (!email) return showError('メールアドレスをご入力ください。');
+        if (!gender) return showError('性別をお選びください。');
+        if (gender === 'male' && !referrer) return showError('男性のお客様はご紹介者のお名前が必須です。');
+        if (!$('#f-consent').checked) return showError('内容のお取り扱いに同意のうえお進みください。');
+
+        const btn = $('#submitBtn');
+        btn.disabled = true;
+        const orig = btn.textContent;
+        btn.textContent = '送信中…';
+
+        const payload = {
+          action: 'createBooking',
+          menuId: state.menu.id,
+          date: state.date,
+          time: state.time,
+          name, phone, email, gender, contactMethod, referrer, note,
+        };
+
+        try {
+          // CORS プリフライト回避のため text/plain で送る
+          const res = await fetch(RESERVE_API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          if (!data.ok) {
+            btn.disabled = false;
+            btn.textContent = orig;
+            return showError(errorMessage(data.error));
+          }
+          renderDone(data);
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = orig;
+          showError('送信に失敗しました。通信環境をご確認のうえ、再度お試しください。');
+        }
+      });
+
+      function errorMessage(code) {
+        const map = {
+          slot_taken: 'ご希望の時間はちょうど埋まってしまいました。別の時間をお選びください。',
+          slot_closed: 'ご希望の時間は受付対象外です。別の時間をお選びください。',
+          too_soon: '当日のご予約はオンラインでは承れません。お電話でお問い合わせください。',
+          too_far: '受付は1ヶ月先までです。',
+          referrer_required: '男性のお客様はご紹介者のお名前が必須です。',
+          missing_required: '必須項目が未入力です。',
+          missing_contact: 'ご連絡先（メール）をご入力ください。',
+          missing_email: 'メールアドレスをご入力ください。',
+          invalid_menu: 'メニューの選択に問題があります。選び直してください。',
+        };
+        return map[code] || 'お申し込みを受け付けられませんでした。時間をおいて再度お試しください。';
+      }
+
+      function renderDone(data) {
+        ['step-date', 'step-form'].forEach((id) => (document.getElementById(id).hidden = true));
+        document.querySelectorAll('.step h2 .step-no').forEach(() => {});
+        const first = data.isFirstTime;
+        const html =
+          `<p>下記内容で承りました。サロンの確認後、<strong>確定のご連絡</strong>をいたします。</p>` +
+          `<dl class="done-dl">` +
+          `<dt>メニュー</dt><dd>${esc(state.menu.name)}${first ? '（初回）' : ''}</dd>` +
+          `<dt>日時</dt><dd>${esc(fmtDateLabel(state.date))} ${esc(state.time)}〜（${esc(data.durationMin)}分）</dd>` +
+          `<dt>料金</dt><dd>${fmtYen(data.price)}${first ? '（初回料金を適用）' : ''}</dd>` +
+          `</dl>` +
+          (data.manageUrl
+            ? `<p class="manage">ご予約の確認・変更・キャンセルはこちら：<br><a href="${esc(data.manageUrl)}">${esc(data.manageUrl)}</a><br><small>このリンクは大切に保管してください。</small></p>`
+            : '');
+        $('#doneBody').innerHTML = html;
+        const done = $('#step-done');
+        done.hidden = false;
+        done.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    </script>
+
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      :root {
+        --c-bg: #FDF2F5;
+        --c-surface: #FFFFFF;
+        --c-ink: #2C1F3A;
+        --c-muted: #7A6080;
+        --c-border: #E2D0D8;
+        --c-purple: #8B6080;
+        --c-purple-lt: #B09AB0;
+        --c-purple-dk: #3E2B4A;
+        --c-reserve: #8B6080;
+        --c-reserve-hv: #3E2B4A;
+        --c-accent: #C9A84C;
+        --f-serif: 'Noto Serif JP', 'YuMincho', 'Yu Mincho', serif;
+      }
+      body {
+        font-family: var(--f-serif);
+        background: var(--c-bg);
+        color: var(--c-ink);
+        line-height: 1.9;
+        font-size: 16px;
+      }
+      a { color: var(--c-purple-dk); }
+
+      .site-header {
+        position: sticky; top: 0; z-index: 10;
+        display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+        padding: .7rem 1rem;
+        background: rgba(253, 242, 245, .92);
+        backdrop-filter: blur(6px);
+        border-bottom: 1px solid var(--c-border);
+      }
+      .home-link { text-decoration: none; color: var(--c-purple-dk); font-size: .9rem; }
+      .head-title { font-size: .9rem; color: var(--c-muted); }
+
+      .wrap { max-width: 680px; margin: 0 auto; padding: 1.25rem 1rem 4rem; }
+      .lead { margin-bottom: .6rem; }
+      .note-today {
+        font-size: .85rem; color: var(--c-muted);
+        background: #fff; border: 1px solid var(--c-border); border-radius: 10px;
+        padding: .6rem .8rem; margin-bottom: 1.5rem;
+      }
+
+      .step {
+        background: var(--c-surface);
+        border: 1px solid var(--c-border);
+        border-radius: 12px;
+        padding: 1.1rem 1rem 1.3rem;
+        margin-bottom: 1.25rem;
+      }
+      .step > h2 {
+        font-size: 1.1rem; display: flex; align-items: center; gap: .55rem;
+        margin-bottom: 1rem; padding-bottom: .55rem; border-bottom: 1px solid var(--c-border);
+      }
+      .step-no {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 1.7rem; height: 1.7rem; border-radius: 50%;
+        background: var(--c-purple); color: #fff; font-size: .9rem; flex: none;
+      }
+
+      .menu-group { margin-bottom: 1rem; }
+      .menu-group h3 { font-size: .95rem; color: var(--c-purple-dk); margin-bottom: .5rem; }
+      .menu-group h3 small { font-weight: normal; color: var(--c-muted); font-size: .8rem; margin-left: .5rem; }
+      .menu-list { display: grid; gap: .5rem; }
+      .menu-item {
+        display: flex; gap: .65rem; align-items: flex-start;
+        border: 1px solid var(--c-border); border-radius: 10px; padding: .7rem .8rem;
+        cursor: pointer; transition: border-color .15s, background .15s;
+      }
+      .menu-item:hover { border-color: var(--c-purple-lt); }
+      .menu-item input { margin-top: .35rem; accent-color: var(--c-purple); flex: none; }
+      .menu-item:has(input:checked) { border-color: var(--c-purple); background: #FCF6FA; }
+      .menu-body { display: flex; flex-direction: column; }
+      .menu-name { font-weight: 600; }
+      .menu-meta { font-size: .85rem; color: var(--c-muted); }
+      .first-tag { display: inline-block; color: var(--c-accent); font-style: normal; font-size: .8rem; margin-left: .4rem; }
+      .menu-note { font-size: .78rem; color: var(--c-muted); margin-top: .2rem; }
+
+      .slot-status { font-size: .9rem; color: var(--c-muted); margin-bottom: .75rem; }
+      .date-list { display: flex; flex-wrap: wrap; gap: .45rem; margin-bottom: 1rem; }
+      .date-btn, .time-btn {
+        font-family: inherit; font-size: .9rem; cursor: pointer;
+        border: 1px solid var(--c-border); background: #fff; color: var(--c-ink);
+        border-radius: 8px; padding: .45rem .7rem; min-height: 40px;
+      }
+      .date-btn:hover, .time-btn:hover { border-color: var(--c-purple-lt); }
+      .date-btn.active, .time-btn.active { background: var(--c-purple); color: #fff; border-color: var(--c-purple); }
+      .time-list { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; }
+      .time-label { width: 100%; font-size: .85rem; color: var(--c-muted); margin-bottom: .15rem; }
+
+      .field { margin-bottom: 1rem; }
+      .field > label, .field-label { display: block; font-size: .9rem; margin-bottom: .35rem; font-weight: 600; }
+      .req { color: #B23A48; font-size: .72rem; font-weight: normal; margin-left: .3rem; }
+      input[type="text"], input[type="tel"], input[type="email"], textarea {
+        width: 100%; font-family: inherit; font-size: 1rem;
+        padding: .6rem .7rem; border: 1px solid var(--c-border); border-radius: 8px;
+        background: #fff; color: var(--c-ink);
+      }
+      input:focus, textarea:focus { outline: 2px solid var(--c-purple-lt); outline-offset: 1px; border-color: var(--c-purple); }
+      .hint { display: block; font-size: .78rem; color: var(--c-muted); margin-top: .25rem; }
+      .radio-row { display: flex; flex-wrap: wrap; gap: .5rem; }
+      .radio-pill { display: inline-flex; }
+      .radio-pill input { position: absolute; opacity: 0; pointer-events: none; }
+      .radio-pill span {
+        display: inline-block; border: 1px solid var(--c-border); border-radius: 20px;
+        padding: .4rem .9rem; font-size: .9rem; cursor: pointer; min-height: 40px; line-height: 1.7;
+      }
+      .radio-pill input:checked + span { background: var(--c-purple); color: #fff; border-color: var(--c-purple); }
+      .radio-pill input:focus-visible + span { outline: 2px solid var(--c-purple-lt); outline-offset: 2px; }
+
+      .consent .check { display: flex; gap: .55rem; align-items: flex-start; font-weight: normal; font-size: .85rem; }
+      .consent .check input { margin-top: .3rem; accent-color: var(--c-purple); flex: none; }
+
+      .form-error {
+        background: #FBEAEC; border: 1px solid #E3B5BC; color: #8E2230;
+        border-radius: 8px; padding: .6rem .8rem; font-size: .9rem; margin-bottom: 1rem;
+      }
+
+      .summary {
+        background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 10px;
+        padding: .8rem .9rem; margin-bottom: 1rem;
+      }
+      .summary-row { display: flex; justify-content: space-between; gap: 1rem; font-size: .92rem; padding: .15rem 0; }
+      .summary-row span { color: var(--c-muted); }
+      .summary-note { font-size: .8rem; color: var(--c-accent); margin-top: .4rem; }
+
+      .reserve-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 100%; font-family: inherit; font-size: 1rem; cursor: pointer;
+        background: var(--c-reserve); color: #fff; border: none; border-radius: 24px;
+        padding: .8rem 1.2rem; min-height: 48px; text-decoration: none;
+        transition: background .15s, transform .15s;
+      }
+      .reserve-btn:hover { background: var(--c-reserve-hv); transform: translateY(-1px); }
+      .reserve-btn:disabled { opacity: .55; cursor: default; transform: none; }
+      .reserve-btn.ghost { background: transparent; color: var(--c-purple-dk); border: 1px solid var(--c-border); margin-top: 1rem; }
+
+      .done { text-align: center; }
+      .done-mark {
+        width: 3rem; height: 3rem; margin: 0 auto .5rem; border-radius: 50%;
+        background: var(--c-purple); color: #fff; font-size: 1.5rem;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .done-body { text-align: left; margin: 1rem 0; }
+      .done-dl { display: grid; grid-template-columns: auto 1fr; gap: .2rem .8rem; margin: .8rem 0; font-size: .92rem; }
+      .done-dl dt { color: var(--c-muted); white-space: nowrap; }
+      .done-dl dd { margin: 0; }
+      .manage { font-size: .88rem; background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 8px; padding: .7rem .8rem; word-break: break-all; }
+
+      .site-footer { text-align: center; color: var(--c-muted); font-size: .82rem; padding: 1.5rem 1rem 2.5rem; }
+      .site-footer .small { font-size: .78rem; }
+
+      @media (max-width: 700px) {
+        .wrap { padding: 1rem .8rem 3rem; }
+      }
+    </style>
+  </body>
+</html>
