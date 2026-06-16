@@ -9,6 +9,11 @@
 name = "wasyo-dev"
 compatibility_date = "2025-09-01"
 
+# dev フロントの URL（wasyo-dev.<account>.workers.dev）を有効化。
+# バージョンごとのプレビューURLも有効（既定どおり明示）。
+workers_dev = true
+preview_urls = true
+
 # pnpm build の出力先（dist/）を静的配信。
 # トレイリングスラッシュ等の扱いは既定（auto）で /reserve/ → /reserve/index.html を解決。
 [assets]
