@@ -46,6 +46,21 @@ function prop_(key) {
   return PropertiesService.getScriptProperties().getProperty(key) || '';
 }
 
+/**
+ * 初回認可用。公開API（実行=自分）はオーナーが事前に各サービスを認可しておく必要がある。
+ * GAS エディタでこの関数を一度だけ実行し、表示される同意画面で
+ * Calendar / Sheets / メール送信 / 外部通信(LINE) のアクセスを許可する。
+ * 認可後は公開API（?action=availability 等）が匿名アクセスでも動作する。
+ */
+function authorize() {
+  // プロジェクト全体で使うスコープを宣言・確認するため各サービスへ軽く触れる
+  CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
+  SpreadsheetApp.openById(prop_('LEDGER_SHEET_ID'));
+  UrlFetchApp.getRequest('https://api.line.me/', {}); // 送信はしない（スコープ宣言用）
+  MailApp.getRemainingDailyQuota();                   // 送信はしない（スコープ宣言用）
+  console.log('authorize: OK — 全スコープ認可済み');
+}
+
 // ============================================================
 // ルーティング（doGet / doPost）
 // ============================================================
