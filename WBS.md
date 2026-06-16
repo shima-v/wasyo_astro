@@ -29,22 +29,22 @@
 - [x] 0.1.5 `.gitignore` に `.env.development` 追加＋`.env.development.example` を作成
 
 ### 0.2 外部サービス準備（dev/prod 完全分離）👤 ※手順書(Phase 0.3.1)に従う
-- [ ] 0.2.1 Google: **dev** 予約カレンダー作成（カレンダーID控え）
-- [ ] 0.2.2 Google: **prod** 予約カレンダー作成（カレンダーID控え）
-- [ ] 0.2.3 Google: **dev** 顧客台帳スプレッドシート作成（ID控え）
-- [ ] 0.2.4 Google: **prod** 顧客台帳スプレッドシート作成（ID控え）
-- [ ] 0.2.5 GAS: **dev** プロジェクト作成（clasp 紐付け→scriptId 控え）
-- [ ] 0.2.6 GAS: **prod** プロジェクト作成（clasp 紐付け→scriptId 控え）
+- [x] 0.2.1 Google: **dev** 予約カレンダー作成（カレンダーID控え）
+- [x] 0.2.2 Google: **prod** 予約カレンダー作成（カレンダーID控え）
+- [x] 0.2.3 Google: **dev** 顧客台帳スプレッドシート作成（ID控え）
+- [x] 0.2.4 Google: **prod** 顧客台帳スプレッドシート作成（ID控え）
+- [x] 0.2.5 GAS: **dev** プロジェクト作成（clasp 紐付け→scriptId 控え）
+- [x] 0.2.6 GAS: **prod** プロジェクト作成（clasp 紐付け→scriptId 控え）
 - [ ] 0.2.7 LINE: **dev** Messaging API チャネル作成＋channel access token 取得
 - [ ] 0.2.8 LINE: **prod** Messaging API チャネル作成＋channel access token 取得
-- [ ] 0.2.9 LINE: **dev** LINE Login チャネル作成（channel ID/secret）
-- [ ] 0.2.10 LINE: **prod** LINE Login チャネル作成（channel ID/secret）
+- [x] 0.2.9 LINE: **dev** LINE Login チャネル作成（channel ID/secret）
+- [x] 0.2.10 LINE: **prod** LINE Login チャネル作成（channel ID/secret）
 - [ ] 0.2.11 Cloudflare Pages: プロジェクト作成・`develop` 連携・環境変数設定
 - [ ] 0.2.12 各 GAS の Script Properties 設定（カレンダーID / 台帳ID / LINEトークン / 管理者メール許可リスト / HMAC secret）
 
 ### 0.3 ローカル開発準備
 - [x] 0.3.1 外部セットアップ手順書 `docs/SETUP.md` 作成 🤖
-- [ ] 0.3.2 clasp インストール・ログイン（手順は SETUP.md）👤
+- [x] 0.3.2 clasp インストール・ログイン（手順は SETUP.md）👤
 
 ---
 

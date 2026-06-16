@@ -1,0 +1,15 @@
+# Cloudflare Workers（dev フロント）設定
+#
+# Workers Builds の「デプロイ コマンド」(`npx wrangler deploy`) がこの設定を読み、
+# Astro の静的出力 dist/ を「静的アセット」として配信する。Worker スクリプト(main)は不要。
+# 本番(prod)は GitHub Pages → wwwasyo.com（main ブランチ）側のため、Cloudflare は dev 専用。
+#
+# ⚠️ name は Cloudflare ダッシュボードの Worker 名と完全一致させること。
+#    不一致だと別 Worker に配信される／デプロイが失敗する。
+name = "wasyo-dev"
+compatibility_date = "2025-09-01"
+
+# pnpm build の出力先（dist/）を静的配信。
+# トレイリングスラッシュ等の扱いは既定（auto）で /reserve/ → /reserve/index.html を解決。
+[assets]
+directory = "./dist"
