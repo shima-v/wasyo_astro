@@ -115,7 +115,7 @@
 > **LINE Messaging API が dev/prod 共有である影響と対策**
 > LINE の仕様上、1つの公式アカウントに紐づく Messaging API チャネルは1つだけ。本サロンは公式アカウントが1つ（`lin.ee/7ZvbqEb`）のため、**dev と prod のオーナー通知は同じチャネル・同じトークンで同じ LINE 宛に届く**。
 > - 影響: 開発テストの通知と本番の通知が同じ LINE に混在する。
-> - 対策: GAS の Script Property `ENV_LABEL`（dev のみ `【開発】` 等）を**店向け通知の先頭に付与**して区別する（prod は空）。承認/辞退リンクは各環境の GAS URL を指すため、誤承認は起きない（dev リンク→dev GAS、prod リンク→prod GAS）。
+> - 対策: GAS の Script Property `ENV_LABEL`（dev のみ `【開発】` 等）を**店向け通知の先頭に付与**して区別する（**prod はキーを登録しない**＝GAS は空文字保存不可のため未登録でラベルなし）。承認/辞退リンクは各環境の GAS URL を指すため、誤承認は起きない（dev リンク→dev GAS、prod リンク→prod GAS）。
 > - 注意: dev で実際に LINE push すると本番と同じ友だち（オーナー）に届くため、テストは通知本文の `【開発】` 表示で識別する。お客様への LINE 通知も同一チャネル経由（MVP はメール既定のため影響小）。
 
 ### 設定の切り替え
