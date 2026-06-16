@@ -61,6 +61,40 @@ function authorize() {
   console.log('authorize: OK — 全スコープ認可済み');
 }
 
+/**
+ * 診断用。GASエディタで実行し「実行ログ」を確認する。
+ * Script Properties の設定有無・LINE push の実レスポンス・実行ユーザーを出力する。
+ * 秘密情報（トークン/HMAC/ownerId）は値を出さず、長さ・接頭辞のみ表示する。
+ * 実行すると LINE へ実テスト通知を1件送る（届けば LINE 設定は正常）。
+ */
+function diag() {
+  function mask(v) { return v ? '(len=' + v.length + ', head=' + v.slice(0, 4) + '…)' : '(未設定)'; }
+  var token = prop_('LINE_CHANNEL_ACCESS_TOKEN');
+  var owner = prop_('LINE_OWNER_USER_ID');
+  Logger.log('CALENDAR_ID: ' + (prop_('CALENDAR_ID') ? 'set' : '未設定'));
+  Logger.log('LEDGER_SHEET_ID: ' + (prop_('LEDGER_SHEET_ID') ? 'set' : '未設定'));
+  Logger.log('HMAC_SECRET: ' + (prop_('HMAC_SECRET') ? 'set' : '未設定'));
+  Logger.log('FRONT_BASE_URL: ' + prop_('FRONT_BASE_URL'));
+  Logger.log('ENV_LABEL: "' + prop_('ENV_LABEL') + '"');
+  Logger.log('ADMIN_EMAILS: ' + prop_('ADMIN_EMAILS'));
+  Logger.log('activeUser: ' + Session.getActiveUser().getEmail());
+  Logger.log('webapp url: ' + ScriptApp.getService().getUrl());
+  Logger.log('LINE_CHANNEL_ACCESS_TOKEN: ' + mask(token));
+  Logger.log('LINE_OWNER_USER_ID: ' + mask(owner) + ' startsWithU=' + (owner.charAt(0) === 'U'));
+  if (token && owner) {
+    var res = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+      method: 'post', contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + token },
+      payload: JSON.stringify({ to: owner, messages: [{ type: 'text', text: '【開発】diag テスト通知' }] }),
+      muteHttpExceptions: true,
+    });
+    Logger.log('LINE push status: ' + res.getResponseCode());
+    Logger.log('LINE push body: ' + res.getContentText());
+  } else {
+    Logger.log('LINE push skipped (token か owner が未設定)');
+  }
+}
+
 // ============================================================
 // ルーティング（doGet / doPost）
 // ============================================================
@@ -522,6 +556,9 @@ function linePush_(to, text) {
 }
 
 function sendMail_(to, subject, body) {
+  // dev は ENV_LABEL を件名・本文の先頭に付けて本番メールと区別する（prod はキー未登録＝無印）
+  var label = prop_('ENV_LABEL');
+  if (label) { subject = label + ' ' + subject; body = label + '\n' + body; }
   try { MailApp.sendEmail(to, subject, body); } catch (err) { console.error('sendMail_ failed: ' + err); }
 }
 

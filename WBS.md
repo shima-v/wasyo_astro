@@ -145,5 +145,5 @@
 - GAS の CORS で問題が出たら Cloudflare Workers プロキシへ退避（プラン「既知のリスク」参照）。
 - LINE Login は MVP では任意。初期は「メール既定・LINE連携は任意」で段階導入可。
 - 新規/常連判定は別端末/別連絡先で取りこぼし得る → 承認時に店が補正。
-- **LINE Messaging API は dev/prod 共有**（1公式アカウント=1チャネル制約）。dev テスト通知が本番と同じ LINE に届くため、Script Property `ENV_LABEL`（dev=`【開発】`／**prod は未登録**＝GASは空文字保存不可のためキーごと作らない）で店通知の先頭を区別する。承認/辞退リンクは各環境の GAS URL を指すため誤承認はしない。
+- **LINE Messaging API は dev/prod 共有**（1公式アカウント=1チャネル制約）。dev テスト通知が本番と同じ LINE に届くため、Script Property `ENV_LABEL`（dev=`【開発】`／**prod は未登録**＝GASは空文字保存不可のためキーごと作らない）で**店へのLINE通知とお客様メール（件名・本文）**の先頭を区別する。承認/辞退リンクは各環境の GAS URL を指すため誤承認はしない。
 - dev フロントは **Cloudflare Workers(Builds)**。`wrangler deploy` が `wrangler.toml`（`[assets] directory="./dist"`）で `dist/` を静的配信。Node は `.nvmrc`=22 固定。
