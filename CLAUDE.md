@@ -6,6 +6,7 @@
 
 - 予約機能の設計プラン: ./RESERVATION_PLAN.md
 - 予約機能の WBS（進捗管理）: ./WBS.md
+- 開発メモ・既知のハマりどころ（備忘録）: ./docs/DEV_NOTES.md
 
 ## コマンド
 
