@@ -477,7 +477,9 @@ function notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst) {
 }
 
 function notifyOwner_(text) {
-  linePush_(prop_('LINE_OWNER_USER_ID'), text);
+  // LINE Messaging API は dev/prod 共有のため、dev は ENV_LABEL(例:【開発】)を先頭に付けて区別する
+  var label = prop_('ENV_LABEL');
+  linePush_(prop_('LINE_OWNER_USER_ID'), (label ? label + '\n' : '') + text);
 }
 
 function notifyCustomer_(b, text) {

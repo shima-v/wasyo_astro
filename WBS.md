@@ -3,7 +3,7 @@
 > サロン和笑〜Violane〜 予約システム開発の進捗管理ドキュメント。
 > 設計の詳細は [`RESERVATION_PLAN.md`](./RESERVATION_PLAN.md) を参照。
 
-- **最終更新**: 2026-06-16
+- **最終更新**: 2026-06-17
 - **作業ブランチ**: `develop`（本番=`main`）
 - **凡例**: `[ ]`未着手 / `[~]`進行中 / `[x]`完了 ／ 担当 🤖=Claude実装 / 👤=ユーザー手動作業
 
@@ -11,11 +11,11 @@
 
 | フェーズ | 内容 | 状態 | 進捗 |
 |---------|------|------|------|
-| Phase 0 | 基盤・環境準備 | 進行中 | 6 / 19 |
+| Phase 0 | 基盤・環境準備 | ほぼ完了（残=HMAC secret 設定） | 18 / 19 |
 | Phase 1 | GAS バックエンド | 実装完了（残=👤デプロイ） | 19 / 21 |
 | Phase 2 | フロント（予約UI） | 実装ほぼ完了（残=LINE Login任意） | 13 / 14 |
-| Phase 3 | 既存サイト統合・環境切替 | 未着手 | 0 / 6 |
-| Phase 4 | 検証・リリース | 未着手 | 0 / 8 |
+| Phase 3 | 既存サイト統合・環境切替 | 進行中 | 1 / 6 |
+| Phase 4 | 検証・リリース | 進行中 | 1 / 8 |
 
 ---
 
@@ -28,19 +28,19 @@
 - [x] 0.1.4 `CLAUDE.md` に平文リンク追記（PLAN / WBS）
 - [x] 0.1.5 `.gitignore` に `.env.development` 追加＋`.env.development.example` を作成
 
-### 0.2 外部サービス準備（dev/prod 完全分離）👤 ※手順書(Phase 0.3.1)に従う
+### 0.2 外部サービス準備（dev/prod 分離。※LINE Messaging API のみ共有）👤 ※手順書(Phase 0.3.1)に従う
 - [x] 0.2.1 Google: **dev** 予約カレンダー作成（カレンダーID控え）
 - [x] 0.2.2 Google: **prod** 予約カレンダー作成（カレンダーID控え）
 - [x] 0.2.3 Google: **dev** 顧客台帳スプレッドシート作成（ID控え）
 - [x] 0.2.4 Google: **prod** 顧客台帳スプレッドシート作成（ID控え）
 - [x] 0.2.5 GAS: **dev** プロジェクト作成（clasp 紐付け→scriptId 控え）
 - [x] 0.2.6 GAS: **prod** プロジェクト作成（clasp 紐付け→scriptId 控え）
-- [ ] 0.2.7 LINE: **dev** Messaging API チャネル作成＋channel access token 取得
-- [ ] 0.2.8 LINE: **prod** Messaging API チャネル作成＋channel access token 取得
+- [x] 0.2.7 LINE: Messaging API チャネル作成＋channel access token 取得（**dev/prod 共有**：1公式アカウント=1チャネル制約のため新規2つは作成不可）
+- [x] 0.2.8 ~~LINE: prod 用 Messaging API チャネル~~ → **0.2.7 と共有**（新規作成不要。dev/prod とも同一チャネル・同一トークン。区別は `ENV_LABEL` で対応）
 - [x] 0.2.9 LINE: **dev** LINE Login チャネル作成（channel ID/secret）
 - [x] 0.2.10 LINE: **prod** LINE Login チャネル作成（channel ID/secret）
-- [ ] 0.2.11 Cloudflare Pages: プロジェクト作成・`develop` 連携・環境変数設定
-- [ ] 0.2.12 各 GAS の Script Properties 設定（カレンダーID / 台帳ID / LINEトークン / 管理者メール許可リスト / HMAC secret）
+- [x] 0.2.11 Cloudflare Workers(Builds): プロジェクト作成・`develop` 連携・環境変数設定（`wrangler.toml`/`.nvmrc`/`pnpm-workspace.yaml` はリポジトリ管理）
+- [~] 0.2.12 各 GAS の Script Properties 設定（カレンダーID / 台帳ID / LINEトークン / 管理者メール許可リスト / HMAC secret / FRONT_BASE_URL✔ / ENV_LABEL）※HMAC secret 残
 
 ### 0.3 ローカル開発準備
 - [x] 0.3.1 外部セットアップ手順書 `docs/SETUP.md` 作成 🤖
@@ -119,16 +119,16 @@
 - [ ] 3.1.3 「当日予約は電話で」案内の維持確認
 
 ### 3.2 環境切替
-- [ ] 3.2.1 `astro.config.mjs` の `site` を環境切替（prod=wwwasyo.com / dev=pages.dev）
+- [ ] 3.2.1 `astro.config.mjs` の `site` を環境切替（prod=wwwasyo.com / dev=`*.workers.dev`）
 - [ ] 3.2.2 GitHub Actions に prod env（secret: prod GAS URL 等）追加
-- [ ] 3.2.3 Cloudflare Pages の dev ビルド設定（環境変数）👤
+- [x] 3.2.3 Cloudflare Workers(Builds) の dev ビルド設定（`wrangler.toml`・`.nvmrc`・環境変数）👤/🤖
 
 ---
 
 ## Phase 4: 検証・リリース
 
 ### 4.1 検証
-- [ ] 4.1.1 `pnpm build` 成功 🤖
+- [x] 4.1.1 `pnpm build` 成功 🤖（dev フロント Cloudflare デプロイ確認済み）
 - [ ] 4.1.2 `/reserve` 動作（dev GAS 接続）🤖/👤
 - [ ] 4.1.3 e2e: 仮予約→devカレンダー【仮】→店LINE通知→承認→【確定】＋確定通知 👤
 - [ ] 4.1.4 新規/常連判定・初回料金の自動適用 👤
@@ -145,3 +145,5 @@
 - GAS の CORS で問題が出たら Cloudflare Workers プロキシへ退避（プラン「既知のリスク」参照）。
 - LINE Login は MVP では任意。初期は「メール既定・LINE連携は任意」で段階導入可。
 - 新規/常連判定は別端末/別連絡先で取りこぼし得る → 承認時に店が補正。
+- **LINE Messaging API は dev/prod 共有**（1公式アカウント=1チャネル制約）。dev テスト通知が本番と同じ LINE に届くため、Script Property `ENV_LABEL`（dev=`【開発】`）で店通知の先頭を区別する。承認/辞退リンクは各環境の GAS URL を指すため誤承認はしない。
+- dev フロントは **Cloudflare Workers(Builds)**。`wrangler deploy` が `wrangler.toml`（`[assets] directory="./dist"`）で `dist/` を静的配信。Node は `.nvmrc`=22 固定。
