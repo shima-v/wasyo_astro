@@ -80,7 +80,8 @@ function diag() {
   Logger.log('activeUser: ' + Session.getActiveUser().getEmail());
   Logger.log('webapp url: ' + ScriptApp.getService().getUrl());
   Logger.log('LINE_CHANNEL_ACCESS_TOKEN: ' + mask(token));
-  Logger.log('LINE_OWNER_USER_ID: ' + mask(owner) + ' startsWithU=' + (owner.charAt(0) === 'U'));
+  Logger.log('LINE_OWNER_USER_ID: ' + mask(owner) + ' prefix=' + owner.charAt(0));
+  Logger.log('LINE_LAST_SOURCE: ' + (prop_('LINE_LAST_SOURCE') || '(未捕捉)'));
   if (token && owner) {
     var res = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
       method: 'post', contentType: 'application/json',
@@ -126,6 +127,8 @@ function doGet(e) {
 function doPost(e) {
   var body = {};
   try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); } catch (_) {}
+  // LINE Webhook（events を含む POST）: 通知先ID（グループ/ルーム/ユーザー）を捕捉する設定用ハンドラ
+  if (body.events) return handleLineWebhook_(body);
   var action = body.action || '';
   try {
     switch (action) {
@@ -143,6 +146,23 @@ function doPost(e) {
   } catch (err) {
     return json_({ ok: false, error: String(err) });
   }
+}
+
+/**
+ * LINE Webhook 受信（通知先ID捕捉用・設定時のみ使用）。
+ * グループ通知のグループID(C…)は Webhook の source からしか取得できない。
+ * 手順: ①公式アカウントでグループ参加を許可 ②ボットを対象グループに招待
+ *       ③グループで誰かが発言 → ここで source を捕捉し Script Property
+ *       `LINE_LAST_SOURCE`（例: group:Cxxxx）へ保存 → その値を `LINE_OWNER_USER_ID` に設定。
+ */
+function handleLineWebhook_(body) {
+  (body.events || []).forEach(function (ev) {
+    var s = (ev && ev.source) || {};
+    var id = s.groupId || s.roomId || s.userId || '';
+    console.log('LINE webhook: type=' + s.type + ' id=' + id);
+    if (id) PropertiesService.getScriptProperties().setProperty('LINE_LAST_SOURCE', (s.type || '?') + ':' + id);
+  });
+  return json_({ ok: true });
 }
 
 function json_(obj) {
