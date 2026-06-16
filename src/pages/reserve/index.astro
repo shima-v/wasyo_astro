@@ -183,7 +183,8 @@ const grouped = groupOrder.map((g) => ({
 
     <script define:vars={{ RESERVE_API, BOOKING_RULES }}>
       const WD = ['日', '月', '火', '水', '木', '金', '土'];
-      const state = { menu: null, date: null, time: null, days: [] };
+      const state = { menu: null, date: null, time: null, days: [], availSet: null, calMin: null, calMax: null };
+      let calMonth = null; // カレンダーで表示中の月 {y, m(0始まり)}
 
       const $ = (s) => document.querySelector(s);
       const esc = (s) =>
@@ -217,13 +218,27 @@ const grouped = groupOrder.map((g) => ({
       });
 
       // ---- 空き枠取得 ----
-      async function loadAvailability() {
+      function setStatusLoading(msg) {
         const status = $('#slotStatus');
-        $('#dateList').innerHTML = '';
+        status.className = 'slot-status loading';
+        status.innerHTML = '<span class="spinner" aria-hidden="true"></span><span>' + msg + '</span>';
+      }
+      function setStatusText(msg, kind) {
+        const status = $('#slotStatus');
+        status.className = 'slot-status' + (kind ? ' ' + kind : '');
+        status.textContent = msg;
+      }
+
+      async function loadAvailability() {
+        calMonth = null;
+        state.date = null;
+        state.time = null;
         $('#timeList').innerHTML = '';
-        status.textContent = '空き状況を確認しています…';
+        $('#dateList').innerHTML = '<div class="cal-skeleton" aria-hidden="true"></div>';
+        setStatusLoading('空き状況を確認しています…');
         if (!RESERVE_API) {
-          status.textContent = '予約システムが未設定です（PUBLIC_RESERVE_API）。';
+          setStatusText('予約システムが未設定です（PUBLIC_RESERVE_API）。', 'slot-empty');
+          $('#dateList').innerHTML = '';
           return;
         }
         // firstTime 候補メニューは長い所要時間でも収まる枠だけ表示する（料金は同額）
@@ -236,28 +251,73 @@ const grouped = groupOrder.map((g) => ({
           state.days = data.days || [];
           renderDates();
         } catch (e) {
-          status.textContent = '空き状況を取得できませんでした。時間をおいて再度お試しください。';
+          setStatusText('空き状況を取得できませんでした。時間をおいて再度お試しください。', 'slot-empty');
+          $('#dateList').innerHTML = '';
         }
       }
 
       function renderDates() {
-        const status = $('#slotStatus');
         const dl = $('#dateList');
         if (!state.days.length) {
-          status.textContent = '現在ご予約可能な空き枠がありません。お手数ですがお電話でお問い合わせください。';
+          setStatusText('現在ご予約可能な空き枠がありません。お手数ですがお電話でお問い合わせください。', 'slot-empty');
+          dl.innerHTML = '';
+          $('#timeList').innerHTML = '';
           return;
         }
-        status.textContent = '日付を選んでください。';
-        dl.innerHTML = state.days
-          .map((d) => `<button type="button" class="date-btn" data-date="${d.date}">${fmtDateLabel(d.date)}</button>`)
-          .join('');
-        dl.querySelectorAll('.date-btn').forEach((b) => {
+        setStatusText('ご希望の日付を選んでください（● 印が空きありの日）。');
+        state.availSet = new Set(state.days.map((d) => d.date));
+        state.calMin = state.days[0].date;
+        state.calMax = state.days[state.days.length - 1].date;
+        if (!calMonth) {
+          const [y, m] = state.calMin.split('-').map(Number);
+          calMonth = { y, m: m - 1 };
+        }
+        renderCalendar();
+      }
+
+      function ymIndex(ymd) { const [y, m] = ymd.split('-').map(Number); return y * 12 + (m - 1); }
+      function stepMonth(c, delta) { const d = new Date(c.y, c.m + delta, 1); return { y: d.getFullYear(), m: d.getMonth() }; }
+
+      function renderCalendar() {
+        const dl = $('#dateList');
+        const { y, m } = calMonth;
+        const firstDow = new Date(y, m, 1).getDay();
+        const daysInMonth = new Date(y, m + 1, 0).getDate();
+        const cur = y * 12 + m;
+        const canPrev = cur > ymIndex(state.calMin);
+        const canNext = cur < ymIndex(state.calMax);
+        let html =
+          '<div class="cal-head">' +
+          `<button type="button" class="cal-nav" id="calPrev" ${canPrev ? '' : 'disabled'} aria-label="前の月">‹</button>` +
+          `<span class="cal-title">${y}年${m + 1}月</span>` +
+          `<button type="button" class="cal-nav" id="calNext" ${canNext ? '' : 'disabled'} aria-label="次の月">›</button>` +
+          '</div><div class="cal-grid">' +
+          WD.map((w, i) => `<span class="cal-wd${i === 0 ? ' sun' : ''}${i === 6 ? ' sat' : ''}">${w}</span>`).join('');
+        for (let i = 0; i < firstDow; i++) html += '<span class="cal-cell empty"></span>';
+        for (let day = 1; day <= daysInMonth; day++) {
+          const ymd = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const dow = new Date(y, m, day).getDay();
+          const dowCls = dow === 0 ? ' sun' : dow === 6 ? ' sat' : '';
+          if (state.availSet.has(ymd)) {
+            const active = state.date === ymd ? ' active' : '';
+            html += `<button type="button" class="cal-cell cal-day avail${active}${dowCls}" data-date="${ymd}">${day}<span class="dot"></span></button>`;
+          } else {
+            html += `<span class="cal-cell cal-day disabled${dowCls}">${day}</span>`;
+          }
+        }
+        html += '</div>';
+        dl.innerHTML = html;
+        const prev = $('#calPrev'), next = $('#calNext');
+        if (prev) prev.onclick = () => { calMonth = stepMonth(calMonth, -1); renderCalendar(); };
+        if (next) next.onclick = () => { calMonth = stepMonth(calMonth, 1); renderCalendar(); };
+        dl.querySelectorAll('.cal-day.avail').forEach((b) => {
           b.addEventListener('click', () => {
             state.date = b.dataset.date;
             state.time = null;
-            dl.querySelectorAll('.date-btn').forEach((x) => x.classList.toggle('active', x === b));
+            renderCalendar();
             renderTimes();
             updateSummary();
+            $('#timeList').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           });
         });
       }
@@ -267,7 +327,7 @@ const grouped = groupOrder.map((g) => ({
         const day = state.days.find((d) => d.date === state.date);
         if (!day) { tl.innerHTML = ''; return; }
         tl.innerHTML =
-          '<div class="time-label">開始時刻</div>' +
+          '<div class="time-label">' + fmtDateLabel(state.date) + ' の開始時刻をお選びください</div>' +
           day.times.map((t) => `<button type="button" class="time-btn" data-time="${t}">${t}</button>`).join('');
         tl.querySelectorAll('.time-btn').forEach((b) => {
           b.addEventListener('click', () => {
@@ -395,7 +455,7 @@ const grouped = groupOrder.map((g) => ({
           `<dt>料金</dt><dd>${fmtYen(data.price)}${first ? '（初回料金を適用）' : ''}</dd>` +
           `</dl>` +
           (data.manageUrl
-            ? `<p class="manage">ご予約の確認・変更・キャンセルはこちら：<br><a href="${esc(data.manageUrl)}">${esc(data.manageUrl)}</a><br><small>このリンクは大切に保管してください。</small></p>`
+            ? `<p class="manage"><a class="reserve-btn manage-btn" href="${esc(data.manageUrl)}">予約内容を確認・変更する</a><small class="manage-hint">※ご予約の確認・変更・キャンセルができます。同じリンクを確認メールにも記載しています。</small></p>`
             : '');
         $('#doneBody').innerHTML = html;
         const done = $('#step-done');
@@ -484,14 +544,69 @@ const grouped = groupOrder.map((g) => ({
       .menu-note { font-size: .78rem; color: var(--c-muted); margin-top: .2rem; }
 
       .slot-status { font-size: .9rem; color: var(--c-muted); margin-bottom: .75rem; }
-      .date-list { display: flex; flex-wrap: wrap; gap: .45rem; margin-bottom: 1rem; }
-      .date-btn, .time-btn {
+      .slot-status.loading {
+        display: flex; align-items: center; gap: .55rem;
+        color: var(--c-purple-dk); font-weight: 600;
+        background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 8px;
+        padding: .65rem .8rem;
+      }
+      .slot-status.slot-empty { color: #8E2230; }
+      .spinner {
+        width: 18px; height: 18px; flex: none;
+        border: 3px solid var(--c-border); border-top-color: var(--c-purple);
+        border-radius: 50%; animation: spin .8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .cal-skeleton {
+        height: 280px; border-radius: 10px;
+        background: linear-gradient(100deg, #f3ecf2 30%, #fbf6fa 50%, #f3ecf2 70%);
+        background-size: 200% 100%; animation: shimmer 1.2s linear infinite;
+      }
+      @keyframes shimmer { to { background-position: -200% 0; } }
+
+      /* カレンダー（日付選択） */
+      .date-list { margin-bottom: 1rem; }
+      .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .6rem; }
+      .cal-title { font-weight: 600; font-size: 1rem; }
+      .cal-nav {
+        font-family: inherit; font-size: 1.25rem; line-height: 1; color: var(--c-purple-dk);
+        width: 42px; height: 42px; border: 1px solid var(--c-border); background: #fff;
+        border-radius: 10px; cursor: pointer;
+      }
+      .cal-nav:hover:not(:disabled) { border-color: var(--c-purple-lt); }
+      .cal-nav:disabled { opacity: .3; cursor: default; }
+      .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: .3rem; }
+      .cal-wd { text-align: center; font-size: .78rem; color: var(--c-muted); padding: .15rem 0; }
+      .cal-wd.sun { color: #B23A48; }
+      .cal-wd.sat { color: #3F6FB0; }
+      .cal-cell {
+        aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center;
+        font-size: .92rem; font-family: inherit;
+      }
+      .cal-cell.empty { border: 0; }
+      .cal-day { border-radius: 9px; }
+      .cal-day.disabled { color: #CDBFCC; }
+      .cal-day.disabled.sun { color: #e0b3ba; }
+      .cal-day.disabled.sat { color: #b6c4dc; }
+      .cal-day.avail {
+        position: relative; flex-direction: column; gap: 2px;
+        border: 1px solid var(--c-border); background: #fff; color: var(--c-ink); cursor: pointer;
+        transition: border-color .15s, background .15s;
+      }
+      .cal-day.avail.sun { color: #B23A48; }
+      .cal-day.avail.sat { color: #3F6FB0; }
+      .cal-day.avail:hover { border-color: var(--c-purple-lt); background: #FCF6FA; }
+      .cal-day.avail.active { background: var(--c-purple); color: #fff; border-color: var(--c-purple); }
+      .cal-day .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--c-accent); }
+      .cal-day.avail.active .dot { background: #fff; }
+
+      .time-btn {
         font-family: inherit; font-size: .9rem; cursor: pointer;
         border: 1px solid var(--c-border); background: #fff; color: var(--c-ink);
         border-radius: 8px; padding: .45rem .7rem; min-height: 40px;
       }
-      .date-btn:hover, .time-btn:hover { border-color: var(--c-purple-lt); }
-      .date-btn.active, .time-btn.active { background: var(--c-purple); color: #fff; border-color: var(--c-purple); }
+      .time-btn:hover { border-color: var(--c-purple-lt); }
+      .time-btn.active { background: var(--c-purple); color: #fff; border-color: var(--c-purple); }
       .time-list { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; }
       .time-label { width: 100%; font-size: .85rem; color: var(--c-muted); margin-bottom: .15rem; }
 
@@ -552,7 +667,9 @@ const grouped = groupOrder.map((g) => ({
       .done-dl { display: grid; grid-template-columns: auto 1fr; gap: .2rem .8rem; margin: .8rem 0; font-size: .92rem; }
       .done-dl dt { color: var(--c-muted); white-space: nowrap; }
       .done-dl dd { margin: 0; }
-      .manage { font-size: .88rem; background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 8px; padding: .7rem .8rem; word-break: break-all; }
+      .manage { font-size: .88rem; background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 8px; padding: .8rem; text-align: center; }
+      .manage-btn { margin: 0 auto; max-width: 320px; }
+      .manage-hint { display: block; font-size: .78rem; color: var(--c-muted); margin-top: .5rem; }
 
       .site-footer { text-align: center; color: var(--c-muted); font-size: .82rem; padding: 1.5rem 1rem 2.5rem; }
       .site-footer .small { font-size: .78rem; }

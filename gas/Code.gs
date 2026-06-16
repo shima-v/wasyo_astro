@@ -78,7 +78,9 @@ function diag() {
   Logger.log('ENV_LABEL: "' + prop_('ENV_LABEL') + '"');
   Logger.log('ADMIN_EMAILS: ' + prop_('ADMIN_EMAILS'));
   Logger.log('activeUser: ' + Session.getActiveUser().getEmail());
-  Logger.log('webapp url: ' + ScriptApp.getService().getUrl());
+  Logger.log('webapp url (getService): ' + ScriptApp.getService().getUrl());
+  Logger.log('PUBLIC_EXEC_URL prop: ' + (prop_('PUBLIC_EXEC_URL') || '(未設定→getServiceにフォールバック)'));
+  Logger.log('承認リンクbase(実際に使う値): ' + publicExecUrl_());
   Logger.log('LINE_CHANNEL_ACCESS_TOKEN: ' + mask(token));
   Logger.log('LINE_OWNER_USER_ID: ' + mask(owner) + ' prefix=' + owner.charAt(0));
   Logger.log('LINE_LAST_SOURCE: ' + (prop_('LINE_LAST_SOURCE') || '(未捕捉)'));
@@ -108,10 +110,10 @@ function doGet(e) {
         return json_(getAvailability_(e.parameter));
       case 'booking': // 管理ページ：トークンで予約内容取得
         return json_(getBookingByToken_(e.parameter.token));
-      case 'approve': // LINE通知の署名リンクから承認
-        return html_(handleSignedDecision_(e.parameter, true));
+      case 'approve': // LINE通知の署名リンク（GETは読み取り専用の確認ページ）
+        return renderDecisionPage_(e.parameter, true);
       case 'decline':
-        return html_(handleSignedDecision_(e.parameter, false));
+        return renderDecisionPage_(e.parameter, false);
       case 'admin': // 管理パネル（別デプロイ：executeAs=アクセスユーザー / アクセス=自分のみ）
         return HtmlService.createHtmlOutputFromFile('admin')
           .setTitle('予約管理 — サロン和笑〜Violane〜')
@@ -203,12 +205,19 @@ function getAvailability_(p) {
   var config = readSlotConfig_();
   var days = [];
 
+  // 既存予約は範囲全体を一度だけ取得し日付ごとにバケツ分け（getEvents 呼び出しを日数分→1回へ削減）
+  var busyByDate = {};
+  if (cal) {
+    cal.getEvents(startOfDay_(from), addDays_(startOfDay_(to), 1)).forEach(function (ev) {
+      var dk = fmt_(ev.getStartTime(), 'yyyy-MM-dd');
+      (busyByDate[dk] || (busyByDate[dk] = [])).push({ start: ev.getStartTime().getTime(), end: ev.getEndTime().getTime() });
+    });
+  }
+
   for (var d = new Date(from); d <= to; d = addDays_(d, 1)) {
     var dateStr = fmt_(d, 'yyyy-MM-dd');
     if (!isOpenDay_(d, config)) continue;
-    var busy = cal ? cal.getEvents(startOfDay_(d), addDays_(startOfDay_(d), 1)).map(function (ev) {
-      return { start: ev.getStartTime().getTime(), end: ev.getEndTime().getTime() };
-    }) : [];
+    var busy = busyByDate[dateStr] || [];
     var times = [];
     var candidates = candidateStarts_(d, dur);
     for (var i = 0; i < candidates.length; i++) {
@@ -320,7 +329,7 @@ function createBooking_(b) {
   // 通知
   notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst);
   notifyCustomer_(b, '【仮予約を受付ました】\n' + bookingSummary_(menu, start, eff, isFirst) +
-    '\nサロンの確認後、確定のご連絡をいたします。\n予約の確認・変更・取消: ' + manageUrl_(token));
+    '\nサロンの確認後、確定のご連絡をいたします。\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(token));
 
   return {
     ok: true, token: token, status: STATUS.PENDING,
@@ -333,12 +342,48 @@ function createBooking_(b) {
 // 承認・辞退
 // ============================================================
 
-/** LINE署名リンク経由（GET）。HTMLを返す。 */
-function handleSignedDecision_(p, approve) {
-  if (!verifySig_('decision:' + p.token, p.sig)) return '署名が無効です。';
-  var r = decide_(p.token, approve);
-  if (!r.ok) return 'エラー: ' + r.error;
-  return approve ? '予約を<b>確定</b>しました。お客様へ通知済みです。' : '予約を<b>辞退</b>しました。お客様へ通知済みです。';
+/**
+ * LINE署名リンク経由（GET）。**状態変更はしない**確認ページを返す。
+ * 重要: GET は読み取り専用にする。承認/辞退リンクを LINE/メール等のクローラが
+ * プリフェッチ（プレビュー生成）すると、GET で確定/辞退が誤発火し予約が
+ * 勝手に削除される事故が起きるため、実処理はボタン押下→google.script.run に分離する。
+ */
+function renderDecisionPage_(p, approve) {
+  var act = approve ? '確定' : '辞退';
+  if (!verifySig_('decision:' + p.token, p.sig)) return html_('署名が無効です。');
+  var b = getBookingByToken_(p.token);
+  if (!b.ok) {
+    return html_('<h2 style="font-size:1.1rem">この予約は見つかりませんでした</h2>' +
+      '<p>すでに処理済み、または取消済みの可能性があります。</p>');
+  }
+  var color = approve ? '#2e7d32' : '#b00020';
+  var statusNote = b.status === STATUS.CONFIRMED ? '<p style="color:#2e7d32">※この予約はすでに「確定」済みです。</p>' : '';
+  var summary = esc_(b.name) + ' 様' + (b.isFirstTime ? '（新規）' : '（常連）') + '<br>' +
+    esc_(b.menuName) + '<br>' + b.date + ' ' + b.time + '〜（' + b.durationMin + '分） ¥' + b.price;
+  var page = '' +
+    '<h2 style="font-size:1.1rem;margin:0 0 .5rem">予約を' + act + 'しますか？</h2>' +
+    statusNote +
+    '<div style="background:#f6f3f6;border-radius:10px;padding:1rem;margin:1rem 0;text-align:left">' + summary + '</div>' +
+    '<button id="go" style="width:100%;min-height:48px;border:0;border-radius:24px;color:#fff;background:' + color + ';font-size:1rem;cursor:pointer">' + act + 'する</button>' +
+    '<p id="msg" style="color:#666;margin-top:1rem;min-height:1.2em"></p>' +
+    '<script>' +
+    'var T=' + JSON.stringify(p.token) + ',S=' + JSON.stringify(p.sig) + ',A=' + (approve ? 'true' : 'false') + ';' +
+    'document.getElementById("go").onclick=function(){' +
+    'this.disabled=true;this.style.opacity=.5;this.textContent="処理中…";' +
+    'google.script.run.withSuccessHandler(function(r){' +
+    'var m=document.getElementById("msg");' +
+    'if(r&&r.ok){m.innerHTML="<b>' + act + 'しました。</b>お客様へ通知済みです。";document.getElementById("go").style.display="none";}' +
+    'else{m.textContent="エラー: "+((r&&r.error)||"unknown");}' +
+    '}).withFailureHandler(function(e){document.getElementById("msg").textContent="通信エラー: "+e;}).decideBySig(T,S,A);' +
+    '};' +
+    '</script>';
+  return html_(page);
+}
+
+/** 確認ページのボタン（google.script.run）から呼ばれる。署名検証のうえ確定/辞退を実行。 */
+function decideBySig(token, sig, approve) {
+  if (!verifySig_('decision:' + token, sig)) return { ok: false, error: 'bad_signature' };
+  return decide_(token, !!approve);
 }
 
 /** 管理画面経由（POST・要Googleログイン） */
@@ -532,17 +577,33 @@ function ledgerUpsert_(props, visitDate) {
 
 function notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst) {
   var sig = sign_('decision:' + token);
-  var base = ScriptApp.getService().getUrl();
+  var base = publicExecUrl_();
   var approve = base + '?action=approve&token=' + token + '&sig=' + encodeURIComponent(sig);
   var decline = base + '?action=decline&token=' + token + '&sig=' + encodeURIComponent(sig);
-  var msg = '【新規 仮予約】\n' +
+  var label = prop_('ENV_LABEL'); // dev のみ【開発】
+  var detail = (label ? label + '\n' : '') +
+    '【新規 仮予約】\n' +
     'お名前: ' + b.name + (isFirst ? '（新規）' : '（常連）') + '\n' +
     bookingSummary_(menu, start, eff, isFirst) + '\n' +
     '性別: ' + (b.gender === 'male' ? '男性' : '女性') + (b.gender === 'male' ? '\n紹介者: ' + b.referrer : '') + '\n' +
-    '連絡: ' + (b.phone || '') + ' ' + (b.email || '') + '\n' +
-    (b.note ? '要望: ' + b.note + '\n' : '') +
-    '\n✅承認: ' + approve + '\n❌辞退: ' + decline;
-  notifyOwner_(msg);
+    '連絡: ' + (b.phone || '') + ' ' + (b.email || '') +
+    (b.note ? '\n要望: ' + b.note : '');
+  // 詳細はテキスト、承認/辞退は confirm テンプレートのボタンで送る（長いURLを直接見せない）
+  linePushMessages_(prop_('LINE_OWNER_USER_ID'), [
+    { type: 'text', text: detail },
+    {
+      type: 'template',
+      altText: (label ? label + ' ' : '') + '仮予約の承認/辞退',
+      template: {
+        type: 'confirm',
+        text: 'この仮予約を承認しますか？\n（ボタンから確認ページが開きます）',
+        actions: [
+          { type: 'uri', label: '✅ 承認する', uri: approve },
+          { type: 'uri', label: '❌ 辞退する', uri: decline },
+        ],
+      },
+    },
+  ]);
 }
 
 function notifyOwner_(text) {
@@ -562,6 +623,11 @@ function notifyCustomerProps_(props, text) {
 }
 
 function linePush_(to, text) {
+  linePushMessages_(to, [{ type: 'text', text: text }]);
+}
+
+/** 任意のメッセージ配列（テキスト/テンプレート等）を push する。 */
+function linePushMessages_(to, messages) {
   var token = prop_('LINE_CHANNEL_ACCESS_TOKEN');
   if (!token || !to) return;
   try {
@@ -569,10 +635,10 @@ function linePush_(to, text) {
       method: 'post',
       contentType: 'application/json',
       headers: { Authorization: 'Bearer ' + token },
-      payload: JSON.stringify({ to: to, messages: [{ type: 'text', text: text }] }),
+      payload: JSON.stringify({ to: to, messages: messages }),
       muteHttpExceptions: true,
     });
-  } catch (err) { console.error('linePush_ failed: ' + err); }
+  } catch (err) { console.error('linePushMessages_ failed: ' + err); }
 }
 
 function sendMail_(to, subject, body) {
@@ -640,6 +706,23 @@ function withinCancelDeadline_(start) {
 }
 
 function normalizePhone_(p) { return String(p).replace(/[^0-9]/g, ''); }
+
+/** HTML特殊文字をエスケープ（確認ページに名前等を埋め込む際のXSS対策） */
+function esc_(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/**
+ * 店通知の承認/辞退リンクの基底URL。
+ * ScriptApp.getService().getUrl() は複数デプロイ環境で別デプロイ（HEAD等）のURLを
+ * 返すことがあり不安定なため、公開APIの /exec を Script Property に固定しておく。
+ * 未設定時のみ getUrl() にフォールバック。
+ */
+function publicExecUrl_() {
+  return prop_('PUBLIC_EXEC_URL') || ScriptApp.getService().getUrl();
+}
 
 // HMAC 署名（base64url）
 function sign_(data) {
