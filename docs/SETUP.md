@@ -155,9 +155,11 @@ J のリポジトリ Secrets に prod 値を登録。
 ## J. GitHub Actions（prod フロント / `main`）
 
 1. リポジトリ → Settings → Secrets and variables → Actions → 「New repository secret」で prod 値を登録:
-   - `PUBLIC_RESERVE_API`（prod `/exec`）
-   - `PUBLIC_LINE_LOGIN_CHANNEL_ID` / `PUBLIC_LINE_LOGIN_REDIRECT`
-2. `deploy.yml` のビルドステップでこれらを env として渡す（Phase 3 で対応）。
+   - **`PROD_RESERVE_API`**（prod GAS の `/exec` URL）← **必須**。`deploy.yml` が env `PUBLIC_RESERVE_API` に注入する。
+   - （任意・LINE Login 導入時のみ）`PROD_LINE_LOGIN_CHANNEL_ID` / `PROD_LINE_LOGIN_REDIRECT`。導入時に `deploy.yml` の Build env に追記する。
+2. `deploy.yml` の Build ステップで env 注入済み🤖：`PUBLIC_RESERVE_API: ${{ secrets.PROD_RESERVE_API }}` と `PUBLIC_SITE_URL: https://www.wwwasyo.com`（prod ドメインは secret ではなく直書き）。
+
+> secret 未登録でも `PUBLIC_RESERVE_API` は空文字になりビルドは通る（予約API未接続の状態でデプロイされるだけ）。prod 公開前に必ず登録する。
 
 ---
 
@@ -172,9 +174,9 @@ dev / prod それぞれ:
 - [×] `LINE_OWNER_USER_ID`（dev/prod 共有）
 - [×] `LINE_LOGIN_CHANNEL_ID` / `LINE_LOGIN_CHANNEL_SECRET`（任意・dev/prod 別）
 - [×] `ADMIN_EMAILS`
-- [ ] `HMAC_SECRET`（dev/prod で別の値。発番方法は F 参照）
+- [x] `HMAC_SECRET`（dev/prod で別の値。発番方法は F 参照）
 - [×] `FRONT_BASE_URL`
-- [ ] `ENV_LABEL`（**dev のみ** `【開発】` を登録／**prod は登録しない**。LINE 共有チャネルの通知区別用）
+- [x] `ENV_LABEL`（**dev のみ** `【開発】` を登録／**prod は登録しない**。LINE 共有チャネルの通知区別用）
 
 ## 動作確認（最小）
 

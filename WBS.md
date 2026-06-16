@@ -3,7 +3,7 @@
 > サロン和笑〜Violane〜 予約システム開発の進捗管理ドキュメント。
 > 設計の詳細は [`RESERVATION_PLAN.md`](./RESERVATION_PLAN.md) を参照。
 
-- **最終更新**: 2026-06-17
+- **最終更新**: 2026-06-17（既存サイト統合 Phase 3.1／環境切替 3.2.1 実装）
 - **作業ブランチ**: `develop`（本番=`main`）
 - **凡例**: `[ ]`未着手 / `[~]`進行中 / `[x]`完了 ／ 担当 🤖=Claude実装 / 👤=ユーザー手動作業
 
@@ -11,10 +11,10 @@
 
 | フェーズ | 内容 | 状態 | 進捗 |
 |---------|------|------|------|
-| Phase 0 | 基盤・環境準備 | ほぼ完了（残=HMAC secret 設定） | 18 / 19 |
+| Phase 0 | 基盤・環境準備 | 完了 | 19 / 19 |
 | Phase 1 | GAS バックエンド | 実装完了（残=👤デプロイ） | 19 / 21 |
 | Phase 2 | フロント（予約UI） | 実装ほぼ完了（残=LINE Login任意） | 13 / 14 |
-| Phase 3 | 既存サイト統合・環境切替 | 進行中 | 1 / 6 |
+| Phase 3 | 既存サイト統合・環境切替 | ほぼ完了（残=👤 repo secret 登録） | 5 / 6 |
 | Phase 4 | 検証・リリース | 進行中 | 1 / 8 |
 
 ---
@@ -40,7 +40,7 @@
 - [x] 0.2.9 LINE: **dev** LINE Login チャネル作成（channel ID/secret）
 - [x] 0.2.10 LINE: **prod** LINE Login チャネル作成（channel ID/secret）
 - [x] 0.2.11 Cloudflare Workers(Builds): プロジェクト作成・`develop` 連携・環境変数設定（`wrangler.toml`/`.nvmrc`/`pnpm-workspace.yaml` はリポジトリ管理）
-- [~] 0.2.12 各 GAS の Script Properties 設定（カレンダーID / 台帳ID / LINEトークン / 管理者メール許可リスト / HMAC secret / FRONT_BASE_URL✔ / ENV_LABEL）※HMAC secret 残
+- [x] 0.2.12 各 GAS の Script Properties 設定（カレンダーID / 台帳ID / LINEトークン / 管理者メール許可リスト / HMAC secret / FRONT_BASE_URL✔ / ENV_LABEL）
 
 ### 0.3 ローカル開発準備
 - [x] 0.3.1 外部セットアップ手順書 `docs/SETUP.md` 作成 🤖
@@ -114,13 +114,13 @@
 ## Phase 3: 既存サイト統合・環境切替 🤖
 
 ### 3.1 既存サイト `src/pages/index.astro`
-- [ ] 3.1.1 主要CTA（ヒーロー/スマホ追従ナビ/メニュー下）を `/reserve` へ
-- [ ] 3.1.2 RESERVA をフッターフォールバックに
-- [ ] 3.1.3 「当日予約は電話で」案内の維持確認
+- [x] 3.1.1 主要CTA（ヒーロー/スマホ追従ナビ/メニュー下）を `/reserve` へ（内部リンク化・`target="_blank"`除去）
+- [x] 3.1.2 RESERVA をフッターフォールバックに（`.reserve-btn--footer` で小さく残置）
+- [x] 3.1.3 「当日予約は電話で」案内の維持確認（アクセス節「当日予約・休日受付」は現状維持）
 
 ### 3.2 環境切替
-- [ ] 3.2.1 `astro.config.mjs` の `site` を環境切替（prod=wwwasyo.com / dev=`*.workers.dev`）
-- [ ] 3.2.2 GitHub Actions に prod env（secret: prod GAS URL 等）追加
+- [x] 3.2.1 `astro.config.mjs` の `site` を環境切替（既定=prod wwwasyo.com / dev=`PUBLIC_SITE_URL`で`*.workers.dev`上書き）
+- [~] 3.2.2 GitHub Actions に prod env 追加（`deploy.yml` の Build に `PUBLIC_RESERVE_API`/`PUBLIC_SITE_URL` 注入済み🤖。👤残=repo secret `PROD_RESERVE_API` に prod GAS の `/exec` URL を登録）
 - [x] 3.2.3 Cloudflare Workers(Builds) の dev ビルド設定（`wrangler.toml`・`.nvmrc`・環境変数）👤/🤖
 
 ---

@@ -3,7 +3,8 @@ const _base = import.meta.env.BASE_URL;
 const base = _base.endsWith('/') ? _base : _base + '/';
 const salonName = "サロン和笑〜Violane〜";
 const salonNameReading = "わしょう";
-const reserveUrl = "https://reserva.be/wasyou258";
+const reservePath = base + "reserve/";              // サイト内 本予約システム（新・メインのCTA）
+const reservaUrl = "https://reserva.be/wasyou258";  // RESERVA（移行期間のフォールバック）
 const tel = "090-9095-6034";
 ---
 
@@ -108,7 +109,7 @@ const tel = "090-9095-6034";
       <div class="hero-content">
         <h1 class="hero-title">サロン<ruby>和笑<rt>わしょう</rt></ruby></h1>
         <p class="hero-violane">〜Violane〜</p>
-        <a href={reserveUrl} target="_blank" rel="noopener noreferrer" class="reserve-btn reserve-btn--hero">
+        <a href={reservePath} class="reserve-btn reserve-btn--hero">
           ネット予約はこちら
         </a>
       </div>
@@ -320,6 +321,12 @@ const tel = "090-9095-6034";
           </div>
         </div>
 
+        <div class="menu-reserve">
+          <a href={reservePath} class="reserve-btn reserve-btn--large">
+            ネット予約はこちら
+          </a>
+        </div>
+
       </div>
     </section>
 
@@ -429,6 +436,9 @@ const tel = "090-9095-6034";
         <a href="https://www.instagram.com/wasyou258/" target="_blank" rel="noopener noreferrer" class="instagram-btn">
           Instagram @wasyou258
         </a>
+        <a href={reservaUrl} target="_blank" rel="noopener noreferrer" class="reserve-btn reserve-btn--footer">
+          外部予約サイト（RESERVA）はこちら
+        </a>
         <p class="footer-copy">&copy; {new Date().getFullYear()} サロン和笑〜Violane〜. All rights reserved.</p>
       </div>
     </footer>
@@ -440,7 +450,7 @@ const tel = "090-9095-6034";
       <a href={`tel:${tel}`} class="sticky-nav-btn sticky-nav-btn--tel">
         &#128222; 電話予約
       </a>
-      <a href={reserveUrl} target="_blank" rel="noopener noreferrer" class="sticky-nav-btn sticky-nav-btn--reserve">
+      <a href={reservePath} class="sticky-nav-btn sticky-nav-btn--reserve">
         ネット予約
       </a>
     </nav>
