@@ -6,6 +6,8 @@ import {
   GENDERS,
   CONTACT_METHODS,
   ENV_LABEL,
+  LINE_LOGIN_CHANNEL_ID,
+  LINE_LOGIN_REDIRECT,
 } from '../../data/config.js';
 import EnvBadge from '../../components/EnvBadge.astro';
 
@@ -95,6 +97,36 @@ const grouped = groupOrder.map((g) => ({
       <section class="step" id="step-form" hidden>
         <h2><span class="step-no">3</span> お客様情報</h2>
         <form id="reserveForm" novalidate>
+          <!-- LINE 連携（任意）。設定済み(チャネルID/redirect あり)のときだけ表示 -->
+          <div class="line-link" id="lineLink" hidden>
+            <!-- 未連携 -->
+            <div id="lineUnlinked">
+              <button type="button" class="line-btn" id="lineLinkBtn">
+                <span class="line-ico" aria-hidden="true">LINE</span>
+                LINEで連携してかんたん予約（任意）
+              </button>
+              <small class="hint">連携するとお名前が自動入力され、ご予約の確認・確定をLINEでお受け取りいただけます。電話番号・性別はご入力が必要です。</small>
+            </div>
+            <!-- 連携済み -->
+            <div id="lineLinked" hidden>
+              <p class="line-linked-badge">
+                <span class="line-ico" aria-hidden="true">LINE</span>
+                <span>連携済み: <strong id="lineDisplayName"></strong> さん</span>
+              </p>
+              <button type="button" class="line-unlink" id="lineUnlinkBtn">連携を解除 / 別の人として予約</button>
+            </div>
+          </div>
+
+          <!-- 再訪（保存済み）の折りたたみ表示 -->
+          <div class="field known-summary" id="knownSummary" hidden>
+            <div class="known-head">
+              <span class="field-label">ご登録情報</span>
+              <button type="button" class="known-edit" id="knownEditBtn">修正する</button>
+            </div>
+            <p class="known-body" id="knownBody"></p>
+          </div>
+
+          <div id="fieldsBlock">
           <div class="field">
             <label for="f-name">お名前 <span class="req">必須</span></label>
             <input type="text" id="f-name" name="name" autocomplete="name" required />
@@ -107,12 +139,12 @@ const grouped = groupOrder.map((g) => ({
           </div>
 
           <div class="field">
-            <label for="f-email">メールアドレス <span class="req">必須</span></label>
+            <label for="f-email">メールアドレス <span class="req" id="emailReq">必須</span></label>
             <input type="email" id="f-email" name="email" inputmode="email" autocomplete="email" required />
-            <small class="hint">ご予約の確認・確定のご連絡をお送りします。</small>
+            <small class="hint" id="emailHint">ご予約の確認・確定のご連絡をお送りします。</small>
           </div>
 
-          <div class="field">
+          <div class="field" id="contact-field">
             <span class="field-label">ご希望の連絡方法</span>
             <div class="radio-row">
               {CONTACT_METHODS.map((c, i) => (
@@ -122,7 +154,7 @@ const grouped = groupOrder.map((g) => ({
                 </label>
               ))}
             </div>
-            <small class="hint">LINEでの自動連絡は順次対応予定です。当面は確認をメールでお送りします。</small>
+            <small class="hint">LINEで自動連絡をご希望の場合は、上の「LINEで連携」をご利用ください。連携なしの場合はメールでお送りします。</small>
           </div>
 
           <div class="field">
@@ -142,6 +174,7 @@ const grouped = groupOrder.map((g) => ({
             <input type="text" id="f-referrer" name="referrer" />
             <small class="hint">男性のお客様はご紹介制です。ご紹介者のお名前をご記入ください。</small>
           </div>
+          </div><!-- /#fieldsBlock -->
 
           <div class="field">
             <label for="f-note">ご要望（任意）</label>
@@ -152,9 +185,10 @@ const grouped = groupOrder.map((g) => ({
             <label class="check">
               <input type="checkbox" id="f-consent" required />
               <span>
-                入力内容（お名前・連絡先・性別・ご要望）を、予約管理・ご連絡・初回／常連判定の目的で
-                当サロンが利用することに同意します。情報は当サロンの Google（予約カレンダー・顧客台帳）と
-                通知サービス内でのみ管理します。
+                入力内容（お名前・連絡先・性別・ご要望）、およびLINE連携時はLINEのユーザーID・表示名を、
+                予約管理・ご連絡・初回／常連判定の目的で当サロンが利用することに同意します。情報は当サロンの
+                Google（予約カレンダー・顧客台帳）と通知サービス（LINE）内でのみ管理します。連携情報は次回の入力省略のため
+                ご利用の端末内に保存される場合があり、「連携を解除」でいつでも削除できます。
               </span>
             </label>
           </div>
@@ -186,10 +220,17 @@ const grouped = groupOrder.map((g) => ({
       <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
     </footer>
 
-    <script define:vars={{ RESERVE_API, BOOKING_RULES }}>
+    <script define:vars={{ RESERVE_API, BOOKING_RULES, LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_REDIRECT }}>
       const WD = ['日', '月', '火', '水', '木', '金', '土'];
-      const state = { menu: null, date: null, time: null, days: [], availSet: null, calMin: null, calMax: null };
+      const state = { menu: null, date: null, time: null, days: [], availSet: null, calMin: null, calMax: null, lineUserId: '', displayName: '' };
       let calMonth = null; // カレンダーで表示中の月 {y, m(0始まり)}
+      let restoreTarget = null; // LINE 認可リダイレクト復帰時に選び直す日時 {date, time}
+
+      // LINE 連携が使える設定か（チャネルID＋redirect が揃っているとき）
+      const LINE_ENABLED = !!(LINE_LOGIN_CHANNEL_ID && LINE_LOGIN_REDIRECT);
+      const LS_KEY = 'wasyo_line_profile'; // 端末内に保存する連携プロフィール
+      const SS_KEY = 'wasyo_line_oauth';   // 認可リダイレクト中の一時退避（state/nonce/フォーム下書き）
+      const GENDER_LABEL = { female: '女性', male: '男性' };
 
       const $ = (s) => document.querySelector(s);
       const esc = (s) =>
@@ -200,6 +241,191 @@ const grouped = groupOrder.map((g) => ({
         const dt = new Date(y, m - 1, d);
         return `${m}/${d}(${WD[dt.getDay()]})`;
       };
+
+      // ============================================================
+      // LINE 連携（任意）：userId・表示名の取得＋同端末での自動連携
+      // ============================================================
+      const randToken = () => {
+        const a = new Uint8Array(16);
+        crypto.getRandomValues(a);
+        return Array.from(a, (b) => b.toString(16).padStart(2, '0')).join('');
+      };
+
+      // 連携状態に応じてフォーム表示を切り替える
+      function applyLinkState() {
+        if (!LINE_ENABLED) return; // 未設定環境では従来どおり（メール必須・LINE枠非表示）
+        $('#lineLink').hidden = false;
+        const linked = !!state.lineUserId;
+        $('#lineUnlinked').hidden = linked;
+        $('#lineLinked').hidden = !linked;
+        if (linked) $('#lineDisplayName').textContent = state.displayName || 'お客様';
+        // メールは連携時のみ任意
+        const emailInput = $('#f-email');
+        emailInput.required = !linked;
+        $('#emailReq').textContent = linked ? '任意' : '必須';
+        $('#emailHint').textContent = linked
+          ? 'LINEで確認・確定のご連絡をお送りします。メールは任意です。'
+          : 'ご予約の確認・確定のご連絡をお送りします。';
+        // 連携時は連絡方法は LINE 固定（フィールド非表示）
+        $('#contact-field').hidden = linked;
+        if (linked) {
+          const lineRadio = document.querySelector('input[name="contactMethod"][value="line"]');
+          if (lineRadio) lineRadio.checked = true;
+        }
+      }
+
+      // 端末保存の連携プロフィールを読む
+      function loadStoredProfile() {
+        if (!LINE_ENABLED) return null;
+        try {
+          const raw = localStorage.getItem(LS_KEY);
+          return raw ? JSON.parse(raw) : null;
+        } catch (_) { return null; }
+      }
+      // 予約成功時に連携プロフィールを保存（同意チェックは保存しない）
+      function saveProfile(p) {
+        try { localStorage.setItem(LS_KEY, JSON.stringify(p)); } catch (_) {}
+      }
+      // 連携解除：保存を消して未連携に戻す
+      function clearProfile() {
+        try { localStorage.removeItem(LS_KEY); } catch (_) {}
+        state.lineUserId = '';
+        state.displayName = '';
+        $('#knownSummary').hidden = true;
+        $('#fieldsBlock').hidden = false;
+        applyLinkState();
+      }
+
+      // 既知項目を入力欄へ流し込む
+      function fillFields(p) {
+        if (p.name) $('#f-name').value = p.name;
+        if (p.phone) $('#f-phone').value = p.phone;
+        if (p.gender) {
+          const g = document.querySelector('input[name="gender"][value="' + p.gender + '"]');
+          if (g) { g.checked = true; g.dispatchEvent(new Event('change', { bubbles: true })); }
+        }
+        if (p.referrer) $('#f-referrer').value = p.referrer;
+      }
+
+      // 再訪（保存あり）：折りたたみ表示にして「ご要望＋同意」だけで完了できるように
+      function showKnownSummary(p) {
+        const parts = [p.name ? p.name + ' さん' : '', p.phone || '', GENDER_LABEL[p.gender] || ''].filter(Boolean);
+        $('#knownBody').textContent = parts.join(' / ');
+        $('#knownSummary').hidden = false;
+        $('#fieldsBlock').hidden = true;
+      }
+
+      // 連携開始：state/nonce＋入力中フォームを退避して LINE 認可へ
+      function startLineLink() {
+        const oauthState = randToken();
+        const draft = {
+          state: oauthState,
+          nonce: randToken(),
+          menuId: state.menu ? state.menu.id : '',
+          date: state.date || '',
+          time: state.time || '',
+          name: $('#f-name').value.trim(),
+          phone: $('#f-phone').value.trim(),
+          email: $('#f-email').value.trim(),
+          gender: document.querySelector('input[name="gender"]:checked')?.value || '',
+          referrer: $('#f-referrer').value.trim(),
+          note: $('#f-note').value.trim(),
+        };
+        try { sessionStorage.setItem(SS_KEY, JSON.stringify(draft)); } catch (_) {}
+        const url =
+          'https://access.line.me/oauth2/v2.1/authorize?response_type=code' +
+          '&client_id=' + encodeURIComponent(LINE_LOGIN_CHANNEL_ID) +
+          '&redirect_uri=' + encodeURIComponent(LINE_LOGIN_REDIRECT) +
+          '&state=' + encodeURIComponent(oauthState) +
+          '&scope=' + encodeURIComponent('profile openid') +
+          '&nonce=' + encodeURIComponent(draft.nonce);
+        window.location.href = url;
+      }
+
+      // 退避した下書きをフォームへ復元（menu/date/time は availability 取得後に選び直す）
+      function restoreDraft(draft) {
+        $('#f-name').value = draft.name || '';
+        $('#f-phone').value = draft.phone || '';
+        $('#f-email').value = draft.email || '';
+        if (draft.gender) {
+          const g = document.querySelector('input[name="gender"][value="' + draft.gender + '"]');
+          if (g) { g.checked = true; g.dispatchEvent(new Event('change', { bubbles: true })); }
+        }
+        $('#f-referrer').value = draft.referrer || '';
+        $('#f-note').value = draft.note || '';
+        if (draft.menuId) {
+          const mr = document.querySelector('input[name="menu"][value="' + draft.menuId + '"]');
+          if (mr) {
+            restoreTarget = { date: draft.date || '', time: draft.time || '' };
+            mr.checked = true;
+            mr.dispatchEvent(new Event('change', { bubbles: true })); // → loadAvailability（restoreTarget は描画後に適用）
+          }
+        }
+      }
+
+      // 認可からの復帰：?code&?state を検知して userId を取得
+      async function handleLineReturn() {
+        const params = new URLSearchParams(location.search);
+        const code = params.get('code');
+        const retState = params.get('state');
+        if (!code || !retState) return false;
+        let draft = null;
+        try { draft = JSON.parse(sessionStorage.getItem(SS_KEY) || 'null'); } catch (_) {}
+        // URL からは即座に code/state を消す（再読込やプレビュー先読み対策）
+        history.replaceState(null, '', location.pathname);
+        sessionStorage.removeItem(SS_KEY);
+        if (!draft || draft.state !== retState) {
+          $('#step-form').hidden = false;
+          showError('連携の確認に失敗しました（セキュリティ検証）。お手数ですが、もう一度お試しください。');
+          return false;
+        }
+        try {
+          const res = await fetch(RESERVE_API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'lineLogin', code, redirectUri: LINE_LOGIN_REDIRECT }),
+          });
+          const data = await res.json();
+          if (!data.ok || !data.lineUserId) { $('#step-form').hidden = false; showError('LINE連携に失敗しました。お手数ですが、もう一度お試しください。'); return false; }
+          state.lineUserId = data.lineUserId;
+          state.displayName = data.displayName || '';
+          restoreDraft(draft);
+          // 名前未入力なら LINE 表示名で自動補完
+          if (!$('#f-name').value.trim() && state.displayName) $('#f-name').value = state.displayName;
+          applyLinkState();
+          $('#step-form').hidden = false;
+          $('#step-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return true;
+        } catch (e) {
+          $('#step-form').hidden = false;
+          showError('LINE連携の通信に失敗しました。通信環境をご確認のうえ、もう一度お試しください。');
+          return false;
+        }
+      }
+
+      // 初期化（連携復帰 or 端末保存からの自動連携）
+      async function initLine() {
+        if (!LINE_ENABLED) return;
+        $('#lineLink').hidden = false;
+        $('#lineLinkBtn').addEventListener('click', startLineLink);
+        $('#lineUnlinkBtn').addEventListener('click', clearProfile);
+        $('#knownEditBtn').addEventListener('click', () => {
+          $('#knownSummary').hidden = true;
+          $('#fieldsBlock').hidden = false;
+        });
+        const returned = await handleLineReturn();
+        if (returned) return; // 連携直後（保存値はまだ無い）
+        // 再訪：端末に連携情報があれば自動で連携済み扱い＋既知項目を折りたたみ
+        const saved = loadStoredProfile();
+        if (saved && saved.lineUserId) {
+          state.lineUserId = saved.lineUserId;
+          state.displayName = saved.displayName || '';
+          fillFields(saved);
+          if (!$('#f-name').value.trim() && state.displayName) $('#f-name').value = state.displayName;
+          applyLinkState();
+          showKnownSummary(saved);
+        }
+      }
 
       // ---- メニュー選択 ----
       document.querySelectorAll('input[name="menu"]').forEach((r) => {
@@ -273,6 +499,25 @@ const grouped = groupOrder.map((g) => ({
         state.availSet = new Set(state.days.map((d) => d.date));
         state.calMin = state.days[0].date;
         state.calMax = state.days[state.days.length - 1].date;
+        // LINE 認可リダイレクト復帰時：退避していた日付/時刻があれば選び直す
+        if (restoreTarget && restoreTarget.date && state.availSet.has(restoreTarget.date)) {
+          const [ry, rm] = restoreTarget.date.split('-').map(Number);
+          calMonth = { y: ry, m: rm - 1 };
+          state.date = restoreTarget.date;
+          renderCalendar();
+          renderTimes();
+          const day = state.days.find((d) => d.date === restoreTarget.date);
+          if (restoreTarget.time && day && day.times.includes(restoreTarget.time)) {
+            state.time = restoreTarget.time;
+            const tb = $('#timeList').querySelector('.time-btn[data-time="' + restoreTarget.time + '"]');
+            if (tb) tb.classList.add('active');
+            $('#step-form').hidden = false;
+          }
+          updateSummary();
+          restoreTarget = null;
+          return;
+        }
+        restoreTarget = null;
         if (!calMonth) {
           const [y, m] = state.calMin.split('-').map(Number);
           calMonth = { y, m: m - 1 };
@@ -394,7 +639,7 @@ const grouped = groupOrder.map((g) => ({
 
         if (!name) return showError('お名前をご入力ください。');
         if (!phone) return showError('電話番号をご入力ください。');
-        if (!email) return showError('メールアドレスをご入力ください。');
+        if (!state.lineUserId && !email) return showError('メールアドレスをご入力ください。');
         if (!gender) return showError('性別をお選びください。');
         if (gender === 'male' && !referrer) return showError('男性のお客様はご紹介者のお名前が必須です。');
         if (!$('#f-consent').checked) return showError('内容のお取り扱いに同意のうえお進みください。');
@@ -410,6 +655,7 @@ const grouped = groupOrder.map((g) => ({
           date: state.date,
           time: state.time,
           name, phone, email, gender, contactMethod, referrer, note,
+          lineUserId: state.lineUserId || '',
         };
 
         try {
@@ -424,6 +670,10 @@ const grouped = groupOrder.map((g) => ({
             btn.disabled = false;
             btn.textContent = orig;
             return showError(errorMessage(data.error));
+          }
+          // 連携済みなら、次回の入力省略のため端末にプロフィールを保存（同意は保存しない）
+          if (state.lineUserId) {
+            saveProfile({ lineUserId: state.lineUserId, displayName: state.displayName, name, phone, gender, referrer });
           }
           renderDone(data);
         } catch (e) {
@@ -467,6 +717,9 @@ const grouped = groupOrder.map((g) => ({
         done.hidden = false;
         done.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
+
+      // ---- 初期化：LINE 連携（復帰 or 端末保存からの自動連携）----
+      initLine();
     </script>
 
     <style is:global>
@@ -636,6 +889,44 @@ const grouped = groupOrder.map((g) => ({
       }
       .radio-pill input:checked + span { background: var(--c-purple); color: #fff; border-color: var(--c-purple); }
       .radio-pill input:focus-visible + span { outline: 2px solid var(--c-purple-lt); outline-offset: 2px; }
+
+      /* LINE 連携（任意） */
+      .line-link {
+        background: #F4FBF6; border: 1px solid #BfE6CC; border-radius: 10px;
+        padding: .85rem .9rem; margin-bottom: 1.25rem;
+      }
+      .line-ico {
+        display: inline-flex; align-items: center; justify-content: center;
+        background: #06C755; color: #fff; font-size: .68rem; font-weight: 700;
+        border-radius: 5px; padding: .12rem .34rem; letter-spacing: .02em;
+      }
+      .line-btn {
+        display: inline-flex; align-items: center; gap: .5rem; width: 100%;
+        justify-content: center; font-family: inherit; font-size: .98rem; cursor: pointer;
+        background: #06C755; color: #fff; border: none; border-radius: 24px;
+        padding: .75rem 1.1rem; min-height: 48px; transition: background .15s, transform .15s;
+      }
+      .line-btn .line-ico { background: rgba(255,255,255,.22); }
+      .line-btn:hover { background: #05B14C; transform: translateY(-1px); }
+      .line-linked-badge { display: flex; align-items: center; gap: .5rem; font-size: .95rem; }
+      .line-unlink {
+        margin-top: .5rem; font-family: inherit; font-size: .82rem; color: var(--c-muted);
+        background: none; border: none; text-decoration: underline; cursor: pointer; padding: .2rem 0;
+      }
+      .line-unlink:hover { color: var(--c-purple-dk); }
+
+      /* 再訪：ご登録情報の折りたたみ */
+      .known-summary {
+        background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 10px; padding: .8rem .9rem;
+      }
+      .known-head { display: flex; align-items: center; justify-content: space-between; gap: .8rem; }
+      .known-edit {
+        font-family: inherit; font-size: .82rem; color: var(--c-purple-dk);
+        background: none; border: 1px solid var(--c-border); border-radius: 16px;
+        padding: .3rem .8rem; cursor: pointer; min-height: 36px;
+      }
+      .known-edit:hover { border-color: var(--c-purple-lt); }
+      .known-body { margin-top: .4rem; font-size: .95rem; }
 
       .consent .check { display: flex; gap: .55rem; align-items: flex-start; font-weight: normal; font-size: .85rem; }
       .consent .check input { margin-top: .3rem; accent-color: var(--c-purple); flex: none; }

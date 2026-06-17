@@ -145,6 +145,7 @@ function doPost(e) {
       case 'createBooking': return json_(createBooking_(body));
       case 'cancelBooking': return json_(cancelBooking_(body));
       case 'changeBooking': return json_(changeBooking_(body));
+      case 'lineLogin': return json_(lineLogin_(body));
       // 管理（Googleログイン必須）
       case 'getSlotConfig': return json_(requireAdmin_(adminGetSlotConfig_));
       case 'setSlotConfig': return json_(requireAdmin_(function () { return adminSetSlotConfig_(body); }));
@@ -655,6 +656,61 @@ function linePushMessages_(to, messages) {
       muteHttpExceptions: true,
     });
   } catch (err) { console.error('linePushMessages_ failed: ' + err); }
+}
+
+/**
+ * LINE Login（Web OAuth）の認可コードを userId・表示名に交換する。
+ * フロントが authorize で得た code を渡してくる（POST {action:'lineLogin', code, redirectUri}）。
+ *  1) code → token 交換（要 channel id/secret。秘密情報は Script Properties から取得しコードに保持しない）
+ *  2) 返ってきた id_token を verify エンドポイントで検証 → sub(=userId)・name(=表示名) を取り出す
+ * 取得できるのは userId・表示名のみ（電話番号・性別は LINE Login では取得不可）。
+ * 成功: { ok:true, lineUserId, displayName } / 失敗: { ok:false, error:'line_login_failed' }
+ */
+function lineLogin_(b) {
+  var channelId = prop_('LINE_LOGIN_CHANNEL_ID');
+  var channelSecret = prop_('LINE_LOGIN_CHANNEL_SECRET');
+  var code = (b && b.code) || '';
+  var redirectUri = (b && b.redirectUri) || '';
+  if (!channelId || !channelSecret) { console.error('lineLogin_: channel id/secret 未設定'); return { ok: false, error: 'line_login_failed' }; }
+  if (!code || !redirectUri) return { ok: false, error: 'line_login_failed' };
+  try {
+    // 1) 認可コード → トークン交換
+    var tokenRes = UrlFetchApp.fetch('https://api.line.me/oauth2/v2.1/token', {
+      method: 'post',
+      contentType: 'application/x-www-form-urlencoded',
+      payload: {
+        grant_type: 'authorization_code',
+        code: code,
+        redirect_uri: redirectUri,
+        client_id: channelId,
+        client_secret: channelSecret,
+      },
+      muteHttpExceptions: true,
+    });
+    var tokenCode = tokenRes.getResponseCode();
+    var tokenJson = JSON.parse(tokenRes.getContentText() || '{}');
+    if (tokenCode !== 200 || !tokenJson.id_token) {
+      console.error('lineLogin_ token exchange failed: ' + tokenCode + ' ' + tokenRes.getContentText());
+      return { ok: false, error: 'line_login_failed' };
+    }
+    // 2) id_token 検証（client_id を渡し aud を検証させる）→ sub(userId)・name(表示名)
+    var verifyRes = UrlFetchApp.fetch('https://api.line.me/oauth2/v2.1/verify', {
+      method: 'post',
+      contentType: 'application/x-www-form-urlencoded',
+      payload: { id_token: tokenJson.id_token, client_id: channelId },
+      muteHttpExceptions: true,
+    });
+    var verifyCode = verifyRes.getResponseCode();
+    var claims = JSON.parse(verifyRes.getContentText() || '{}');
+    if (verifyCode !== 200 || !claims.sub) {
+      console.error('lineLogin_ verify failed: ' + verifyCode + ' ' + verifyRes.getContentText());
+      return { ok: false, error: 'line_login_failed' };
+    }
+    return { ok: true, lineUserId: claims.sub, displayName: claims.name || '' };
+  } catch (err) {
+    console.error('lineLogin_ failed: ' + err);
+    return { ok: false, error: 'line_login_failed' };
+  }
 }
 
 function sendMail_(to, subject, body) {

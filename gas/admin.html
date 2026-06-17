@@ -102,6 +102,23 @@
     }
     #toast.show { opacity: 1; }
     .spin { color: var(--c-muted); font-size: .9rem; }
+
+    /* スマホ対応（狭幅で入力欄が画面外にはみ出さない・ボタンを押しやすく） */
+    @media (max-width: 600px) {
+      .wrap { padding: 1rem .75rem 3.5rem; }
+      section { padding: .9rem .8rem 1.1rem; }
+      h2 { flex-wrap: wrap; }
+      /* 入力欄は行内で幅いっぱい＋縮小可（min-width:0 でオーバーフロー防止） */
+      input[type="date"], input[type="time"], textarea {
+        flex: 1 1 100%; width: 100%; min-width: 0;
+      }
+      /* 日付＋時刻＋ボタンの行は縦並び寄りにして各要素を押しやすく */
+      .row { gap: .45rem; }
+      .row > button { flex: 1 1 100%; }
+      /* 承認/辞退は横並びのまま均等幅で大きく */
+      .card .actions { gap: .45rem; }
+      .card .actions button { flex: 1 1 0; }
+    }
   </style>
 </head>
 <body>

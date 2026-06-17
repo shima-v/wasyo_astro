@@ -65,13 +65,15 @@
 
 ## E. LINE Login チャネル（dev / prod 各1）— お客様の userId 取得用（任意）
 
-> MVP では「メール既定・LINE連携は任意」。LINE 通知をお客様にも自動送信したい場合に設定。
+> お客様の LINE userId を取得し、LINE 通知の自動送信・新規/常連照合に使う場合に設定。フロント連携の仕様は WBS「開発中仕様（ドラフト）①」を参照（**実装中・確定後に本節も fix**）。
 
-1. LINE Developers → 同プロバイダーに「LINEログイン」チャネルを作成（dev / prod 別）。
-2. **チャネルID / チャネルシークレット** を控える → **LINE_LOGIN_CHANNEL_ID / LINE_LOGIN_CHANNEL_SECRET**(dev/prod)。
-3. 「LINEログイン設定」→ コールバックURLに予約ページURLを登録:
-   - dev: `https://<dev>.pages.dev/reserve/`（ローカル確認用に `http://localhost:4321/reserve/` も）
+1. LINE Developers → **Messaging API チャネルと同一プロバイダー**に「LINEログイン」チャネルを作成（dev / prod 別）。
+   - ⚠️ **重要**: 取得した userId を Messaging API の push に使うには、**LINE Login チャネルと Messaging API チャネルが同一プロバイダー**である必要がある（別プロバイダーだと userId が異なり push できない）。
+2. **チャネルID / チャネルシークレット** を控える → **LINE_LOGIN_CHANNEL_ID / LINE_LOGIN_CHANNEL_SECRET**(dev/prod)。チャネルシークレットは GAS Script Properties のみに保存（フロント/リポジトリに置かない）。
+3. 「LINEログイン設定」→ コールバックURL（**exact match**）に予約ページURLを登録:
+   - dev: `https://wasyo-dev.<account>.workers.dev/reserve/`（ローカル確認用に `http://localhost:4321/reserve/` も両方登録）
    - prod: `https://wwwasyo.com/reserve/`
+4. スコープは `profile`（表示名）＋ `openid`（userId=`sub` を id_token で取得）。メールも欲しい場合は別途「メールアドレス取得権限」を申請（任意）。
 
 ## F. GAS Script Properties（dev / prod それぞれに設定）
 

@@ -116,3 +116,27 @@
 - 一般則: **`<title>` の中身は「単一の式」か「純粋な生テキスト」のどちらかにする**。混在させない。
 
 参考実装: [`../src/pages/index.astro`](../src/pages/index.astro) ほか各ページの `pageTitle` ／ 環境フラグは [`../src/data/config.js`](../src/data/config.js)（`IS_DEV` / `ENV_LABEL`）。
+
+---
+
+## 2026-06-17 — お客様 LINE 連携の落とし穴 **【ドラフト・実装中／完了後 fix】**
+
+> ⚠️ 実装中の備忘ドラフト。LINE Login（userId 取得）＋同端末自動連携の実装に伴うハマりどころ。確定後に検証結果を反映する。
+
+### Login userId を Messaging API の push に使うには「同一プロバイダー」必須
+- LINE の userId は**チャネルではなくプロバイダー単位で同一**。**LINE Login チャネル**で取得した userId を、**Messaging API チャネル**の push（`linePush_`）に渡して通知するには、**両チャネルが同一プロバイダー**でなければならない。
+- 別プロバイダーだと同じ人でも userId が変わり、取得した userId 宛に push しても届かない（無効）。dev/prod それぞれで Login チャネルを Messaging API と同じプロバイダーに作る。
+
+### LINE Login で取れない情報
+- LINE Login（`profile`＋`openid`）で取得できるのは **userId（`sub`）・表示名（`name`）** のみ。**電話番号・性別は取得不可**。メールは「メール取得権限」申請時のみ。
+- → 予約フォームは**氏名は LINE 表示名で自動補完**するが、**電話・性別は手入力で必須のまま**。メールは連携時のみ任意化。
+
+### 再訪自動連携は localStorage（端末内）— 開発者DBではない
+- 「再連携・再入力不要」は **同一端末の localStorage**（`wasyo_line_profile`）に `{lineUserId, displayName, name, phone, gender, referrer}` を保存して実現（**同意チェックは保存しない**＝予約毎に再取得）。
+- これは**お客様自身の端末内**のデータで、開発者が管理するDBに PII を貯めるものではない。必ず**「連携を解除/別の人として予約」**で即削除できる導線を用意する。
+- 再訪時は OAuth を省略し localStorage の `lineUserId` を信頼する設計（userId は推測不能なため許容）。気になる場合は送信時の再検証を将来追加できる形にしておく。
+
+### CSRF: `state` 照合は必須
+- 認可リダイレクトの戻りで `?code`&`?state` を受けたら、開始時に `sessionStorage` 退避した `state` と**必ず照合**し、不一致なら連携を中断する。処理後は `history.replaceState` で URL から `code/state` を消す。
+
+参考: 仕様は [`../WBS.md`](../WBS.md)「開発中仕様（ドラフト）」、設定は [`SETUP.md`](./SETUP.md) E、実装は [`../gas/Code.gs`](../gas/Code.gs)（`lineLogin_`）・[`../src/pages/reserve/index.astro`](../src/pages/reserve/index.astro)。

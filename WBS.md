@@ -3,7 +3,7 @@
 > サロン和笑〜Violane〜 予約システム開発の進捗管理ドキュメント。
 > 設計の詳細は [`RESERVATION_PLAN.md`](./RESERVATION_PLAN.md) を参照。
 
-- **最終更新**: 2026-06-17（承認/辞退リンクのGETプリフェッチ誤発火を修正＝GET確認ページ化／予約UIをカレンダー形式・ローディング強調・URLボタン化）
+- **最終更新**: 2026-06-17（**【実装中・ドラフト】**①お客様LINE userID取得〔LINE Login＋同端末自動連携〕②管理画面スマホレスポンシブ対応 に着手。仕様は下記「開発中仕様（ドラフト）」参照。実装完了後にfix）
 - **作業ブランチ**: `develop`（本番=`main`）
 - **凡例**: `[ ]`未着手 / `[~]`進行中 / `[x]`完了 ／ 担当 🤖=Claude実装 / 👤=ユーザー手動作業
 
@@ -13,7 +13,7 @@
 |---------|------|------|------|
 | Phase 0 | 基盤・環境準備 | 完了 | 19 / 19 |
 | Phase 1 | GAS バックエンド | 完了（dev デプロイ・単体確認済み） | 21 / 21 |
-| Phase 2 | フロント（予約UI） | 実装ほぼ完了（残=LINE Login任意） | 13 / 14 |
+| Phase 2 | フロント（予約UI） | **実装中**（LINE Login連携＋管理画面レスポンシブを追加開発中） | 13 / 16 |
 | Phase 3 | 既存サイト統合・環境切替 | ほぼ完了（残=👤 repo secret 登録） | 5 / 6 |
 | Phase 4 | 検証・リリース | 進行中（e2e ほぼ合格・残=店LINE宛先修正/UI/リリース） | 4 / 8 |
 
@@ -106,8 +106,13 @@
 - [x] 2.3.2 キャンセル UI
 - [x] 2.3.3 変更（再空き枠選択）UI
 
-### 2.4 LINE Login 連携（任意・段階導入可）
-- [ ] 2.4.1 LINE Login フロー（userId 取得→フォームに連携）※MVPは「メール既定」で先送り
+### 2.4 LINE Login 連携（任意）🤖 **【実装中・ドラフト】**
+- [~] 2.4.1 LINE Login フロー（Web OAuth リダイレクト方式で userId・表示名を取得→フォームに連携）
+- [~] 2.4.2 GAS `lineLogin_`（`code`→token交換→`id_token` 検証→`{lineUserId, displayName}`）＋ `doPost` ルート
+- [~] 2.4.3 同端末 localStorage 保存による自動連携（再訪時は LINE 認可スキップ・既知項目折りたたみ・解除導線）
+
+### 2.5 管理画面レスポンシブ（スマホ対応）🤖 **【実装中・ドラフト】**
+- [~] 2.5.1 `gas/admin.html` に `@media (max-width:600px)` を追加（入力欄の幅・行の縦並び・ボタンのタップ領域。配色/トークンは維持）
 
 ---
 
@@ -139,6 +144,54 @@
 ### 4.2 リリース
 - [ ] 4.2.1 `develop`→`main` マージ 👤
 - [ ] 4.2.2 prod 反映確認（wwwasyo.com）👤
+
+---
+
+## 開発中仕様（ドラフト）※2026-06-17 着手・実装完了後に fix
+
+> ⚠️ **本節は実装前のドラフト**。実装の過程で変わり得る。完了時に実装と一致するよう更新（fix）し、本注記を外す。
+
+### ① お客様 LINE userID 取得（LINE Login＋同端末 自動連携）
+
+**目的**: お客様の LINE userId を取得し、(a) お客様への LINE 自動通知、(b) 新規/常連の照合（`line:<userId>` 優先）に使う。GAS 側は受領・通知・照合とも実装済みで、不足は**フロントの取得導線**のみ（WBS 2.4.1 の積み残し）。
+
+**取得できる情報の制約**: LINE Login で取れるのは **userId・表示名（・任意設定でメール）のみ**。**電話番号・性別は取得不可**。
+
+**確定要件**:
+- LINE 連携は**任意**。
+- **氏名** = LINE 表示名で自動補完（編集可）。**電話番号・性別**は手入力で**必須のまま**。男性は紹介者必須を維持。
+- **メール**は連携時のみ**任意**（未連携は従来どおり必須）。
+- **再連携・再入力不要（同一端末）**: 連携情報を端末（localStorage）に保存し、次回訪問時は自動で「連携済み」扱い（LINE 認可をスキップ）。既知項目は折りたたみ表示にし、実質「ご要望＋同意チェックのみ」で予約完了できる。
+
+**表示状態（3種）**:
+1. **未連携**: 従来の全項目＋「LINEで連携（任意）」ボタン。
+2. **連携直後（保存値なし）**: 「連携済み: 〇〇さん」。氏名自動補完・メール任意化・電話/性別は入力（必須）。送信成功時に連携情報を端末保存。
+3. **再訪（localStorage に連携情報あり）**: 自動で連携済み。氏名/電話/性別/紹介者は保存値を流用し折りたたみ表示。アクティブ入力は「ご要望＋同意」のみ。「修正」で編集展開、「連携を解除/別の人として予約」で保存クリア＆未連携へ。
+
+**フロント** [`src/pages/reserve/index.astro`](src/pages/reserve/index.astro):
+- 連携開始: 乱数 `state`/`nonce`＋入力中フォーム状態を `sessionStorage` 退避 → `https://access.line.me/oauth2/v2.1/authorize`（`response_type=code` / `client_id` / `redirect_uri` / `state` / `scope=profile%20openid` / `nonce`）へ遷移。
+- 連携復帰: 読込時に `?code`&`?state` 検知 → `state` 照合（不一致は中断＝CSRF対策）→ フォーム復元 → GAS へ `POST {action:'lineLogin', code, redirectUri}` → `{lineUserId, displayName}` 保持 → 状態② → `history.replaceState` で URL から `code/state` 除去。
+- 端末保存: localStorage キー `wasyo_line_profile` に `{lineUserId, displayName, name, phone, gender, referrer}`（**同意チェックは保存しない**＝予約毎に再取得）。読込時 `lineUserId` あれば認可せず状態③で開始。
+- バリデーション/送信: `lineUserId` ありならメール必須チェックをスキップ（電話・性別は必須維持）。payload に `lineUserId` 追加。同意文に LINE userID・表示名（連携時）の取得/保存目的を追記。
+- 設定読込: [`src/data/config.js`](src/data/config.js) の `LINE_LOGIN_CHANNEL_ID`・`LINE_LOGIN_REDIRECT`（既存エクスポート）。
+
+**GAS** [`gas/Code.gs`](gas/Code.gs):
+- `doPost` switch に `case 'lineLogin': return json_(lineLogin_(body));`（お客様向け区分）。
+- 新規 `lineLogin_(b)`: `UrlFetchApp` で `https://api.line.me/oauth2/v2.1/token`（`grant_type=authorization_code` / `code` / `redirect_uri=b.redirectUri` / `client_id=prop_('LINE_LOGIN_CHANNEL_ID')` / `client_secret=prop_('LINE_LOGIN_CHANNEL_SECRET')`）→ `id_token` を `https://api.line.me/oauth2/v2.1/verify` で検証 → `{ok:true, lineUserId:sub, displayName:name||''}`。失敗時 `{ok:false, error:'line_login_failed'}`（詳細 `console.error`）。秘密情報はコード非保持。
+- `createBooking_`（連絡先判定）は**変更不要**（`lineUserId` で通る）。
+
+**セキュリティ注記**: 再訪時は OAuth を省略し localStorage の `lineUserId` を信頼する。LINE userId は推測不能（`U`+ランダム）のため第三者の値詐称は非現実的＝許容。気になる場合は将来「送信時に再検証」を足せる設計にする。localStorage は**お客様自身の端末内**（開発者DBではない）・解除導線あり。
+
+**👤 設定**: dev GAS Script Properties に `LINE_LOGIN_CHANNEL_ID`/`LINE_LOGIN_CHANNEL_SECRET`（dev値）。dev Login チャネルのコールバックURLに `http://localhost:4321/reserve/` と `https://wasyo-dev.<account>.workers.dev/reserve/` を登録（exact match）。Cloudflare に `PUBLIC_LINE_LOGIN_REDIRECT`（workers.dev /reserve/）。**重要: push に使うため LINE Login チャネルと Messaging API チャネルは同一プロバイダーであること**（別プロバイダーだと取得 userId で push 不可）。
+
+### ② 管理画面のスマホレスポンシブ [`gas/admin.html`](gas/admin.html)
+
+`<style>` に `@media (max-width:600px)`（必要なら 480px も）を追加（配色/トークン維持）:
+- `input[type=date]/[type=time]/textarea` を `width:100%`（または `flex:1 1 100%; min-width:0`）で行内オーバーフロー防止。
+- `.row`（日付＋時刻＋ボタン）はスマホで縦並び寄り＋押しやすい幅。
+- `.card .actions`（承認/辞退）はスマホで各 `flex:1`。
+- `h2`（タイトル＋小ボタン）は `flex-wrap` 許可。`.wrap` 左右 padding 微減。
+- タップ領域（既存 `min-height:40px`）維持。viewport は `doGet` で付与済み＝CSS のみ。
 
 ---
 
