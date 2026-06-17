@@ -466,6 +466,8 @@ const grouped = groupOrder.map((g) => ({
 
     <style is:global>
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      /* display:flex 等を指定した要素でも hidden 属性が確実に効くようにする */
+      [hidden] { display: none !important; }
       :root {
         --c-bg: #FDF2F5;
         --c-surface: #FFFFFF;

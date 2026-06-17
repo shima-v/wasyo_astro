@@ -304,6 +304,8 @@ const tel = '090-9095-6034';
 
     <style is:global>
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      /* display:flex 等を指定した要素でも hidden 属性が確実に効くようにする */
+      [hidden] { display: none !important; }
       :root {
         --c-bg: #FDF2F5; --c-surface: #FFFFFF; --c-ink: #2C1F3A; --c-muted: #7A6080;
         --c-border: #E2D0D8; --c-purple: #8B6080; --c-purple-lt: #B09AB0; --c-purple-dk: #3E2B4A;
