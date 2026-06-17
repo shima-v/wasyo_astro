@@ -65,7 +65,7 @@
 
 ## E. LINE Login チャネル（dev / prod 各1）— お客様の userId 取得用（任意）
 
-> お客様の LINE userId を取得し、LINE 通知の自動送信・新規/常連照合に使う場合に設定。フロント連携の仕様は WBS「開発中仕様（ドラフト）①」を参照（**実装中・確定後に本節も fix**）。
+> お客様の LINE userId を取得し、LINE 通知の自動送信・新規/常連照合に使う場合に設定。フロント連携の仕様は WBS「LINE連携・管理画面レスポンシブ（確定仕様）①」を参照。
 
 1. LINE Developers → **Messaging API チャネルと同一プロバイダー**に「LINEログイン」チャネルを作成（dev / prod 別）。
    - ⚠️ **重要**: 取得した userId を Messaging API の push に使うには、**LINE Login チャネルと Messaging API チャネルが同一プロバイダー**である必要がある（別プロバイダーだと userId が異なり push できない）。

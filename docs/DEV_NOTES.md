@@ -119,9 +119,9 @@
 
 ---
 
-## 2026-06-17 — お客様 LINE 連携の落とし穴 **【ドラフト・実装中／完了後 fix】**
+## 2026-06-17 — お客様 LINE 連携の落とし穴
 
-> ⚠️ 実装中の備忘ドラフト。LINE Login（userId 取得）＋同端末自動連携の実装に伴うハマりどころ。確定後に検証結果を反映する。
+> LINE Login（userId 取得）＋同端末自動連携の実装に伴うハマりどころ（実装・dev 反映済み）。
 
 ### Login userId を Messaging API の push に使うには「同一プロバイダー」必須
 - LINE の userId は**チャネルではなくプロバイダー単位で同一**。**LINE Login チャネル**で取得した userId を、**Messaging API チャネル**の push（`linePush_`）に渡して通知するには、**両チャネルが同一プロバイダー**でなければならない。
@@ -139,4 +139,4 @@
 ### CSRF: `state` 照合は必須
 - 認可リダイレクトの戻りで `?code`&`?state` を受けたら、開始時に `sessionStorage` 退避した `state` と**必ず照合**し、不一致なら連携を中断する。処理後は `history.replaceState` で URL から `code/state` を消す。
 
-参考: 仕様は [`../WBS.md`](../WBS.md)「開発中仕様（ドラフト）」、設定は [`SETUP.md`](./SETUP.md) E、実装は [`../gas/Code.gs`](../gas/Code.gs)（`lineLogin_`）・[`../src/pages/reserve/index.astro`](../src/pages/reserve/index.astro)。
+参考: 仕様は [`../WBS.md`](../WBS.md)「LINE連携・管理画面レスポンシブ（確定仕様）」、設定は [`SETUP.md`](./SETUP.md) E、実装は [`../gas/Code.gs`](../gas/Code.gs)（`lineLogin_`）・[`../src/pages/reserve/index.astro`](../src/pages/reserve/index.astro)。
