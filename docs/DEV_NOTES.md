@@ -95,3 +95,24 @@
   実行ユーザー識別（executeAs）が**別物**であることを思い出す。
 
 参考実装: [`../gas/Code.gs`](../gas/Code.gs)（`requireAdmin_`）。
+
+---
+
+## 2026-06-17 — Astro `<title>` に「式＋生テキスト」を混在させると描画が壊れる
+
+### 症状
+- dev 環境表示のため `<title>{ENV_LABEL}高岡市の…</title>` のように **`<title>` 先頭に式 `{…}` を置き、続けて生テキスト**を書いたところ、
+  ビルド出力で **`<title></title>`（空）になり、タイトル文字列が `</head>` の外（本文先頭）に漏れ出した**。3ページとも同症状。
+
+### 真因
+- `<title>` は HTML の **RCDATA 要素**。Astro コンパイラはこの中の「式＋生テキストの混在」をうまく扱えず、
+  特に**先頭が式**だと要素境界の解釈が崩れて中身が脱落する。
+
+### 対策（実装済み）
+- タイトルは**フロントマターで単一の式として組み立て**、`<title>{pageTitle}</title>` の形にする。
+  ```js
+  const pageTitle = `${ENV_LABEL}ご予約 | ${salonName}`;   // 単一式
+  ```
+- 一般則: **`<title>` の中身は「単一の式」か「純粋な生テキスト」のどちらかにする**。混在させない。
+
+参考実装: [`../src/pages/index.astro`](../src/pages/index.astro) ほか各ページの `pageTitle` ／ 環境フラグは [`../src/data/config.js`](../src/data/config.js)（`IS_DEV` / `ENV_LABEL`）。
