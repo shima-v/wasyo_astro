@@ -77,7 +77,7 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
       <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
     </footer>
 
-    <script define:vars={{ RESERVE_API }}>
+    <script define:vars={{ RESERVE_API, tel }}>
       const WD = ['日', '月', '火', '水', '木', '金', '土'];
       const $ = (s) => document.querySelector(s);
       const params = new URLSearchParams(location.search);
@@ -206,7 +206,7 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
       function renderDates() {
         const dl = $('#dateList');
         if (!state.days.length) {
-          setStatusText('現在ご予約可能な空き枠がありません。', 'err');
+          setStatusText('ご希望の期間にネット予約の空きがありません。受付時間外・定休日（日・祝など）はお電話（' + tel + '）にてご相談ください。', 'err');
           dl.innerHTML = '';
           return;
         }

@@ -14,29 +14,44 @@
 // 設定・定数
 // ============================================================
 
-/** 営業ルール（フロント src/data/config.js の BOOKING_RULES とそろえる） */
+/**
+ * 営業ルール（フロント src/data/config.js の BOOKING_RULES とそろえる）。
+ * windows: ネット予約の「開始時刻」を受け付ける曜日別ウィンドウ（30分刻み・両端を含む）。
+ *          終了時刻は問わない（開始がウィンドウ内なら、施術終了がウィンドウ外でも可）。
+ */
 var RULES = {
-  openTime: '10:00',
-  closeTime: '20:00',
   slotStepMin: 30,
   leadTimeDays: 1, // 当日不可・翌日以降
   maxAdvanceDays: 30,
   cleanupBufferMin: 0,
   cancelDeadlineDays: 1,
+  windows: {
+    mtf: [{ start: '10:00', end: '15:00' }, { start: '17:30', end: '19:00' }], // 月・火・金
+    wt: [{ start: '10:00', end: '15:00' }],                                     // 水・木
+    sat: [{ start: '10:00', end: '19:00' }],                                    // 第2・第4土
+  },
+  tempOpenWindow: [{ start: '10:00', end: '19:00' }], // 臨時営業日（openDates）の既定枠
 };
 
-/** メニュー（src/data/menu.js のミラー）。firstTime は新規(初回)時の上書き。 */
+/** 祝日カレンダー（自動判定）。Script Property `HOLIDAY_CALENDAR_ID` で上書き可。 */
+var DEFAULT_HOLIDAY_CALENDAR_ID = 'ja.japanese#holiday@group.v.calendar.google.com';
+
+/**
+ * メニュー（src/data/menu.js のミラー）。
+ *   durationMin … お客様に見せる施術時間（firstTime は新規(初回)時の上書き）。
+ *   slotMin     … カレンダー占有時間（施術＋待機）。空き枠計算とイベント長に使う。新規/常連で不変。
+ */
 var MENU = {
-  'double-momi-part-oil-70': { name: '全身もみほぐし＋部位オイルケア', durationMin: 70, price: 4300 },
-  'double-momi-full-oil-90': { name: '全身もみほぐし＋全身オイルケア', durationMin: 90, price: 5500 },
-  'simple-momi-30': { name: '全身もみほぐし 30分', durationMin: 30, price: 3300, firstTime: { durationMin: 40, price: 3300 } },
-  'simple-momi-50': { name: '全身もみほぐし 50分', durationMin: 50, price: 4000, firstTime: { durationMin: 60, price: 4000 } },
-  'simple-momi-70': { name: '全身もみほぐし 70分', durationMin: 70, price: 4400 },
-  'simple-momi-100': { name: '全身もみほぐし 100分', durationMin: 100, price: 5500 },
-  'simple-oil-80': { name: '全身オイルケア', durationMin: 80, price: 6600 },
-  'petit-foot-30': { name: 'フットケア', durationMin: 30, price: 3300 },
-  'petit-hand-30': { name: 'ハンドケア', durationMin: 30, price: 3300 },
-  'petit-head-30': { name: 'ヘッド&リフトアップ（顎ほぐし）', durationMin: 30, price: 3500 },
+  'double-momi-part-oil-70': { name: '全身もみほぐし＋部位オイルケア', durationMin: 70, slotMin: 120, price: 4300 },
+  'double-momi-full-oil-90': { name: '全身もみほぐし＋全身オイルケア', durationMin: 90, slotMin: 150, price: 5500 },
+  'simple-momi-30': { name: '全身もみほぐし 30分', durationMin: 30, slotMin: 60, price: 3300, firstTime: { durationMin: 40, price: 3300 } },
+  'simple-momi-50': { name: '全身もみほぐし 50分', durationMin: 50, slotMin: 120, price: 4000, firstTime: { durationMin: 60, price: 4000 } },
+  'simple-momi-70': { name: '全身もみほぐし 70分', durationMin: 70, slotMin: 120, price: 4400 },
+  'simple-momi-100': { name: '全身もみほぐし 100分', durationMin: 100, slotMin: 150, price: 5500 },
+  'simple-oil-80': { name: '全身オイルケア', durationMin: 80, slotMin: 150, price: 6600 },
+  'petit-foot-30': { name: 'フットケア', durationMin: 30, slotMin: 60, price: 3300 },
+  'petit-hand-30': { name: 'ハンドケア', durationMin: 30, slotMin: 60, price: 3300 },
+  'petit-head-30': { name: 'ヘッド&リフトアップ（顎ほぐし）', durationMin: 30, slotMin: 60, price: 3500 },
 };
 
 var TZ = 'Asia/Tokyo';
@@ -199,7 +214,8 @@ function getAvailability_(p) {
   var menu = MENU[p.menuId];
   if (!menu) return { ok: false, error: 'invalid_menu' };
   var isFirst = String(p.isFirstTime || '') === '1';
-  var dur = effectiveMenu_(menu, isFirst).durationMin;
+  var dur = effectiveMenu_(menu, isFirst).durationMin; // 表示用の施術時間
+  var slot = slotMin_(menu);                            // カレンダー占有時間
 
   var today = startOfDay_(new Date());
   var from = p.from ? parseDate_(p.from) : addDays_(today, RULES.leadTimeDays);
@@ -211,6 +227,7 @@ function getAvailability_(p) {
 
   var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
   var config = readSlotConfig_();
+  var holidaySet = holidayDateSet_(from, to); // 祝日（自動判定）を一度だけ取得
   var days = [];
 
   // 既存予約は範囲全体を一度だけ取得し日付ごとにバケツ分け（getEvents 呼び出しを日数分→1回へ削減）
@@ -224,46 +241,90 @@ function getAvailability_(p) {
 
   for (var d = new Date(from); d <= to; d = addDays_(d, 1)) {
     var dateStr = fmt_(d, 'yyyy-MM-dd');
-    if (!isOpenDay_(d, config)) continue;
+    if (!isOpenDay_(d, config, holidaySet)) continue;
     var busy = busyByDate[dateStr] || [];
     var times = [];
-    var candidates = candidateStarts_(d, dur);
+    var candidates = candidateStarts_(d, config, holidaySet);
     for (var i = 0; i < candidates.length; i++) {
       var s = candidates[i];
-      var slotEnd = new Date(s.getTime() + dur * 60000);
+      var slotEnd = new Date(s.getTime() + slot * 60000); // 占有時間で重複判定
       if (isClosedSlot_(dateStr, fmt_(s, 'HH:mm'), config)) continue;
       if (overlapsBusy_(s, slotEnd, busy)) continue;
       times.push(fmt_(s, 'HH:mm'));
     }
     if (times.length) days.push({ date: dateStr, times: times });
   }
-  return { ok: true, menuId: p.menuId, durationMin: dur, isFirstTime: isFirst, days: days };
+  return { ok: true, menuId: p.menuId, durationMin: dur, slotMin: slot, isFirstTime: isFirst, days: days };
 }
 
-/** その日が営業日か（曜日ルール＋手動 closedDates） */
-function isOpenDay_(d, config) {
+/**
+ * その日のネット予約「受付ウィンドウ」（開始可能な時間帯）を返す。受付不可なら []。
+ *   closedDates → 終日クローズ / openDates → 臨時営業（既定枠）
+ *   祝日・日曜・第1/3/5土 → 休 / 月火金・水木・第2/4土 → 曜日別ウィンドウ
+ * @param {Object} holidaySet { 'yyyy-MM-dd': true } 祝日集合（省略可）
+ */
+function receptionWindows_(d, config, holidaySet) {
   var dateStr = fmt_(d, 'yyyy-MM-dd');
-  if (config.closedDates && config.closedDates.indexOf(dateStr) >= 0) return false;
-  if (config.openDates && config.openDates.indexOf(dateStr) >= 0) return true; // 臨時営業
+  if (config.closedDates && config.closedDates.indexOf(dateStr) >= 0) return [];
+  if (config.openDates && config.openDates.indexOf(dateStr) >= 0) return RULES.tempOpenWindow; // 臨時営業
+  if (holidaySet && holidaySet[dateStr]) return []; // 祝日休
   var dow = d.getDay(); // 0=日, 6=土
-  if (dow === 0) return false; // 日曜休
+  if (dow === 0) return []; // 日曜休
   if (dow === 6) {
     var nth = Math.ceil(d.getDate() / 7);
-    return nth === 2 || nth === 4; // 第2・第4土のみ営業
+    return (nth === 2 || nth === 4) ? RULES.windows.sat : []; // 第2・第4土のみ
   }
-  return true; // 月〜金
+  if (dow === 1 || dow === 2 || dow === 5) return RULES.windows.mtf; // 月・火・金
+  if (dow === 3 || dow === 4) return RULES.windows.wt;               // 水・木
+  return [];
 }
 
-/** 30分刻みの開始候補（営業時間内で施術が閉店までに終わるもの） */
-function candidateStarts_(d, dur) {
-  var open = atTime_(d, RULES.openTime);
-  var close = atTime_(d, RULES.closeTime);
-  var lastStart = new Date(close.getTime() - dur * 60000);
+/** その日がネット予約を受け付ける日か（受付ウィンドウが1つでもあるか） */
+function isOpenDay_(d, config, holidaySet) {
+  return receptionWindows_(d, config, holidaySet).length > 0;
+}
+
+/**
+ * 30分刻みの開始候補。各受付ウィンドウの start〜end（両端を含む）を列挙する。
+ * 終了時刻は問わない（施術がウィンドウ外まで延びても、開始がウィンドウ内なら受付可）。
+ */
+function candidateStarts_(d, config, holidaySet) {
+  var wins = receptionWindows_(d, config, holidaySet);
   var out = [];
-  for (var t = new Date(open); t <= lastStart; t = new Date(t.getTime() + RULES.slotStepMin * 60000)) {
-    out.push(new Date(t));
+  var step = RULES.slotStepMin * 60000;
+  for (var w = 0; w < wins.length; w++) {
+    var s = atTime_(d, wins[w].start), e = atTime_(d, wins[w].end);
+    for (var t = new Date(s); t <= e; t = new Date(t.getTime() + step)) out.push(new Date(t));
   }
   return out;
+}
+
+/** 開始時刻 hhmm がその日の受付ウィンドウ内の候補に含まれるか（サーバ再検証用） */
+function isValidStart_(d, hhmm, config, holidaySet) {
+  var starts = candidateStarts_(d, config, holidaySet);
+  for (var i = 0; i < starts.length; i++) {
+    if (fmt_(starts[i], 'HH:mm') === hhmm) return true;
+  }
+  return false;
+}
+
+/**
+ * 範囲内の祝日（自動判定）を { 'yyyy-MM-dd': true } で返す。
+ * 祝日カレンダーが購読されていない/例外時は空（=祝日なし扱い）でフォールバックし警告ログを出す。
+ */
+function holidayDateSet_(from, to) {
+  var set = {};
+  var id = prop_('HOLIDAY_CALENDAR_ID') || DEFAULT_HOLIDAY_CALENDAR_ID;
+  try {
+    var hcal = CalendarApp.getCalendarById(id);
+    if (!hcal) { console.warn('holiday calendar not found: ' + id + '（GAS実行アカウントで「日本の祝日」を購読してください）'); return set; }
+    hcal.getEvents(startOfDay_(from), addDays_(startOfDay_(to), 1)).forEach(function (ev) {
+      set[fmt_(ev.getStartTime(), 'yyyy-MM-dd')] = true;
+    });
+  } catch (err) {
+    console.warn('holidayDateSet_ failed: ' + err);
+  }
+  return set;
 }
 
 function overlapsBusy_(s, e, busy) {
@@ -301,7 +362,8 @@ function createBooking_(b) {
   var ledgerKey = ledgerKey_(b);
   var isFirst = ledgerKey ? !ledgerLookup_(ledgerKey) : true;
   var eff = effectiveMenu_(menu, isFirst);
-  var end = new Date(start.getTime() + eff.durationMin * 60000);
+  var slot = slotMin_(menu);
+  var end = new Date(start.getTime() + slot * 60000); // イベント長＝占有時間
 
   var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
   if (!cal) return { ok: false, error: 'calendar_not_configured' };
@@ -310,9 +372,12 @@ function createBooking_(b) {
   lock.waitLock(15000);
   var token, ev;
   try {
-    // 直前再検証（重複・休枠）
+    // 直前再検証（受付日・開始時刻・休枠・重複）。フロント値は信用しない。
     var config = readSlotConfig_();
-    if (!isOpenDay_(start, config) || isClosedSlot_(b.date, b.time, config)) {
+    var holidaySet = holidayDateSet_(start, start);
+    if (!isOpenDay_(start, config, holidaySet) ||
+        !isValidStart_(start, b.time, config, holidaySet) ||
+        isClosedSlot_(b.date, b.time, config)) {
       return { ok: false, error: 'slot_closed' };
     }
     var busy = cal.getEvents(startOfDay_(start), addDays_(startOfDay_(start), 1)).map(function (e) {
@@ -327,7 +392,8 @@ function createBooking_(b) {
       name: b.name, phone: b.phone || '', email: b.email || '',
       gender: b.gender || '', referrer: b.referrer || '',
       lineUserId: b.lineUserId || '', isFirstTime: String(isFirst),
-      price: String(eff.price), note: b.note || '',
+      price: String(eff.price), durationMin: String(eff.durationMin), slotMin: String(slot),
+      note: b.note || '',
     });
     try { ev.setColor(CalendarApp.EventColor.ORANGE); } catch (_) {}
   } finally {
@@ -418,7 +484,7 @@ function decide_(token, approve, message) {
     try { ev.setColor(CalendarApp.EventColor.GREEN); } catch (_) {}
     ledgerUpsert_(props, ev.getStartTime());
     notifyCustomerProps_(props, '【ご予約が確定しました】\n' +
-      bookingSummary_(menu, ev.getStartTime(), { durationMin: durationMin_(ev), price: Number(props.price || 0) }, props.isFirstTime === 'true') +
+      bookingSummary_(menu, ev.getStartTime(), { durationMin: displayDurationMin_(props, ev), price: Number(props.price || 0) }, props.isFirstTime === 'true') +
       '\nご来店をお待ちしております。');
   } else {
     var msg = (message && String(message).trim()) ? String(message).trim() : DECLINE_DEFAULT_MSG;
@@ -453,21 +519,30 @@ function changeBooking_(b) {
   var menu = MENU[props.menuId];
   if (!menu) return { ok: false, error: 'invalid_menu' };
   var eff = effectiveMenu_(menu, props.isFirstTime === 'true');
+  var slot = slotMin_(menu);
   var start = atTime_(parseDate_(b.date), b.time);
-  var end = new Date(start.getTime() + eff.durationMin * 60000);
+  var end = new Date(start.getTime() + slot * 60000); // イベント長＝占有時間
 
   var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
   var lock = LockService.getScriptLock();
   lock.waitLock(15000);
   try {
+    // 受付日・開始時刻・休枠をサーバ側で再検証
+    var config = readSlotConfig_();
+    var holidaySet = holidayDateSet_(start, start);
+    if (!isOpenDay_(start, config, holidaySet) ||
+        !isValidStart_(start, b.time, config, holidaySet) ||
+        isClosedSlot_(b.date, b.time, config)) {
+      return { ok: false, error: 'slot_closed' };
+    }
     var busy = cal.getEvents(startOfDay_(start), addDays_(startOfDay_(start), 1)).filter(function (e) {
       return e.getId() !== found.event.getId();
     }).map(function (e) { return { start: e.getStartTime().getTime(), end: e.getEndTime().getTime() }; });
     if (overlapsBusy_(start, end, busy)) return { ok: false, error: 'slot_taken' };
     found.event.setTime(start, end);
-    // 変更後は再承認のため仮に戻す
+    // 変更後は再承認のため仮に戻す（占有変更に備え durationMin/slotMin タグも整える）
     found.event.setTitle('【仮】' + menu.name + ' / ' + props.name);
-    setEventProps_(found.event, { status: STATUS.PENDING });
+    setEventProps_(found.event, { status: STATUS.PENDING, durationMin: String(eff.durationMin), slotMin: String(slot) });
     try { found.event.setColor(CalendarApp.EventColor.ORANGE); } catch (_) {}
   } finally {
     lock.releaseLock();
@@ -485,7 +560,7 @@ function getBookingByToken_(token) {
     ok: true, menuId: p.menuId, menuName: menu.name, name: p.name, status: p.status,
     isFirstTime: p.isFirstTime === 'true',
     date: fmt_(found.event.getStartTime(), 'yyyy-MM-dd'), time: fmt_(found.event.getStartTime(), 'HH:mm'),
-    durationMin: durationMin_(found.event), price: Number(p.price || 0),
+    durationMin: displayDurationMin_(p, found.event), price: Number(p.price || 0),
     canCancel: withinCancelDeadline_(found.event.getStartTime()),
   };
 }
@@ -769,7 +844,7 @@ function setEventProps_(ev, obj) {
 }
 function getEventProp_(ev, key) { return ev.getTag(key) || ''; }
 function getEventProps_(ev) {
-  var keys = ['token', 'status', 'menuId', 'name', 'phone', 'email', 'gender', 'referrer', 'lineUserId', 'isFirstTime', 'price', 'note'];
+  var keys = ['token', 'status', 'menuId', 'name', 'phone', 'email', 'gender', 'referrer', 'lineUserId', 'isFirstTime', 'price', 'durationMin', 'slotMin', 'note'];
   var o = {};
   keys.forEach(function (k) { o[k] = ev.getTag(k) || ''; });
   return o;
@@ -792,9 +867,22 @@ function durationMin_(ev) {
   return Math.round((ev.getEndTime().getTime() - ev.getStartTime().getTime()) / 60000);
 }
 
+/**
+ * お客様表示用の「施術時間」。イベント長は占有時間(slotMin)なので durationMin_(ev) は使えない。
+ * 予約作成時に保存した durationMin タグを優先し、無い旧イベントはイベント長にフォールバック。
+ */
+function displayDurationMin_(props, ev) {
+  return Number(props.durationMin) || durationMin_(ev);
+}
+
 function effectiveMenu_(menu, isFirst) {
   if (isFirst && menu.firstTime) return { durationMin: menu.firstTime.durationMin, price: menu.firstTime.price };
   return { durationMin: menu.durationMin, price: menu.price };
+}
+
+/** カレンダー占有時間（分）。slotMin 未定義のメニューは施術時間にフォールバック。 */
+function slotMin_(menu) {
+  return Number(menu.slotMin) || menu.durationMin;
 }
 
 function readSlotConfig_() {

@@ -150,3 +150,25 @@
 - 注意: `localStorage` も**オリジン（scheme+host+port）単位**。**プレビューURL**（版別 `*-wasyo-dev.<account>.workers.dev`）で開始し正規URLへ戻ると別オリジンで共有されず再発する。**開始ホスト＝redirect_uri のホスト**（正規 workers.dev）で操作すること。
 
 参考: 仕様は [`../WBS.md`](../WBS.md)「LINE連携・管理画面レスポンシブ（確定仕様）」、設定は [`SETUP.md`](./SETUP.md) E、実装は [`../gas/Code.gs`](../gas/Code.gs)（`lineLogin_`）・[`../src/pages/reserve/index.astro`](../src/pages/reserve/index.astro)。
+
+---
+
+## 2026-06-18 — LINE連携ボタンで `400 Bad Request`（developing status）
+
+### 症状
+- お客様が「LINEで連携」を押すと `access.line.me` で **400 Bad Request**。
+- メッセージ: `This channel is now developing status. User need to have developer role.`
+- 開発者本人（チャネルに紐づくLINEアカウント）では連携できるのに、一般のお客様だけ失敗する。
+
+### 真因
+- **LINEログインチャネルのステータスが「Developing（開発中）」**のままだった。Developing 中は、チャネル/プロバイダーに **開発者ロール（Admin / Member / Tester）** を持つLINEユーザーしか認可（ログイン）できない仕様。一般ユーザーは 400 になる。
+- フロントの authorize URL 生成（`startLineLink`）・スコープ `profile openid`・`redirect_uri` は正常。**コード側の不具合ではない**。
+
+### 対策（運用・LINE Developers コンソール）
+- 該当の **LINEログインチャネル** を開き、チャネル名の下の **ステータス トグルを「Developing」→「Published（公開）」** に切り替える。
+- 公開前に「LINEログイン設定」の**コールバックURLが exact match**（末尾スラッシュまで）・スコープが `profile`＋`openid` かを確認（[`SETUP.md`](./SETUP.md) E）。
+- dev/prod で**別のログインチャネル**を使うため、**それぞれ公開状態を確認**する。
+- dev だけ先に検証したい段階では、チャネルの「ロール」に検証者を **Tester** 追加すれば Developing のまま連携可。ただし本番のお客様向けには **Publish 必須**。
+
+### 一般教訓
+- LINE Login は **「Developing＝開発者ロール限定」「Published＝一般公開」**。連携が「自分だけ通る／お客様だけ 400」のときは、まずチャネルの**公開ステータス**を疑う（コード以前の設定）。

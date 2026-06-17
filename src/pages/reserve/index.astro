@@ -48,8 +48,14 @@ const grouped = groupOrder.map((g) => ({
         ご希望のメニューと日時をお選びください。お申し込みは「仮予約」です。サロンが内容を確認のうえ、確定のご連絡をいたします。
       </p>
       <p class="note-today">
-        ※ 当日のご予約はお電話（<a href={`tel:${tel}`}>{tel}</a>）で承ります。オンラインは翌日以降・1ヶ月先までです。
+        ※ ネット予約は受付時間内の「開始時刻」をお選びいただけます（施術終了が受付時間を過ぎても承ります）。当日のご予約はお電話（<a href={`tel:${tel}`}>{tel}</a>）で承ります。オンラインは翌日以降・1ヶ月先までです。
       </p>
+      <ul class="hours" aria-label="ネット予約の受付時間">
+        <li><span class="hours-day">月・火・金</span><span class="hours-time">10:00〜15:00 / 17:30〜19:00</span></li>
+        <li><span class="hours-day">水・木</span><span class="hours-time">10:00〜15:00</span></li>
+        <li><span class="hours-day">土（第2・第4のみ）</span><span class="hours-time">10:00〜19:00</span></li>
+        <li class="closed"><span class="hours-day">日・祝</span><span class="hours-time">お休み（緊急対応はお電話にてお問い合わせください）</span></li>
+      </ul>
 
       <!-- STEP 1: メニュー -->
       <section class="step">
@@ -220,7 +226,7 @@ const grouped = groupOrder.map((g) => ({
       <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
     </footer>
 
-    <script define:vars={{ RESERVE_API, BOOKING_RULES, LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_REDIRECT }}>
+    <script define:vars={{ RESERVE_API, BOOKING_RULES, LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_REDIRECT, tel }}>
       const WD = ['日', '月', '火', '水', '木', '金', '土'];
       const state = { menu: null, date: null, time: null, days: [], availSet: null, calMin: null, calMax: null, lineUserId: '', displayName: '' };
       let calMonth = null; // カレンダーで表示中の月 {y, m(0始まり)}
@@ -474,7 +480,7 @@ const grouped = groupOrder.map((g) => ({
           $('#dateList').innerHTML = '';
           return;
         }
-        // firstTime 候補メニューは長い所要時間でも収まる枠だけ表示する（料金は同額）
+        // 占有時間(slotMin)は初回/常連で不変。isFirstTime は応答の表示用所要時間にのみ影響する。
         const isFirst = state.menu.hasFirst ? '1' : '0';
         const url = `${RESERVE_API}?action=availability&menuId=${encodeURIComponent(state.menu.id)}&isFirstTime=${isFirst}`;
         try {
@@ -492,7 +498,7 @@ const grouped = groupOrder.map((g) => ({
       function renderDates() {
         const dl = $('#dateList');
         if (!state.days.length) {
-          setStatusText('現在ご予約可能な空き枠がありません。お手数ですがお電話でお問い合わせください。', 'slot-empty');
+          setStatusText('ご希望の期間にネット予約の空きがありません。受付時間外・定休日（日・祝など）はネット予約は受け付けておりません。お電話（' + tel + '）にて対応いたします。', 'slot-empty');
           dl.innerHTML = '';
           $('#timeList').innerHTML = '';
           return;
@@ -767,8 +773,18 @@ const grouped = groupOrder.map((g) => ({
       .note-today {
         font-size: .85rem; color: var(--c-muted);
         background: #fff; border: 1px solid var(--c-border); border-radius: 10px;
-        padding: .6rem .8rem; margin-bottom: 1.5rem;
+        padding: .6rem .8rem; margin-bottom: .75rem;
       }
+      .hours {
+        list-style: none; font-size: .85rem;
+        background: #fff; border: 1px solid var(--c-border); border-radius: 10px;
+        padding: .5rem .8rem; margin-bottom: 1.5rem;
+      }
+      .hours li { display: flex; gap: .8rem; padding: .25rem 0; }
+      .hours li + li { border-top: 1px dashed var(--c-border); }
+      .hours-day { flex: none; min-width: 9.5em; font-weight: 600; color: var(--c-ink); }
+      .hours-time { color: var(--c-muted); }
+      .hours li.closed .hours-day, .hours li.closed .hours-time { color: #8E2230; }
 
       .step {
         background: var(--c-surface);
