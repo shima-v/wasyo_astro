@@ -119,7 +119,7 @@ node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ### dev（ローカル）
 `.env.development.example` を `.env.development` にコピーして実値を設定:
 ```
-PUBLIC_ENV="development"   # dev のみ。サイト右下に開発バッジ＋タブに【開発】を表示
+PUBLIC_ENV="development"   # dev のみ。サイト右上に開発リボン＋タブに【開発】を表示
 PUBLIC_RESERVE_API="<dev /exec URL>"
 PUBLIC_LINE_LOGIN_CHANNEL_ID="<dev login channel id 任意>"
 PUBLIC_LINE_LOGIN_REDIRECT="http://localhost:4321/reserve/"
