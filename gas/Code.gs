@@ -42,6 +42,9 @@ var MENU = {
 var TZ = 'Asia/Tokyo';
 var STATUS = { PENDING: 'pending', CONFIRMED: 'confirmed' };
 
+/** 辞退時にお客様へ送る既定メッセージ（確認ページでオーナーが編集可能） */
+var DECLINE_DEFAULT_MSG = '申し訳ございませんが、今回はご希望の日時でご予約をお受けできませんでした。\nお手数ですが、別の日時で改めてお申し込みいただけますと幸いです。';
+
 function prop_(key) {
   return PropertiesService.getScriptProperties().getProperty(key) || '';
 }
@@ -360,38 +363,46 @@ function renderDecisionPage_(p, approve) {
   var statusNote = b.status === STATUS.CONFIRMED ? '<p style="color:#2e7d32">※この予約はすでに「確定」済みです。</p>' : '';
   var summary = esc_(b.name) + ' 様' + (b.isFirstTime ? '（新規）' : '（常連）') + '<br>' +
     esc_(b.menuName) + '<br>' + b.date + ' ' + b.time + '〜（' + b.durationMin + '分） ¥' + b.price;
+  // 辞退時はお客様へ送るメッセージを入力できる（既定文をプリセット）
+  var declineBox = approve ? '' : (
+    '<label for="declineMsg" style="display:block;text-align:left;font-size:.9rem;margin:.2rem 0 .35rem">お客様へのメッセージ（このまま送信／編集可）</label>' +
+    '<textarea id="declineMsg" rows="4" style="width:100%;font-family:inherit;font-size:1rem;padding:.6rem .7rem;border:1px solid #E2D0D8;border-radius:8px;box-sizing:border-box">' +
+    esc_(DECLINE_DEFAULT_MSG) + '</textarea>'
+  );
   var page = '' +
     '<h2 style="font-size:1.1rem;margin:0 0 .5rem">予約を' + act + 'しますか？</h2>' +
     statusNote +
     '<div style="background:#f6f3f6;border-radius:10px;padding:1rem;margin:1rem 0;text-align:left">' + summary + '</div>' +
-    '<button id="go" style="width:100%;min-height:48px;border:0;border-radius:24px;color:#fff;background:' + color + ';font-size:1rem;cursor:pointer">' + act + 'する</button>' +
+    declineBox +
+    '<button id="go" style="width:100%;min-height:48px;margin-top:1rem;border:0;border-radius:24px;color:#fff;background:' + color + ';font-size:1rem;cursor:pointer">' + act + 'する</button>' +
     '<p id="msg" style="color:#666;margin-top:1rem;min-height:1.2em"></p>' +
     '<script>' +
     'var T=' + JSON.stringify(p.token) + ',S=' + JSON.stringify(p.sig) + ',A=' + (approve ? 'true' : 'false') + ';' +
     'document.getElementById("go").onclick=function(){' +
+    'var box=document.getElementById("declineMsg");var MSG=box?box.value:"";' +
     'this.disabled=true;this.style.opacity=.5;this.textContent="処理中…";' +
     'google.script.run.withSuccessHandler(function(r){' +
     'var m=document.getElementById("msg");' +
-    'if(r&&r.ok){m.innerHTML="<b>' + act + 'しました。</b>お客様へ通知済みです。";document.getElementById("go").style.display="none";}' +
+    'if(r&&r.ok){m.innerHTML="<b>' + act + 'しました。</b>お客様へ通知済みです。";document.getElementById("go").style.display="none";if(box)box.disabled=true;}' +
     'else{m.textContent="エラー: "+((r&&r.error)||"unknown");}' +
-    '}).withFailureHandler(function(e){document.getElementById("msg").textContent="通信エラー: "+e;}).decideBySig(T,S,A);' +
+    '}).withFailureHandler(function(e){document.getElementById("msg").textContent="通信エラー: "+e;}).decideBySig(T,S,A,MSG);' +
     '};' +
     '</script>';
   return html_(page);
 }
 
 /** 確認ページのボタン（google.script.run）から呼ばれる。署名検証のうえ確定/辞退を実行。 */
-function decideBySig(token, sig, approve) {
+function decideBySig(token, sig, approve, message) {
   if (!verifySig_('decision:' + token, sig)) return { ok: false, error: 'bad_signature' };
-  return decide_(token, !!approve);
+  return decide_(token, !!approve, message);
 }
 
 /** 管理画面経由（POST・要Googleログイン） */
 function adminDecision_(b) {
-  return decide_(b.token, !!b.approve);
+  return decide_(b.token, !!b.approve, b.message);
 }
 
-function decide_(token, approve) {
+function decide_(token, approve, message) {
   var found = findEventByToken_(token);
   if (!found) return { ok: false, error: 'not_found' };
   var ev = found.event, props = found.props;
@@ -405,7 +416,8 @@ function decide_(token, approve) {
       bookingSummary_(menu, ev.getStartTime(), { durationMin: durationMin_(ev), price: Number(props.price || 0) }, props.isFirstTime === 'true') +
       '\nご来店をお待ちしております。');
   } else {
-    notifyCustomerProps_(props, '【ご予約を承れませんでした】\n申し訳ございませんが、今回はご予約をお受けできませんでした。詳しくはお問い合わせください。');
+    var msg = (message && String(message).trim()) ? String(message).trim() : DECLINE_DEFAULT_MSG;
+    notifyCustomerProps_(props, '【ご予約について】\n' + msg);
     ev.deleteEvent();
   }
   return { ok: true, status: approve ? STATUS.CONFIRMED : 'declined' };
@@ -645,7 +657,30 @@ function sendMail_(to, subject, body) {
   // dev は ENV_LABEL を件名・本文の先頭に付けて本番メールと区別する（prod はキー未登録＝無印）
   var label = prop_('ENV_LABEL');
   if (label) { subject = label + ' ' + subject; body = label + '\n' + body; }
-  try { MailApp.sendEmail(to, subject, body); } catch (err) { console.error('sendMail_ failed: ' + err); }
+  try {
+    // プレーン本文をフォールバックに残しつつ HTML メールも送る（URL単独行はボタン化）
+    MailApp.sendEmail(to, subject, body, { htmlBody: mailHtml_(body), name: 'サロン和笑〜Violane〜' });
+  } catch (err) { console.error('sendMail_ failed: ' + err); }
+}
+
+/** プレーン本文から簡易HTMLメールを生成する。URL単独行はボタン化する。 */
+function mailHtml_(text) {
+  var rows = '';
+  String(text).split('\n').forEach(function (ln) {
+    var t = ln.trim();
+    if (/^https?:\/\/\S+$/.test(t)) {
+      rows += '<p style="text-align:center;margin:18px 0">' +
+        '<a href="' + esc_(t) + '" style="display:inline-block;background:#8B6080;color:#ffffff;' +
+        'text-decoration:none;border-radius:24px;padding:13px 26px;font-size:15px">予約内容を確認・変更する</a></p>';
+    } else if (t === '') {
+      rows += '<div style="height:8px"></div>';
+    } else {
+      rows += '<div>' + esc_(ln) + '</div>';
+    }
+  });
+  return '<div style="font-family:\'Hiragino Mincho ProN\',\'YuMincho\',serif;background:#FDF2F5;padding:22px;color:#2C1F3A;line-height:1.9">' +
+    '<div style="max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #E2D0D8;border-radius:12px;padding:24px">' + rows + '</div>' +
+    '<p style="max-width:520px;margin:14px auto 0;text-align:center;color:#7A6080;font-size:12px">サロン和笑〜Violane〜</p></div>';
 }
 
 function bookingSummary_(menu, start, eff, isFirst) {
