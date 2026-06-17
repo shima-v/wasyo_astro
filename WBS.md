@@ -169,7 +169,7 @@
 3. **再訪（localStorage に連携情報あり）**: 自動で連携済み。氏名/電話/性別/紹介者は保存値を流用し折りたたみ表示。アクティブ入力は「ご要望＋同意」のみ。「修正」で編集展開、「連携を解除/別の人として予約」で保存クリア＆未連携へ。
 
 **フロント** [`src/pages/reserve/index.astro`](src/pages/reserve/index.astro):
-- 連携開始: 乱数 `state`/`nonce`＋入力中フォーム状態を `sessionStorage` 退避 → `https://access.line.me/oauth2/v2.1/authorize`（`response_type=code` / `client_id` / `redirect_uri` / `state` / `scope=profile%20openid` / `nonce`）へ遷移。
+- 連携開始: 乱数 `state`/`nonce`＋入力中フォーム状態を `localStorage`（キー `wasyo_line_oauth`・復帰時に必ず削除）へ退避 → `https://access.line.me/oauth2/v2.1/authorize`（`response_type=code` / `client_id` / `redirect_uri` / `state` / `scope=profile%20openid` / `nonce`）へ遷移。※`sessionStorage` だと「認可開始タブ」と「LINEから戻るタブ/アプリ内ブラウザ」が別だと失われ `state` 照合に失敗するため `localStorage`（同一オリジンでタブ共有）を使う。
 - 連携復帰: 読込時に `?code`&`?state` 検知 → `state` 照合（不一致は中断＝CSRF対策）→ フォーム復元 → GAS へ `POST {action:'lineLogin', code, redirectUri}` → `{lineUserId, displayName}` 保持 → 状態② → `history.replaceState` で URL から `code/state` 除去。
 - 端末保存: localStorage キー `wasyo_line_profile` に `{lineUserId, displayName, name, phone, gender, referrer}`（**同意チェックは保存しない**＝予約毎に再取得）。読込時 `lineUserId` あれば認可せず状態③で開始。
 - バリデーション/送信: `lineUserId` ありならメール必須チェックをスキップ（電話・性別は必須維持）。payload に `lineUserId` 追加。同意文に LINE userID・表示名（連携時）の取得/保存目的を追記。

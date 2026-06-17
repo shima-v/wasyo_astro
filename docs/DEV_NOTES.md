@@ -137,6 +137,16 @@
 - 再訪時は OAuth を省略し localStorage の `lineUserId` を信頼する設計（userId は推測不能なため許容）。気になる場合は送信時の再検証を将来追加できる形にしておく。
 
 ### CSRF: `state` 照合は必須
-- 認可リダイレクトの戻りで `?code`&`?state` を受けたら、開始時に `sessionStorage` 退避した `state` と**必ず照合**し、不一致なら連携を中断する。処理後は `history.replaceState` で URL から `code/state` を消す。
+- 認可リダイレクトの戻りで `?code`&`?state` を受けたら、開始時に退避した `state` と**必ず照合**し、不一致なら連携を中断する。処理後は `history.replaceState` で URL から `code/state` を消す。
+
+### 実際に踏んだ 2 つの落とし穴（dev で発生・解決済み）
+
+**(1) `Invalid redirect_uri value`** — authorize に渡す `redirect_uri` が LINE Login チャネル登録のコールバックURLと**完全一致**していないと出る。**スキーム・ホスト・ポート・パス・末尾スラッシュまで** exact match。
+- 実例: `PUBLIC_LINE_LOGIN_REDIRECT` を**末尾スラッシュ無し**で登録 → 予約ページは `/reserve/`（base=`/`・末尾スラッシュ有り）なので不一致。末尾 `/` を付けて解決。
+- コールバックURL欄は**複数URLを別行**で（1行に並べると1つの不正値扱い）。`http://localhost` は dev で可。
+
+**(2) `連携の確認に失敗（state照合）`** — 戻った先で退避データ（`state`）が読めない。
+- 真因: **`sessionStorage` はタブ/アプリ内ブラウザをまたぐと共有されない**。スマホの LINE アプリ内ブラウザ→外部ブラウザ復帰や別タブ復帰で消える。→ **`localStorage`（同一オリジンでタブ共有）** に退避し、復帰時に必ず削除する方式へ変更（キー `wasyo_line_oauth`）。
+- 注意: `localStorage` も**オリジン（scheme+host+port）単位**。**プレビューURL**（版別 `*-wasyo-dev.<account>.workers.dev`）で開始し正規URLへ戻ると別オリジンで共有されず再発する。**開始ホスト＝redirect_uri のホスト**（正規 workers.dev）で操作すること。
 
 参考: 仕様は [`../WBS.md`](../WBS.md)「LINE連携・管理画面レスポンシブ（確定仕様）」、設定は [`SETUP.md`](./SETUP.md) E、実装は [`../gas/Code.gs`](../gas/Code.gs)（`lineLogin_`）・[`../src/pages/reserve/index.astro`](../src/pages/reserve/index.astro)。
