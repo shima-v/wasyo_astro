@@ -60,3 +60,38 @@
   公開する `/exec` は Script Property に固定する。
 
 参考実装: [`../gas/Code.gs`](../gas/Code.gs)（`renderDecisionPage_` / `decideBySig` / `notifyOwnerNewBooking_` / `publicExecUrl_`）
+
+---
+
+## 2026-06-17 — 管理画面が「このGoogleアカウントには管理権限がありません」になる
+
+### 症状
+- `ADMIN_EMAILS` に自分のメール（例: `…@gmail.com`）を登録済みなのに、管理画面(`?action=admin`)で
+  **「このGoogleアカウントには管理権限がありません（ADMIN_EMAILS を確認）。」** と出て操作できない。
+- 管理ページ自体は開ける（HTMLは表示される）が、`google.script.run.adminApi*` が `forbidden` を返す。
+
+### 真因
+- 管理判定 `requireAdmin_` は `Session.getActiveUser().getEmail()` を `ADMIN_EMAILS` と照合している。
+- 開いていたデプロイが **`executeAs: USER_DEPLOYING`（＝オーナー実行）** で、**オーナー(`…@wwwasyo.com`)と
+  閲覧者(`…@gmail.com`)のドメインが異なる**と、Google のプライバシー仕様で
+  **`getActiveUser().getEmail()` が空文字を返す** → 照合は必ず失敗。ADMIN_EMAILS の中身は無関係。
+- そもそも「管理専用デプロイ（実行ユーザー＝アクセスしているユーザー）」が未作成で、全デプロイが
+  マニフェスト既定の `USER_DEPLOYING` を継承していた。
+
+### 対策
+- 管理画面は **必ず別デプロイで「実行ユーザー: ウェブアプリにアクセスしているユーザー」** にする
+  （こうすると `getActiveUser()` がアクセス中の管理者本人を確実に返す）。
+- アクセス範囲は用途で選ぶ（オーナーのみ=「自分のみ」／組織内=「サロン和笑 内の全員」／外部gmail可=「Googleアカウントを持つ全員」）。
+  いずれも実ガードは `ADMIN_EMAILS`。**「全員（匿名）」は不可**（ログイン必須でないと email が空）。
+- `getEffectiveUser()` を判定に使ってはいけない：公開デプロイ(オーナー実行)で `?action=admin` を開かれると
+  effective=オーナー=ADMIN_EMAILS該当となり、**誰でも管理者になれてしまう**。判定は必ず `getActiveUser()`。
+- 設定手順・運用パターン（オーナー1人／gmail／組織内複数）と費用は
+  [`../gas/README.md`](../gas/README.md)「管理者ユーザーの登録・管理」に集約。
+
+### 一般教訓
+- `Session.getActiveUser().getEmail()` は **「オーナー実行 × 別ドメイン閲覧者」だと空**になる。
+  Web アプリでログインユーザーを識別したいなら **「アクセスしているユーザーとして実行」** にする。
+- 「ページは開けるのに API だけ権限エラー」は、ページ表示の可否（access設定）と
+  実行ユーザー識別（executeAs）が**別物**であることを思い出す。
+
+参考実装: [`../gas/Code.gs`](../gas/Code.gs)（`requireAdmin_`）。
