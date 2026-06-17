@@ -117,10 +117,14 @@ function doGet(e) {
         return renderDecisionPage_(e.parameter, true);
       case 'decline':
         return renderDecisionPage_(e.parameter, false);
-      case 'admin': // 管理パネル（別デプロイ：executeAs=アクセスユーザー / アクセス=自分のみ）
-        return HtmlService.createHtmlOutputFromFile('admin')
-          .setTitle('予約管理 — サロン和笑〜Violane〜')
+      case 'admin': { // 管理パネル（別デプロイ：executeAs=アクセスユーザー / アクセス=自分のみ）
+        var envLabel = prop_('ENV_LABEL') || ''; // dev のみ '【開発】'。dev インジケータの出し分けに使う
+        var t = HtmlService.createTemplateFromFile('admin');
+        t.envLabel = envLabel;
+        return t.evaluate()
+          .setTitle(envLabel + '予約管理 — サロン和笑〜Violane〜')
           .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+      }
       default:
         return json_({ ok: false, error: 'unknown_action' });
     }
