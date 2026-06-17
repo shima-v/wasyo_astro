@@ -229,7 +229,9 @@ const grouped = groupOrder.map((g) => ({
       // LINE 連携が使える設定か（チャネルID＋redirect が揃っているとき）
       const LINE_ENABLED = !!(LINE_LOGIN_CHANNEL_ID && LINE_LOGIN_REDIRECT);
       const LS_KEY = 'wasyo_line_profile'; // 端末内に保存する連携プロフィール
-      const SS_KEY = 'wasyo_line_oauth';   // 認可リダイレクト中の一時退避（state/nonce/フォーム下書き）
+      // 認可リダイレクト中の一時退避（state/nonce/フォーム下書き）。
+      // sessionStorage はタブ/アプリ内ブラウザをまたぐと失われるため localStorage に保存し、復帰時に必ず消す。
+      const OAUTH_KEY = 'wasyo_line_oauth';
       const GENDER_LABEL = { female: '女性', male: '男性' };
 
       const $ = (s) => document.querySelector(s);
@@ -331,7 +333,7 @@ const grouped = groupOrder.map((g) => ({
           referrer: $('#f-referrer').value.trim(),
           note: $('#f-note').value.trim(),
         };
-        try { sessionStorage.setItem(SS_KEY, JSON.stringify(draft)); } catch (_) {}
+        try { localStorage.setItem(OAUTH_KEY, JSON.stringify(draft)); } catch (_) {}
         const url =
           'https://access.line.me/oauth2/v2.1/authorize?response_type=code' +
           '&client_id=' + encodeURIComponent(LINE_LOGIN_CHANNEL_ID) +
@@ -370,10 +372,10 @@ const grouped = groupOrder.map((g) => ({
         const retState = params.get('state');
         if (!code || !retState) return false;
         let draft = null;
-        try { draft = JSON.parse(sessionStorage.getItem(SS_KEY) || 'null'); } catch (_) {}
+        try { draft = JSON.parse(localStorage.getItem(OAUTH_KEY) || 'null'); } catch (_) {}
         // URL からは即座に code/state を消す（再読込やプレビュー先読み対策）
         history.replaceState(null, '', location.pathname);
-        sessionStorage.removeItem(SS_KEY);
+        try { localStorage.removeItem(OAUTH_KEY); } catch (_) {}
         if (!draft || draft.state !== retState) {
           $('#step-form').hidden = false;
           showError('連携の確認に失敗しました（セキュリティ検証）。お手数ですが、もう一度お試しください。');
