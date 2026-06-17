@@ -661,10 +661,21 @@ function sendMail_(to, subject, body) {
   // dev は ENV_LABEL を件名・本文の先頭に付けて本番メールと区別する（prod はキー未登録＝無印）
   var label = prop_('ENV_LABEL');
   if (label) { subject = label + ' ' + subject; body = label + '\n' + body; }
+  // プレーン本文をフォールバックに残しつつ HTML メールも送る（URL単独行はボタン化）
+  var opts = { htmlBody: mailHtml_(body), name: 'サロン和笑〜Violane〜' };
+  // 通知専用の差出人。MAIL_FROM は「スクリプト実行アカウントの Send mail as エイリアス」である必要がある。
+  // 返信先(MAIL_REPLY_TO 未指定時は MAIL_FROM)も合わせて通知アドレスに向ける。
+  var from = prop_('MAIL_FROM');
+  if (from) { opts.from = from; opts.replyTo = prop_('MAIL_REPLY_TO') || from; }
   try {
-    // プレーン本文をフォールバックに残しつつ HTML メールも送る（URL単独行はボタン化）
-    MailApp.sendEmail(to, subject, body, { htmlBody: mailHtml_(body), name: 'サロン和笑〜Violane〜' });
-  } catch (err) { console.error('sendMail_ failed: ' + err); }
+    MailApp.sendEmail(to, subject, body, opts);
+  } catch (err) {
+    // from がエイリアス未登録だと例外になりうる。from を外して再送し、お客様には必ず届ける。
+    console.error('sendMail_ failed (retry without from): ' + err);
+    delete opts.from;
+    try { MailApp.sendEmail(to, subject, body, opts); }
+    catch (e2) { console.error('sendMail_ retry failed: ' + e2); }
+  }
 }
 
 /** プレーン本文から簡易HTMLメールを生成する。URL単独行はボタン化する。 */
