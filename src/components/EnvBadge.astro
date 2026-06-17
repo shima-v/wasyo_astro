@@ -1,0 +1,21 @@
+---
+// 開発(dev)環境であることを示す右下フローティングバッジ。
+// dev のときだけ描画し、prod では DOM も CSS も一切出力しない
+// （IS_DEV は PUBLIC_ENV==='development' のときのみ true）。
+// スタイルはインライン指定にしている：scoped <style> は import しただけで prod の
+// <head> にも残るため、prod を完全に無変更にする目的でインラインにしている。
+import { IS_DEV } from '../data/config.js';
+
+// 色: ブランドの淡ピンクと紛れない深紫地＋イエロー文字で「明らかに別物」と分かる調子。
+const badgeStyle = [
+  'position:fixed', 'right:12px', 'bottom:12px', 'z-index:9999',
+  'pointer-events:none',                 // ページの操作（CTA・フォーム）を邪魔しない
+  'background:#2C1F3A', 'color:#F7E58E',
+  'font:600 12px/1 var(--f-sans, system-ui, sans-serif)',
+  'padding:7px 11px', 'border-radius:999px', 'border:1px solid #F7E58E',
+  'box-shadow:0 2px 8px rgba(0,0,0,.25)', 'opacity:.92',
+].join(';');
+---
+{IS_DEV && (
+  <div role="status" aria-label="開発・テスト環境" style={badgeStyle}>🚧 開発環境</div>
+)}

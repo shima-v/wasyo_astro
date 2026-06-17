@@ -5,12 +5,16 @@ import {
   BOOKING_RULES,
   GENDERS,
   CONTACT_METHODS,
+  ENV_LABEL,
 } from '../../data/config.js';
+import EnvBadge from '../../components/EnvBadge.astro';
 
 const _base = import.meta.env.BASE_URL;
 const base = _base.endsWith('/') ? _base : _base + '/';
 const salonName = 'サロン和笑〜Violane〜';
 const tel = '090-9095-6034';
+// title は単一の式にする（<title> RCDATA で式＋生テキストの混在を避ける）
+const pageTitle = `${ENV_LABEL}ご予約 | ${salonName}`;
 
 // コース区分ごとにメニューをまとめる
 const groupOrder = ['double', 'simple', 'petit'];
@@ -27,10 +31,11 @@ const grouped = groupOrder.map((g) => ({
     <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex" />
-    <title>ご予約 | {salonName}</title>
+    <title>{pageTitle}</title>
     <meta name="description" content="サロン和笑〜Violane〜 のオンライン予約。メニューと日時を選んでお申し込みいただけます。" />
   </head>
   <body>
+    <EnvBadge />
     <header class="site-header">
       <a class="home-link" href={base}>‹ {salonName}</a>
       <span class="head-title">オンラインご予約</span>

@@ -119,13 +119,16 @@ node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ### dev（ローカル）
 `.env.development.example` を `.env.development` にコピーして実値を設定:
 ```
+PUBLIC_ENV="development"   # dev のみ。サイト右下に開発バッジ＋タブに【開発】を表示
 PUBLIC_RESERVE_API="<dev /exec URL>"
 PUBLIC_LINE_LOGIN_CHANNEL_ID="<dev login channel id 任意>"
 PUBLIC_LINE_LOGIN_REDIRECT="http://localhost:4321/reserve/"
 ```
 
+> `PUBLIC_ENV` は `config.js` の `IS_DEV`/`ENV_LABEL` が参照する環境フラグ。dev=`development` のときだけ開発インジケータを表示し、prod では出さない（`=== 'development'` の厳密一致なので prod で未設定でも安全）。
+
 ### dev（Cloudflare Workers）
-I のプロジェクト環境変数に上記 `PUBLIC_*`（redirect は `*.workers.dev` のURL）を設定。
+I のプロジェクト環境変数に上記 `PUBLIC_*`（`PUBLIC_ENV=development` を含む。redirect は `*.workers.dev` のURL）を設定。
 
 ### prod（GitHub Actions）
 J のリポジトリ Secrets に prod 値を登録。
@@ -147,7 +150,7 @@ J のリポジトリ Secrets に prod 値を登録。
    - デプロイコマンド: `npx wrangler deploy`（`wrangler.toml` を読み `dist/` を配信）
    - 非本番ブランチのデプロイコマンド: `npx wrangler versions upload`（プレビュー版）
    - パス（ルートディレクトリ）: `/`
-4. 環境変数に H（dev）の `PUBLIC_*` を設定（`PUBLIC_LINE_LOGIN_REDIRECT` は `*.workers.dev` の `/reserve/`）。
+4. 環境変数に H（dev）の `PUBLIC_*` を設定（`PUBLIC_ENV=development` を含む。`PUBLIC_LINE_LOGIN_REDIRECT` は `*.workers.dev` の `/reserve/`）。
 5. デプロイ後の **`https://wasyo-dev.<account>.workers.dev`** を、LINE Login のコールバック（E）と `FRONT_BASE_URL`（F dev）に反映。
 6. Node バージョンは `.nvmrc`(22) を自動参照（環境変数 `NODE_VERSION` の設定は不要）。
 
@@ -158,7 +161,7 @@ J のリポジトリ Secrets に prod 値を登録。
 1. リポジトリ → Settings → Secrets and variables → Actions → 「New repository secret」で prod 値を登録:
    - **`PROD_RESERVE_API`**（prod GAS の `/exec` URL）← **必須**。`deploy.yml` が env `PUBLIC_RESERVE_API` に注入する。
    - （任意・LINE Login 導入時のみ）`PROD_LINE_LOGIN_CHANNEL_ID` / `PROD_LINE_LOGIN_REDIRECT`。導入時に `deploy.yml` の Build env に追記する。
-2. `deploy.yml` の Build ステップで env 注入済み🤖：`PUBLIC_RESERVE_API: ${{ secrets.PROD_RESERVE_API }}` と `PUBLIC_SITE_URL: https://www.wwwasyo.com`（prod ドメインは secret ではなく直書き）。
+2. `deploy.yml` の Build ステップで env 注入済み🤖：`PUBLIC_ENV: production`（dev 限定の開発バッジ/タブ【開発】を出さない）・`PUBLIC_RESERVE_API: ${{ secrets.PROD_RESERVE_API }}`・`PUBLIC_SITE_URL: https://www.wwwasyo.com`（prod ドメインは secret ではなく直書き）。
 
 > secret 未登録でも `PUBLIC_RESERVE_API` は空文字になりビルドは通る（予約API未接続の状態でデプロイされるだけ）。prod 公開前に必ず登録する。
 

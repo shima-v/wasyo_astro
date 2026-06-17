@@ -1,4 +1,7 @@
 ---
+import EnvBadge from '../components/EnvBadge.astro';
+import { ENV_LABEL } from '../data/config.js';
+
 const _base = import.meta.env.BASE_URL;
 const base = _base.endsWith('/') ? _base : _base + '/';
 const salonName = "サロン和笑〜Violane〜";
@@ -6,6 +9,8 @@ const salonNameReading = "わしょう";
 const reservePath = base + "reserve/";              // サイト内 本予約システム（新・メインのCTA）
 const reservaUrl = "https://reserva.be/wasyou258";  // RESERVA（移行期間のフォールバック）
 const tel = "090-9095-6034";
+// title は単一の式にする（<title> は RCDATA。先頭に式＋生テキストの混在を置くと描画が壊れるため）
+const pageTitle = ENV_LABEL + "高岡市のマッサージならサロン和笑〜Violane〜 | 高岡駅車で9分";
 ---
 
 <html lang="ja">
@@ -16,7 +21,7 @@ const tel = "090-9095-6034";
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="generator" content={Astro.generator} />
     <meta name="description" content="富山県高岡市野村にあるリラクゼーションサロン和笑〜Violane〜。もみほぐしやオイルケア・フットケア・ハンドケアで至福のひとときを。女性が安心して通える和モダンな癒やし空間です。駐車場完備。" />
-    <title>高岡市のマッサージならサロン和笑〜Violane〜 | 高岡駅車で9分</title>
+    <title>{pageTitle}</title>
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -75,6 +80,7 @@ const tel = "090-9095-6034";
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;600&family=Noto+Sans+JP:wght@300;400&display=swap" rel="stylesheet" />
   </head>
   <body>
+    <EnvBadge />
 
     <!-- ============================================================
          ヘッダー

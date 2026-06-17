@@ -34,6 +34,7 @@ jobs:
         env:
           # 本番(prod)の公開設定。GAS の prod /exec URL は repo secret で注入する。
           # 秘密情報（LINEトークン/HMAC）は GAS の Script Properties 側にのみ置き、ここには置かない。
+          PUBLIC_ENV: production            # 本番。dev 限定の開発バッジ/タブ【開発】は出さない
           PUBLIC_RESERVE_API: ${{ secrets.PROD_RESERVE_API }}
           PUBLIC_SITE_URL: https://www.wwwasyo.com
 

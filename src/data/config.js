@@ -3,6 +3,15 @@
 //   ・本番(prod)   : GitHub Actions の env（repo secret の prod値）
 // 秘密情報（LINEチャネルトークン等）はここに置かない。それらは GAS の Script Properties 側で管理する。
 
+/**
+ * 実行環境の判定。dev のみ true。
+ * `=== 'development'` の厳密一致なので、prod で PUBLIC_ENV を付け忘れても安全に false（＝開発表示は出ない）。
+ */
+export const IS_DEV = import.meta.env.PUBLIC_ENV === 'development';
+
+/** タブ(title)や通知に付ける環境ラベル。dev のみ '【開発】'、prod は ''。 */
+export const ENV_LABEL = IS_DEV ? '【開発】' : '';
+
 /** GAS Web App の /exec エンドポイント URL（環境ごとに切替） */
 export const RESERVE_API = import.meta.env.PUBLIC_RESERVE_API ?? '';
 

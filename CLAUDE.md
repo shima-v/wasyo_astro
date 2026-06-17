@@ -26,9 +26,10 @@ pnpm preview    # 本番ビルドをローカルでプレビュー
 
 ## アーキテクチャ
 
-**単一ファイル構成の Astro サイト**。コンテンツ・スタイル・ロジックはすべて `src/pages/index.astro` に集約されており、コンポーネント・レイアウト・独立した CSS ファイルは存在しない。
+**単一ファイル構成の Astro サイト**。コンテンツ・スタイル・ロジックはすべて `src/pages/index.astro` に集約されており、コンポーネント・レイアウト・独立した CSS ファイルは原則存在しない（例外: dev 環境表示用の `src/components/EnvBadge.astro` のみ。全ページ共通で使う唯一の共有コンポーネント）。
 
 - `src/pages/index.astro` — サイト全体：フロントマター変数、HTML、`<style>` ブロック
+- `src/components/EnvBadge.astro` — **dev のときだけ**右下に「🚧 開発環境」バッジを表示（prod は非出力）。`config.js` の `IS_DEV`（=`PUBLIC_ENV==='development'`）で切替。タブの `【開発】` は各ページ `<title>` 冒頭の `{ENV_LABEL}` で付与。環境分離の全体像は README.md「環境分離」節を参照
 - `src/pages/assets/images/` — 元画像ファイル（`logo.jpg`、`naisou.jpg`）
 - `public/` — ルートで配信される静的アセット（favicon・画像）
   - `public/favicon.jpg` — favicon として使用

@@ -1,10 +1,13 @@
 ---
-import { RESERVE_API } from '../../data/config.js';
+import { RESERVE_API, ENV_LABEL } from '../../data/config.js';
+import EnvBadge from '../../components/EnvBadge.astro';
 
 const _base = import.meta.env.BASE_URL;
 const base = _base.endsWith('/') ? _base : _base + '/';
 const salonName = 'サロン和笑〜Violane〜';
 const tel = '090-9095-6034';
+// title は単一の式にする（<title> RCDATA で式＋生テキストの混在を避ける）
+const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
 ---
 
 <html lang="ja">
@@ -13,9 +16,10 @@ const tel = '090-9095-6034';
     <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex" />
-    <title>ご予約の確認・変更 | {salonName}</title>
+    <title>{pageTitle}</title>
   </head>
   <body>
+    <EnvBadge />
     <header class="site-header">
       <a class="home-link" href={base}>‹ {salonName}</a>
       <span class="head-title">ご予約の確認</span>
