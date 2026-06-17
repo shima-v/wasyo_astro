@@ -106,9 +106,9 @@
 </head>
 <body>
   <? if (envLabel) { ?>
-  <!-- dev のときだけ表示。envLabel(=【開発】) が空の prod では出力されない -->
+  <!-- dev のときだけ表示。envLabel(=【開発】) が空の prod では出力されない。右上の斜めリボン -->
   <div role="status" aria-label="開発・テスト環境"
-       style="position:fixed;right:14px;bottom:14px;z-index:9999;pointer-events:none;background:#2C1F3A;color:#F7E58E;font:700 16px/1 system-ui,sans-serif;padding:12px 18px;border-radius:999px;border:1px solid #F7E58E;box-shadow:0 3px 10px rgba(0,0,0,.3);opacity:.95;">🚧 開発環境</div>
+       style="position:fixed;top:34px;right:-54px;z-index:9999;pointer-events:none;width:210px;transform:rotate(45deg);text-align:center;padding:7px 0;background:#2C1F3A;color:#F7E58E;font:700 14px/1.4 system-ui,sans-serif;letter-spacing:.06em;border-top:1px solid #F7E58E;border-bottom:1px solid #F7E58E;box-shadow:0 2px 8px rgba(0,0,0,.35);">🚧 開発環境</div>
   <? } ?>
   <div class="wrap">
     <header>

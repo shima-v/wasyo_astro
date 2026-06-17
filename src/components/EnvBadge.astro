@@ -6,16 +6,20 @@
 // <head> にも残るため、prod を完全に無変更にする目的でインラインにしている。
 import { IS_DEV } from '../data/config.js';
 
-// 色: ブランドの淡ピンクと紛れない深紫地＋イエロー文字で「明らかに別物」と分かる調子。
-const badgeStyle = [
-  'position:fixed', 'right:14px', 'bottom:14px', 'z-index:9999',
+// 画面右上の斜めリボン（Android/Flutter のデバッグバナー風）。
+// 下部追従の予約ボタンと被らないよう右上に配置。色はブランドの淡ピンクと紛れない深紫地＋イエロー文字。
+// 45°回転した帯を右上隅にかぶせ、両端は画面外へ逃がす（width を広めにして right を負に）。
+const ribbonStyle = [
+  'position:fixed', 'top:34px', 'right:-54px', 'z-index:9999',
   'pointer-events:none',                 // ページの操作（CTA・フォーム）を邪魔しない
+  'width:210px', 'transform:rotate(45deg)', 'text-align:center',
+  'padding:7px 0',
   'background:#2C1F3A', 'color:#F7E58E',
-  'font:700 16px/1 var(--f-sans, system-ui, sans-serif)',
-  'padding:12px 18px', 'border-radius:999px', 'border:1px solid #F7E58E',
-  'box-shadow:0 3px 10px rgba(0,0,0,.3)', 'opacity:.95',
+  'font:700 14px/1.4 var(--f-sans, system-ui, sans-serif)', 'letter-spacing:.06em',
+  'border-top:1px solid #F7E58E', 'border-bottom:1px solid #F7E58E',
+  'box-shadow:0 2px 8px rgba(0,0,0,.35)',
 ].join(';');
 ---
 {IS_DEV && (
-  <div role="status" aria-label="開発・テスト環境" style={badgeStyle}>🚧 開発環境</div>
+  <div role="status" aria-label="開発・テスト環境" style={ribbonStyle}>🚧 開発環境</div>
 )}
