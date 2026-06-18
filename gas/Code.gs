@@ -22,7 +22,7 @@
 var RULES = {
   slotStepMin: 30,
   leadTimeDays: 1, // 当日不可・翌日以降
-  maxAdvanceDays: 30,
+  maxAdvanceDays: 60, // 受付上限（約2ヶ月先まで）
   cleanupBufferMin: 0,
   cancelDeadlineDays: 1,
   windows: {

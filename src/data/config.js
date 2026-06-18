@@ -27,7 +27,7 @@ export const LINE_LOGIN_REDIRECT = import.meta.env.PUBLIC_LINE_LOGIN_REDIRECT ??
  */
 export const BOOKING_RULES = {
   leadTimeDays: 1,       // 当日不可・翌日以降のみオンライン受付
-  maxAdvanceDays: 30,    // 受付上限（約1ヶ月先まで）
+  maxAdvanceDays: 60,    // 受付上限（約2ヶ月先まで）
   slotStepMin: 30,       // 開始時刻は30分刻み
   cleanupBufferMin: 0,   // 施術前後の確保バッファ（必要に応じて調整）
   cancelDeadlineDays: 1, // 前日までキャンセル/変更可
