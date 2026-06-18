@@ -228,7 +228,7 @@ const grouped = groupOrder.map((g) => ({
 
     <script define:vars={{ RESERVE_API, BOOKING_RULES, LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_REDIRECT, tel }}>
       const WD = ['日', '月', '火', '水', '木', '金', '土'];
-      const state = { menu: null, date: null, time: null, days: [], availSet: null, calMin: null, calMax: null, lineUserId: '', displayName: '' };
+      const state = { menu: null, date: null, time: null, days: [], availSet: null, calMin: null, calMax: null, holidays: {}, lineUserId: '', displayName: '' };
       let calMonth = null; // カレンダーで表示中の月 {y, m(0始まり)}
       let restoreTarget = null; // LINE 認可リダイレクト復帰時に選び直す日時 {date, time}
 
@@ -488,6 +488,7 @@ const grouped = groupOrder.map((g) => ({
           const data = await res.json();
           if (!data.ok) throw new Error(data.error || 'error');
           state.days = data.days || [];
+          state.holidays = data.holidays || {}; // { 'yyyy-MM-dd': '祝日名' }（カレンダー表示用）
           renderDates();
         } catch (e) {
           setStatusText('空き状況を取得できませんでした。時間をおいて再度お試しください。', 'slot-empty');
@@ -560,7 +561,12 @@ const grouped = groupOrder.map((g) => ({
             const active = state.date === ymd ? ' active' : '';
             html += `<button type="button" class="cal-cell cal-day avail${active}${dowCls}" data-date="${ymd}">${day}<span class="dot"></span></button>`;
           } else {
-            html += `<span class="cal-cell cal-day disabled${dowCls}">${day}</span>`;
+            const hol = state.holidays[ymd];
+            if (hol) {
+              html += `<span class="cal-cell cal-day disabled holiday${dowCls}" title="${esc(hol)}">${day}<small class="hol-name">${esc(hol)}</small></span>`;
+            } else {
+              html += `<span class="cal-cell cal-day disabled${dowCls}">${day}</span>`;
+            }
           }
         }
         html += '</div>';
@@ -866,6 +872,16 @@ const grouped = groupOrder.map((g) => ({
       .cal-day.disabled { color: #CDBFCC; }
       .cal-day.disabled.sun { color: #e0b3ba; }
       .cal-day.disabled.sat { color: #b6c4dc; }
+      /* 祝日（休業）: 日付の下に祝日名を小さく表示。色は日曜と同系の赤で休業を示す */
+      .cal-day.disabled.holiday {
+        flex-direction: column; gap: 0; line-height: 1.05;
+        color: #B23A48; overflow: hidden;
+      }
+      .cal-day.disabled.holiday .hol-name {
+        display: block; max-width: 100%;
+        font-size: .5rem; color: #B23A48;
+        white-space: normal; word-break: break-all; text-align: center;
+      }
       .cal-day.avail {
         position: relative; flex-direction: column; gap: 2px;
         border: 1px solid var(--c-border); background: #fff; color: var(--c-ink); cursor: pointer;

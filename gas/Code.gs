@@ -254,14 +254,14 @@ function getAvailability_(p) {
     }
     if (times.length) days.push({ date: dateStr, times: times });
   }
-  return { ok: true, menuId: p.menuId, durationMin: dur, slotMin: slot, isFirstTime: isFirst, days: days };
+  return { ok: true, menuId: p.menuId, durationMin: dur, slotMin: slot, isFirstTime: isFirst, days: days, holidays: holidaySet };
 }
 
 /**
  * その日のネット予約「受付ウィンドウ」（開始可能な時間帯）を返す。受付不可なら []。
  *   closedDates → 終日クローズ / openDates → 臨時営業（既定枠）
  *   祝日・日曜・第1/3/5土 → 休 / 月火金・水木・第2/4土 → 曜日別ウィンドウ
- * @param {Object} holidaySet { 'yyyy-MM-dd': true } 祝日集合（省略可）
+ * @param {Object} holidaySet { 'yyyy-MM-dd': '祝日名' } 祝日マップ（値は名称・省略可。真値なら祝日扱い）
  */
 function receptionWindows_(d, config, holidaySet) {
   var dateStr = fmt_(d, 'yyyy-MM-dd');
@@ -309,7 +309,8 @@ function isValidStart_(d, hhmm, config, holidaySet) {
 }
 
 /**
- * 範囲内の祝日（自動判定）を { 'yyyy-MM-dd': true } で返す。
+ * 範囲内の祝日（自動判定）を { 'yyyy-MM-dd': '祝日名' } で返す。
+ * 値は祝日名（カレンダーのイベント名）。受付判定では真値かどうかだけ見るので名称はUI表示用。
  * 祝日カレンダーが購読されていない/例外時は空（=祝日なし扱い）でフォールバックし警告ログを出す。
  */
 function holidayDateSet_(from, to) {
@@ -319,7 +320,7 @@ function holidayDateSet_(from, to) {
     var hcal = CalendarApp.getCalendarById(id);
     if (!hcal) { console.warn('holiday calendar not found: ' + id + '（GAS実行アカウントで「日本の祝日」を購読してください）'); return set; }
     hcal.getEvents(startOfDay_(from), addDays_(startOfDay_(to), 1)).forEach(function (ev) {
-      set[fmt_(ev.getStartTime(), 'yyyy-MM-dd')] = true;
+      set[fmt_(ev.getStartTime(), 'yyyy-MM-dd')] = ev.getTitle() || '祝日';
     });
   } catch (err) {
     console.warn('holidayDateSet_ failed: ' + err);
