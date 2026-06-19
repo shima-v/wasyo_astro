@@ -172,3 +172,18 @@
 
 ### 一般教訓
 - LINE Login は **「Developing＝開発者ロール限定」「Published＝一般公開」**。連携が「自分だけ通る／お客様だけ 400」のときは、まずチャネルの**公開ステータス**を疑う（コード以前の設定）。
+
+## 2026-06-19 — 本番初リリースで踏んだ2件（CIビルド失敗 / LINE redirect malformed）
+
+### ① GitHub Actions ビルド失敗：pnpm 8 が lockfileVersion 9.0 を読めない
+- **症状**: `develop`→`main` 初マージで Actions の `build` が exit 1（`pnpm install` 段）。ローカルでは成功。
+- **真因**: `deploy.yml` が `pnpm/action-setup@v3` で **`version: 8` 固定**。`pnpm-lock.yaml` は **`lockfileVersion: '9.0'`**（pnpm 9/10/11 形式）で、CIの frozen-lockfile で読めず失敗。`pnpm-workspace.yaml` の `allowBuilds`（esbuild/sharp 許可）も pnpm 10+ 機能。
+- **対策**: `package.json` に **`"packageManager": "pnpm@11.7.0"`**（ローカルの corepack と同一）を追加し、`action-setup` は version 指定を外して **packageManager を参照**。CI＝ローカルに統一。
+- **教訓**: CIの pnpm は **lockfileVersion とローカル版に必ず合わせる**。`packageManager` を単一の真実にするのが安全（version 二重指定は action がエラーにするので併記不可）。
+
+### ② LINE連携「失敗しました」：redirect_uri is malformed（secretの先頭スペース）
+- **症状**: 認可・同意画面までは成功して戻るのに、戻った後に「LINE連携に失敗しました」。`lineLogin_` のトークン交換が `400 {"error":"invalid_request","error_description":"the redirect_uri is malformed"}`。
+- **真因**: GitHub secret **`PROD_LINE_LOGIN_REDIRECT` の値に先頭スペース**が混入（` https://wwwasyo.com/reserve/`）。ビルド時にフロントへ焼き込まれ、`redirect_uri` が malformed に。**authorize は寛容に通り、token 交換は厳格に弾く**ため「同意画面までは出るのに最後で失敗」になった。
+- **切り分け**: `lineLogin_` は throw せず `{ok:false}` を返す→ Executions は「完了」表示で見落としやすい。**一時診断で失敗内容を Script Property `LINE_LAST_ERROR` に記録**して特定した（確認後に撤去）。
+- **対策**: `src/data/config.js` で `RESERVE_API` / `LINE_LOGIN_*` を **必ず `.trim()`**（secret由来のコピペ空白に耐性）。secret 側も前後空白なしに直すのが正本。
+- **教訓**: 環境変数/secret 由来の値は**前後空白で壊れうる**。URL・ID 系は source で trim。`redirect_uri` 系のエラーは **malformed（書式不正＝空白等）と does not match（登録ズレ）を区別**して読む。
