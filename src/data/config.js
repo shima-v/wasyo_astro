@@ -12,14 +12,16 @@ export const IS_DEV = import.meta.env.PUBLIC_ENV === 'development';
 /** タブ(title)や通知に付ける環境ラベル。dev のみ '【開発】'、prod は ''。 */
 export const ENV_LABEL = IS_DEV ? '【開発】' : '';
 
+// 値は環境変数(secret)由来のため、コピペ由来の前後空白・改行が混ざると
+// redirect_uri が malformed になる等で壊れる。防御的に必ず trim する。
 /** GAS Web App の /exec エンドポイント URL（環境ごとに切替） */
-export const RESERVE_API = import.meta.env.PUBLIC_RESERVE_API ?? '';
+export const RESERVE_API = (import.meta.env.PUBLIC_RESERVE_API ?? '').trim();
 
 /** LINE Login チャネルID（任意。LINE連携を使う場合のみ） */
-export const LINE_LOGIN_CHANNEL_ID = import.meta.env.PUBLIC_LINE_LOGIN_CHANNEL_ID ?? '';
+export const LINE_LOGIN_CHANNEL_ID = (import.meta.env.PUBLIC_LINE_LOGIN_CHANNEL_ID ?? '').trim();
 
 /** LINE Login のリダイレクト先（予約ページURL） */
-export const LINE_LOGIN_REDIRECT = import.meta.env.PUBLIC_LINE_LOGIN_REDIRECT ?? '';
+export const LINE_LOGIN_REDIRECT = (import.meta.env.PUBLIC_LINE_LOGIN_REDIRECT ?? '').trim();
 
 /**
  * 予約ルール（フロント表示・即時バリデーション用）。
