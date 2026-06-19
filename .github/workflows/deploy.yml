@@ -36,6 +36,10 @@ jobs:
           # 秘密情報（LINEトークン/HMAC）は GAS の Script Properties 側にのみ置き、ここには置かない。
           PUBLIC_ENV: production            # 本番。dev 限定の開発バッジ/タブ【開発】は出さない
           PUBLIC_RESERVE_API: ${{ secrets.PROD_RESERVE_API }}
+          # LINE Login（任意）。両方が揃ったときだけフロントの「LINEで連携」が有効化される。
+          # REDIRECT は LINE コンソールのコールバックURLと完全一致（末尾スラッシュ・www有無まで）させること。
+          PUBLIC_LINE_LOGIN_CHANNEL_ID: ${{ secrets.PROD_LINE_LOGIN_CHANNEL_ID }}
+          PUBLIC_LINE_LOGIN_REDIRECT: ${{ secrets.PROD_LINE_LOGIN_REDIRECT }}
           PUBLIC_SITE_URL: https://www.wwwasyo.com
 
       - name: Upload artifact
