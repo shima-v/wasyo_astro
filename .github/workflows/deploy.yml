@@ -40,7 +40,7 @@ jobs:
           # REDIRECT は LINE コンソールのコールバックURLと完全一致（末尾スラッシュ・www有無まで）させること。
           PUBLIC_LINE_LOGIN_CHANNEL_ID: ${{ secrets.PROD_LINE_LOGIN_CHANNEL_ID }}
           PUBLIC_LINE_LOGIN_REDIRECT: ${{ secrets.PROD_LINE_LOGIN_REDIRECT }}
-          PUBLIC_SITE_URL: https://www.wwwasyo.com
+          PUBLIC_SITE_URL: https://wwwasyo.com
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
