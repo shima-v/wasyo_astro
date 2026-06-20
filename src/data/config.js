@@ -24,6 +24,13 @@ export const LINE_LOGIN_CHANNEL_ID = (import.meta.env.PUBLIC_LINE_LOGIN_CHANNEL_
 export const LINE_LOGIN_REDIRECT = (import.meta.env.PUBLIC_LINE_LOGIN_REDIRECT ?? '').trim();
 
 /**
+ * LIFF アプリ ID（任意。LINEアプリ内予約を使う場合のみ。環境ごとに切替）。
+ * 設定されていれば、LINEアプリ内で開いたときに liff.init で起動し、
+ * ログイン操作なしで userId・表示名・メールを取得してフォームへ自動入力する。
+ */
+export const LIFF_ID = (import.meta.env.PUBLIC_LIFF_ID ?? '').trim();
+
+/**
  * 予約ルール（フロント表示・即時バリデーション用）。
  * ※サーバー(GAS)側でも同じ値で必ず再検証する。フロントの値は信用しない。
  */

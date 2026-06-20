@@ -3,7 +3,7 @@
 > サロン和笑〜Violane〜 予約システム開発の進捗管理ドキュメント。
 > 設計の詳細は [`RESERVATION_PLAN.md`](./RESERVATION_PLAN.md) を参照。
 
-- **最終更新**: 2026-06-17（①お客様LINE userID取得〔LINE Login＋同端末自動連携〕②管理画面スマホレスポンシブ対応 を**実装・dev反映完了**。仕様は下記「LINE連携・管理画面レスポンシブ（確定仕様）」参照）
+- **最終更新**: 2026-06-20（**LIFF予約機能を実装**〔LINEアプリ内予約・IDトークンをGASで検証・前日リマインド/来店後フォロー・Messaging API無料枠監視〕。コードは🤖実装・ビルド確認済み、残=👤 LINEコンソール/トリガー/secret。詳細は下記「Phase 5」参照／2026-06-17＝LINE Login＋管理画面レスポンシブ対応）
 - **作業ブランチ**: `develop`（本番=`main`）
 - **凡例**: `[ ]`未着手 / `[~]`進行中 / `[x]`完了 ／ 担当 🤖=Claude実装 / 👤=ユーザー手動作業
 
@@ -16,6 +16,7 @@
 | Phase 2 | フロント（予約UI） | 完了（LINE Login連携＋管理画面レスポンシブ実装・dev反映済み） | 16 / 16 |
 | Phase 3 | 既存サイト統合・環境切替 | ほぼ完了（残=👤 repo secret 登録） | 5 / 6 |
 | Phase 4 | 検証・リリース | 進行中（e2e ほぼ合格・残=店LINE宛先修正/UI/リリース） | 4 / 8 |
+| Phase 5 | LIFF化（LINEアプリ内予約・リマインド・無料枠監視） | コード実装・ビルド確認済み（残=👤 LINEコンソール/トリガー/secret/e2e） | 5 / 11 |
 
 ---
 
@@ -144,6 +145,37 @@
 ### 4.2 リリース
 - [ ] 4.2.1 `develop`→`main` マージ 👤
 - [ ] 4.2.2 prod 反映確認（wwwasyo.com）👤
+
+---
+
+## Phase 5: LIFF化（LINEアプリ内予約・リマインド・無料枠監視）※2026-06-20 実装
+
+> 既存の Web 予約（外部ブラウザ＝LINE未使用客）は併存維持。LINEアプリ内では LIFF で
+> ログイン操作なしに予約完結。設計の詳細は [`RESERVATION_PLAN.md`](./RESERVATION_PLAN.md) の「LIFF構成」節を参照。
+
+### 5.1 GAS バックエンド 🤖
+- [x] 5.1.1 `verifyLineIdToken_(idToken)` を抽出（`lineLogin_` の verify 部を共通化・email クレームも返す）
+- [x] 5.1.2 `liffVerify_(b)` 新規＋`doPost` に `case 'liffVerify'`（id_token をサーバ検証して userId 確定＝なりすまし防止）
+- [x] 5.1.3 `sendReminders_()`（前日・確定予約へ LINE/メール・`reminded` タグで多重防止）/ `sendFollowUps_()`（来店翌日・`followedUp` タグ）
+- [x] 5.1.4 無料枠監視：`getQuotaConsumption_`/`adminGetQuota_`/`case 'getQuota'`/`checkQuota_`（80%でオーナー警告・月単位ガード `QUOTA_WARNED_YYYYMM`）
+- [x] 5.1.5 送信ログ：`linePushMessages_` に `kind` 引数＋`logPush_`（台帳の「送信ログ」シートへ日時/種別/宛先マスク/成否を記録）
+
+### 5.2 フロント 🤖
+- [x] 5.2.1 `src/data/config.js` に `LIFF_ID`（trim）追加・SDK 読込（`LIFF_ID` 設定時のみ head に挿入）
+- [x] 5.2.2 `reserve/index.astro`：`initLiff()`（`liff.init`→`isInClient` 分岐→`getIDToken`→`liffVerify`→氏名/メール自動入力）。外部ブラウザは既存 OAuth/手入力にフォールバック
+- [x] 5.2.3 完了時アクション：`liffAfterBooking()`（`sendMessages`/`getFriendship` で友だち追加案内/`shareTargetPicker`、各 `isApiAvailable` ガード）
+- [x] 5.2.4 `gas/admin.html` に「LINE無料枠（当月）◯/200通」表示＋再読込
+
+### 5.3 env / CI 🤖
+- [x] 5.3.1 `.env.development(.example)` と `deploy.yml` に `PUBLIC_LIFF_ID` 追加
+- [ ] 5.3.2 repo secret `PROD_LIFF_ID` 登録 👤
+
+### 5.4 LINEコンソール / トリガー / 検証 👤
+- [ ] 5.4.1 dev/prod の LINE Login チャネルに LIFF アプリ追加（エンドポイント=各 `/reserve/`・サイズ Full・スコープ `profile openid email` `chat_message.write`・`bot_prompt=normal`）→ `LIFF_ID` 控え
+- [ ] 5.4.2 LINE Login チャネルに公式アカウント（Messaging API）を連携（`getFriendship`/友だち追加の前提）＋ email 取得申請
+- [ ] 5.4.3 リッチメニュー/トークカード/プロフィールに LIFF URL（`https://liff.line.me/{LIFF_ID}`）設定
+- [ ] 5.4.4 GAS 時間トリガー登録：`sendReminders_`/`sendFollowUps_`/`checkQuota_` を日次（毎朝）＋ Script Property `MONTHLY_FREE_QUOTA`（既定200）
+- [ ] 5.4.5 e2e：dev Workers URL→LINEアプリで LIFF 起動→自動入力→予約→`liffVerify` 検証・リマインド/フォロー多重防止・無料枠表示・警告
 
 ---
 

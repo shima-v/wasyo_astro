@@ -161,10 +161,12 @@ function doPost(e) {
       case 'cancelBooking': return json_(cancelBooking_(body));
       case 'changeBooking': return json_(changeBooking_(body));
       case 'lineLogin': return json_(lineLogin_(body));
+      case 'liffVerify': return json_(liffVerify_(body));
       // 管理（Googleログイン必須）
       case 'getSlotConfig': return json_(requireAdmin_(adminGetSlotConfig_));
       case 'setSlotConfig': return json_(requireAdmin_(function () { return adminSetSlotConfig_(body); }));
       case 'listPending': return json_(requireAdmin_(adminListPending_));
+      case 'getQuota': return json_(requireAdmin_(adminGetQuota_));
       case 'adminDecision': return json_(requireAdmin_(function () { return adminDecision_(body); }));
       default: return json_({ ok: false, error: 'unknown_action' });
     }
@@ -589,6 +591,7 @@ function adminApiListPending() { return requireAdmin_(adminListPending_); }
 function adminApiDecision(token, approve) {
   return requireAdmin_(function () { return adminDecision_({ token: token, approve: !!approve }); });
 }
+function adminApiGetQuota() { return requireAdmin_(adminGetQuota_); }
 
 function adminGetSlotConfig_() { return { ok: true, config: readSlotConfig_() }; }
 
@@ -696,42 +699,72 @@ function notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst) {
         ],
       },
     },
-  ]);
+  ], 'owner');
 }
 
 function notifyOwner_(text) {
   // LINE Messaging API は dev/prod 共有のため、dev は ENV_LABEL(例:【開発】)を先頭に付けて区別する
   var label = prop_('ENV_LABEL');
-  linePush_(prop_('LINE_OWNER_USER_ID'), (label ? label + '\n' : '') + text);
+  linePush_(prop_('LINE_OWNER_USER_ID'), (label ? label + '\n' : '') + text, 'owner');
 }
 
 function notifyCustomer_(b, text) {
-  if (b.lineUserId) linePush_(b.lineUserId, text);
+  if (b.lineUserId) linePush_(b.lineUserId, text, 'customer');
   else if (b.email) sendMail_(b.email, 'サロン和笑〜Violane〜 ご予約', text);
 }
 
-function notifyCustomerProps_(props, text) {
-  if (props.lineUserId) linePush_(props.lineUserId, text);
+function notifyCustomerProps_(props, text, kind) {
+  if (props.lineUserId) linePush_(props.lineUserId, text, kind || 'customer');
   else if (props.email) sendMail_(props.email, 'サロン和笑〜Violane〜 ご予約', text);
 }
 
-function linePush_(to, text) {
-  linePushMessages_(to, [{ type: 'text', text: text }]);
+function linePush_(to, text, kind) {
+  linePushMessages_(to, [{ type: 'text', text: text }], kind);
 }
 
-/** 任意のメッセージ配列（テキスト/テンプレート等）を push する。 */
-function linePushMessages_(to, messages) {
+/**
+ * 任意のメッセージ配列（テキスト/テンプレート等）を push する。
+ * kind は送信ログの種別（owner/customer/reminder/followup/share 等）。
+ */
+function linePushMessages_(to, messages, kind) {
   var token = prop_('LINE_CHANNEL_ACCESS_TOKEN');
   if (!token || !to) return;
+  var ok = false;
   try {
-    UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+    var res = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
       method: 'post',
       contentType: 'application/json',
       headers: { Authorization: 'Bearer ' + token },
       payload: JSON.stringify({ to: to, messages: messages }),
       muteHttpExceptions: true,
     });
+    ok = res.getResponseCode() === 200;
+    if (!ok) console.error('linePushMessages_ http ' + res.getResponseCode() + ': ' + res.getContentText());
   } catch (err) { console.error('linePushMessages_ failed: ' + err); }
+  logPush_(kind || 'other', to, ok);
+}
+
+/**
+ * push 送信履歴を台帳スプレッドシートの「送信ログ」シートへ記録する（無料枠の消費追跡用）。
+ * 宛先(userId/グループID)は生で残さず末尾4桁のみのマスク表示にする（PIIを溜めない）。
+ */
+function logPush_(kind, to, ok) {
+  try {
+    var id = prop_('LEDGER_SHEET_ID');
+    if (!id) return;
+    var ss = SpreadsheetApp.openById(id);
+    var sh = ss.getSheetByName('送信ログ');
+    if (!sh) {
+      sh = ss.insertSheet('送信ログ');
+      sh.appendRow(['日時', '種別', '宛先(マスク)', '成否']);
+    }
+    sh.appendRow([fmt_(new Date(), 'yyyy-MM-dd HH:mm:ss'), kind, maskId_(to), ok ? 'ok' : 'ng']);
+  } catch (err) { console.error('logPush_ failed: ' + err); }
+}
+
+function maskId_(s) {
+  s = String(s || '');
+  return s.length <= 4 ? '****' : '****' + s.slice(-4);
 }
 
 /**
@@ -769,24 +802,55 @@ function lineLogin_(b) {
       console.error('lineLogin_ token exchange failed: ' + tokenCode + ' ' + tokenRes.getContentText());
       return { ok: false, error: 'line_login_failed' };
     }
-    // 2) id_token 検証（client_id を渡し aud を検証させる）→ sub(userId)・name(表示名)
-    var verifyRes = UrlFetchApp.fetch('https://api.line.me/oauth2/v2.1/verify', {
-      method: 'post',
-      contentType: 'application/x-www-form-urlencoded',
-      payload: { id_token: tokenJson.id_token, client_id: channelId },
-      muteHttpExceptions: true,
-    });
-    var verifyCode = verifyRes.getResponseCode();
-    var claims = JSON.parse(verifyRes.getContentText() || '{}');
-    if (verifyCode !== 200 || !claims.sub) {
-      console.error('lineLogin_ verify failed: ' + verifyCode + ' ' + verifyRes.getContentText());
-      return { ok: false, error: 'line_login_failed' };
-    }
-    return { ok: true, lineUserId: claims.sub, displayName: claims.name || '' };
+    // 2) id_token 検証（共通ヘルパに集約）→ sub(userId)・name(表示名)
+    var verified = verifyLineIdToken_(tokenJson.id_token);
+    if (!verified) return { ok: false, error: 'line_login_failed' };
+    return { ok: true, lineUserId: verified.userId, displayName: verified.displayName };
   } catch (err) {
     console.error('lineLogin_ failed: ' + err);
     return { ok: false, error: 'line_login_failed' };
   }
+}
+
+/**
+ * LINE の id_token を verify エンドポイントで検証し claims を取り出す共通処理。
+ * LINE Login（code交換後の id_token）と LIFF（liff.getIDToken()）の双方から使う。
+ * aud 検証のため client_id に LINE Login チャネルID（= LIFFアプリの所属チャネル）を渡す。
+ * 成功: { userId, displayName, email } / 失敗: null
+ */
+function verifyLineIdToken_(idToken) {
+  var channelId = prop_('LINE_LOGIN_CHANNEL_ID');
+  if (!channelId || !idToken) return null;
+  try {
+    var res = UrlFetchApp.fetch('https://api.line.me/oauth2/v2.1/verify', {
+      method: 'post',
+      contentType: 'application/x-www-form-urlencoded',
+      payload: { id_token: idToken, client_id: channelId },
+      muteHttpExceptions: true,
+    });
+    var claims = JSON.parse(res.getContentText() || '{}');
+    if (res.getResponseCode() !== 200 || !claims.sub) {
+      console.error('verifyLineIdToken_ failed: ' + res.getResponseCode() + ' ' + res.getContentText());
+      return null;
+    }
+    return { userId: claims.sub, displayName: claims.name || '', email: claims.email || '' };
+  } catch (err) {
+    console.error('verifyLineIdToken_ error: ' + err);
+    return null;
+  }
+}
+
+/**
+ * LIFF 経由の認証。フロントが liff.getIDToken() で得た id_token を渡してくる
+ * （POST {action:'liffVerify', idToken}）。サーバ側で検証して userId を確定する。
+ * クライアントの getProfile().userId は詐称可能なため信用せず、必ず検証済みの sub を使う。
+ * email は LINE Login チャネルで email スコープが許可されているときのみ返る。
+ * 成功: { ok:true, lineUserId, displayName, email } / 失敗: { ok:false, error:'liff_verify_failed' }
+ */
+function liffVerify_(b) {
+  var verified = verifyLineIdToken_((b && b.idToken) || '');
+  if (!verified) return { ok: false, error: 'liff_verify_failed' };
+  return { ok: true, lineUserId: verified.userId, displayName: verified.displayName, email: verified.email };
 }
 
 function sendMail_(to, subject, body) {
@@ -834,6 +898,107 @@ function bookingSummary_(menu, start, eff, isFirst) {
   return 'メニュー: ' + menu.name + (isFirst && eff.durationMin ? '（初回）' : '') + '\n' +
     '日時: ' + fmt_(start, 'M/d(E) HH:mm') + '〜（' + eff.durationMin + '分）\n' +
     '料金: ¥' + Number(eff.price).toLocaleString('ja-JP');
+}
+
+// ============================================================
+// 定期実行（時間トリガー）：前日リマインド / 来店後フォロー / 無料枠監視
+//   GAS の「トリガー」で日次（毎朝）実行を登録する。手順は docs/SETUP.md 参照。
+//   ※リマインド/フォローは push 枠を消費するため checkQuota_ の監視対象。
+// ============================================================
+
+/**
+ * 前日リマインド。翌日に予定されている【確定】予約のお客様へ LINE/メールで通知する。
+ * 二重送信防止に送信済みイベントへ reminded=true タグを付ける（再実行しても多重送信しない）。
+ */
+function sendReminders_() {
+  var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
+  if (!cal) return;
+  var from = startOfDay_(addDays_(new Date(), 1)); // 翌日 0:00
+  var to = addDays_(from, 1);                       // 翌々日 0:00
+  cal.getEvents(from, to).forEach(function (ev) {
+    if (getEventProp_(ev, 'status') !== STATUS.CONFIRMED) return;
+    if (getEventProp_(ev, 'reminded') === 'true') return;
+    var props = getEventProps_(ev);
+    var menu = MENU[props.menuId] || { name: props.menuId };
+    var eff = { durationMin: displayDurationMin_(props, ev), price: Number(props.price || 0) };
+    notifyCustomerProps_(props,
+      '【ご予約前日のお知らせ】\n明日のご予約です。お気をつけてお越しください。\n' +
+      bookingSummary_(menu, ev.getStartTime(), eff, props.isFirstTime === 'true') +
+      '\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(props.token),
+      'reminder');
+    ev.setTag('reminded', 'true');
+  });
+}
+
+/**
+ * 来店後フォロー。前日に終了した【確定】予約のお客様へお礼/再来店メッセージを送る。
+ * 二重送信防止に followedUp=true タグを付ける。
+ */
+function sendFollowUps_() {
+  var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
+  if (!cal) return;
+  var from = startOfDay_(addDays_(new Date(), -1)); // 前日 0:00
+  var to = startOfDay_(new Date());                  // 当日 0:00
+  cal.getEvents(from, to).forEach(function (ev) {
+    if (getEventProp_(ev, 'status') !== STATUS.CONFIRMED) return;
+    if (getEventProp_(ev, 'followedUp') === 'true') return;
+    var props = getEventProps_(ev);
+    notifyCustomerProps_(props,
+      '【ご来店ありがとうございました】\n先日はサロン和笑〜Violane〜をご利用いただき、ありがとうございました。\n' +
+      'お身体の調子はいかがでしょうか。またのご来店を心よりお待ちしております。',
+      'followup');
+    ev.setTag('followedUp', 'true');
+  });
+}
+
+// ---- 無料枠（Messaging API push）の監視 ----
+
+/** 当月の push 送信数（無料枠カウント対象）を取得。失敗時は null。 */
+function getQuotaConsumption_() {
+  var token = prop_('LINE_CHANNEL_ACCESS_TOKEN');
+  if (!token) return null;
+  try {
+    var res = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/quota/consumption', {
+      method: 'get',
+      headers: { Authorization: 'Bearer ' + token },
+      muteHttpExceptions: true,
+    });
+    if (res.getResponseCode() !== 200) {
+      console.error('quota/consumption http ' + res.getResponseCode() + ': ' + res.getContentText());
+      return null;
+    }
+    return Number(JSON.parse(res.getContentText() || '{}').totalUsage || 0);
+  } catch (err) { console.error('getQuotaConsumption_ failed: ' + err); return null; }
+}
+
+/**
+ * 無料枠の上限。Script Property MONTHLY_FREE_QUOTA（既定200）。
+ * free プランは message/quota API が上限を返さないことがあるため固定値で持つ。
+ */
+function monthlyFreeQuota_() {
+  return Number(prop_('MONTHLY_FREE_QUOTA')) || 200;
+}
+
+/** 管理画面用：当月送信数と上限・残量を返す（used が null は取得失敗）。 */
+function adminGetQuota_() {
+  var used = getQuotaConsumption_();
+  var limit = monthlyFreeQuota_();
+  return { ok: true, used: used, limit: limit, available: used == null ? null : Math.max(0, limit - used) };
+}
+
+/**
+ * 無料枠監視（日次トリガー）。当月送信数が上限の80%以上ならオーナーへ警告する。
+ * 月内の多重警告を避けるため、警告済みの月(yyyy-MM)を QUOTA_WARNED_YYYYMM に記録する。
+ */
+function checkQuota_() {
+  var used = getQuotaConsumption_();
+  if (used == null) return;
+  var limit = monthlyFreeQuota_();
+  if (used < limit * 0.8) return;
+  var ym = fmt_(new Date(), 'yyyy-MM');
+  if (prop_('QUOTA_WARNED_YYYYMM') === ym) return; // 今月は警告済み
+  notifyOwner_('【LINE無料枠の警告】\n今月の送信数が ' + used + '/' + limit + ' 通に達しました（80%超）。\n上限を超えると追加メッセージは送信されません。');
+  PropertiesService.getScriptProperties().setProperty('QUOTA_WARNED_YYYYMM', ym);
 }
 
 // ============================================================

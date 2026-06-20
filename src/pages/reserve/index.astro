@@ -8,6 +8,7 @@ import {
   ENV_LABEL,
   LINE_LOGIN_CHANNEL_ID,
   LINE_LOGIN_REDIRECT,
+  LIFF_ID,
 } from '../../data/config.js';
 import EnvBadge from '../../components/EnvBadge.astro';
 
@@ -35,6 +36,7 @@ const grouped = groupOrder.map((g) => ({
     <meta name="robots" content="noindex" />
     <title>{pageTitle}</title>
     <meta name="description" content="サロン和笑〜Violane〜 のオンライン予約。メニューと日時を選んでお申し込みいただけます。" />
+    {LIFF_ID ? <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script> : null}
   </head>
   <body>
     <EnvBadge />
@@ -217,6 +219,15 @@ const grouped = groupOrder.map((g) => ({
         <div class="done-mark">✓</div>
         <h2>仮予約を受け付けました</h2>
         <div class="done-body" id="doneBody"></div>
+        <!-- LIFF: 友だち未追加の案内（確定・リマインドのpush通知を届けるため） -->
+        <div id="liffFriend" class="line-link" hidden>
+          <p class="hint">確定・リマインドのご連絡をLINEでお受け取りいただくには、サロンの公式アカウントを友だち追加してください。</p>
+          <a class="line-btn" href="https://lin.ee/7ZvbqEb" target="_blank" rel="noopener noreferrer">
+            <span class="line-ico" aria-hidden="true">LINE</span>友だち追加する
+          </a>
+        </div>
+        <!-- LIFF: 友だちにサロンを教える（任意） -->
+        <button type="button" class="reserve-btn ghost" id="liffShareBtn" hidden>友だちにサロンを教える</button>
         <a class="reserve-btn ghost" href={base}>トップへ戻る</a>
       </section>
     </main>
@@ -226,14 +237,16 @@ const grouped = groupOrder.map((g) => ({
       <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
     </footer>
 
-    <script define:vars={{ RESERVE_API, BOOKING_RULES, LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_REDIRECT, tel }}>
+    <script define:vars={{ RESERVE_API, BOOKING_RULES, LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_REDIRECT, LIFF_ID, tel }}>
       const WD = ['日', '月', '火', '水', '木', '金', '土'];
-      const state = { menu: null, date: null, time: null, days: [], availSet: null, calMin: null, calMax: null, holidays: {}, lineUserId: '', displayName: '' };
+      const state = { menu: null, date: null, time: null, days: [], availSet: null, calMin: null, calMax: null, holidays: {}, lineUserId: '', displayName: '', inLiff: false };
       let calMonth = null; // カレンダーで表示中の月 {y, m(0始まり)}
       let restoreTarget = null; // LINE 認可リダイレクト復帰時に選び直す日時 {date, time}
 
       // LINE 連携が使える設定か（チャネルID＋redirect が揃っているとき）
       const LINE_ENABLED = !!(LINE_LOGIN_CHANNEL_ID && LINE_LOGIN_REDIRECT);
+      // LIFF（LINEアプリ内）連携が使える設定か
+      const LIFF_ENABLED = !!LIFF_ID;
       const LS_KEY = 'wasyo_line_profile'; // 端末内に保存する連携プロフィール
       // 認可リダイレクト中の一時退避（state/nonce/フォーム下書き）。
       // sessionStorage はタブ/アプリ内ブラウザをまたぐと失われるため localStorage に保存し、復帰時に必ず消す。
@@ -261,10 +274,11 @@ const grouped = groupOrder.map((g) => ({
 
       // 連携状態に応じてフォーム表示を切り替える
       function applyLinkState() {
-        if (!LINE_ENABLED) return; // 未設定環境では従来どおり（メール必須・LINE枠非表示）
+        if (!LINE_ENABLED && !LIFF_ENABLED) return; // 未設定環境では従来どおり（メール必須・LINE枠非表示）
         $('#lineLink').hidden = false;
         const linked = !!state.lineUserId;
-        $('#lineUnlinked').hidden = linked;
+        // OAuthの「連携する」ボタンは LINE_ENABLED のときだけ意味を持つ（LIFF専用構成では非表示）
+        $('#lineUnlinked').hidden = linked || !LINE_ENABLED;
         $('#lineLinked').hidden = !linked;
         if (linked) $('#lineDisplayName').textContent = state.displayName || 'お客様';
         // メールは連携時のみ任意
@@ -411,16 +425,83 @@ const grouped = groupOrder.map((g) => ({
         }
       }
 
+      // LIFF（LINEアプリ内）：ログイン操作なしで userId/表示名/メールを取得して自動入力
+      // 成立したら true を返し、以降の OAuth/端末保存フローはスキップする。
+      async function initLiff() {
+        if (!LIFF_ENABLED || !window.liff) return false;
+        try {
+          await liff.init({ liffId: LIFF_ID });
+        } catch (_) {
+          return false; // 初期化失敗時は通常フロー（OAuth/手入力）へフォールバック
+        }
+        // LINEアプリ内でないなら LIFF は使わない（Webから来た予約客は従来フロー）
+        if (!liff.isInClient()) return false;
+        try {
+          if (!liff.isLoggedIn()) { liff.login(); return true; } // 認可後この画面に戻る
+          const idToken = liff.getIDToken();
+          if (!idToken) return false;
+          // userId は詐称防止のためサーバ(GAS)で id_token を検証して確定する
+          const res = await fetch(RESERVE_API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'liffVerify', idToken }),
+          });
+          const data = await res.json();
+          if (!data.ok || !data.lineUserId) return false;
+          state.lineUserId = data.lineUserId;
+          state.displayName = data.displayName || '';
+          state.inLiff = true;
+          if (state.displayName && !$('#f-name').value.trim()) $('#f-name').value = state.displayName;
+          if (data.email && !$('#f-email').value.trim()) $('#f-email').value = data.email; // メール自動入力
+          applyLinkState();
+          return true;
+        } catch (_) {
+          return false;
+        }
+      }
+
+      // 予約成功後（LIFF時のみ）：トークへ送信／友だち追加案内／シェアボタン
+      async function liffAfterBooking(data) {
+        if (!state.inLiff || !window.liff) return;
+        // 完了内容を本人のトークへ送る（トーク文脈からの起動時のみ有効・push枠は消費しない）
+        try {
+          if (liff.isApiAvailable('sendMessages')) {
+            const text = '【予約を申し込みました】\n' + state.menu.name + '\n' +
+              fmtDateLabel(state.date) + ' ' + state.time + '〜\nサロンの確認後、確定のご連絡をいたします。';
+            await liff.sendMessages([{ type: 'text', text }]);
+          }
+        } catch (_) {}
+        // 友だち未追加なら案内（確定/リマインドの push を届ける前提を作る）
+        try {
+          const fs = await liff.getFriendship();
+          if (fs && fs.friendFlag === false) $('#liffFriend').hidden = false;
+        } catch (_) {}
+        // 友だちにサロンを教える（shareTargetPicker が使えるときだけ）
+        try {
+          if (liff.isApiAvailable('shareTargetPicker')) {
+            const shareBtn = $('#liffShareBtn');
+            shareBtn.hidden = false;
+            shareBtn.addEventListener('click', () => {
+              liff.shareTargetPicker([
+                { type: 'text', text: 'サロン和笑〜Violane〜 のネット予約はこちら\nhttps://lin.ee/7ZvbqEb' },
+              ]).catch(() => {});
+            }, { once: true });
+          }
+        } catch (_) {}
+      }
+
       // 初期化（連携復帰 or 端末保存からの自動連携）
       async function initLine() {
-        if (!LINE_ENABLED) return;
+        if (!LINE_ENABLED && !LIFF_ENABLED) return;
         $('#lineLink').hidden = false;
-        $('#lineLinkBtn').addEventListener('click', startLineLink);
+        if (LINE_ENABLED) $('#lineLinkBtn').addEventListener('click', startLineLink);
         $('#lineUnlinkBtn').addEventListener('click', clearProfile);
         $('#knownEditBtn').addEventListener('click', () => {
           $('#knownSummary').hidden = true;
           $('#fieldsBlock').hidden = false;
         });
+        // LIFF（LINEアプリ内）優先。成立したら OAuth/端末保存フローはスキップ
+        if (await initLiff()) return;
         const returned = await handleLineReturn();
         if (returned) return; // 連携直後（保存値はまだ無い）
         // 再訪：端末に連携情報があれば自動で連携済み扱い＋既知項目を折りたたみ
@@ -690,6 +771,7 @@ const grouped = groupOrder.map((g) => ({
             saveProfile({ lineUserId: state.lineUserId, displayName: state.displayName, name, phone, gender, referrer });
           }
           renderDone(data);
+          liffAfterBooking(data); // LIFF時のみ：トーク送信／友だち追加案内／シェア
         } catch (e) {
           btn.disabled = false;
           btn.textContent = orig;

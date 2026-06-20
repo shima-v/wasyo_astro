@@ -187,3 +187,33 @@
 - **切り分け**: `lineLogin_` は throw せず `{ok:false}` を返す→ Executions は「完了」表示で見落としやすい。**一時診断で失敗内容を Script Property `LINE_LAST_ERROR` に記録**して特定した（確認後に撤去）。
 - **対策**: `src/data/config.js` で `RESERVE_API` / `LINE_LOGIN_*` を **必ず `.trim()`**（secret由来のコピペ空白に耐性）。secret 側も前後空白なしに直すのが正本。
 - **教訓**: 環境変数/secret 由来の値は**前後空白で壊れうる**。URL・ID 系は source で trim。`redirect_uri` 系のエラーは **malformed（書式不正＝空白等）と does not match（登録ズレ）を区別**して読む。
+
+---
+
+## 2026-06-20 — LIFF（LINEアプリ内予約）導入のハマりどころ
+
+> LINEアプリ内で予約を完結させる LIFF 化に伴う注意点。設計は [`../RESERVATION_PLAN.md`](../RESERVATION_PLAN.md)「LIFF構成」、進捗は [`../WBS.md`](../WBS.md) Phase 5、実装は [`../gas/Code.gs`](../gas/Code.gs)（`verifyLineIdToken_`/`liffVerify_`/`sendReminders_`/`checkQuota_`）・[`../src/pages/reserve/index.astro`](../src/pages/reserve/index.astro)（`initLiff`/`liffAfterBooking`）。
+
+### LIFF エンドポイントは HTTPS 必須 — `localhost` では検証不可
+- LIFF アプリのエンドポイントURLは **HTTPS 必須**。`http://localhost:4321/reserve/` は登録できず、`liff.init` 後の `isInClient` 経路を実機で確認できない。
+- → dev の LIFF 実機確認は **Cloudflare Workers の dev URL（HTTPS）** で行う。LINE Login(OAuth) 用の localhost コールバック設定とは**別物**なので混同しない。
+
+### userId はクライアントの `getProfile()` を信用しない（なりすまし防止）
+- `liff.getProfile().userId` は**クライアントが自由に詐称できる**。予約に使う userId は **`liff.getIDToken()` の id_token を GAS に送り、`oauth2/v2.1/verify` でサーバ検証**して `sub` を確定する（`liffVerify_`）。
+- 検証は LINE Login(OAuth) の verify と**同一処理**なので `verifyLineIdToken_` に集約して共用した。これは「通知URLの先読み」教訓（GETの冪等性）と同じく **クライアント入力を信用しない** という原則の適用。
+
+### `liff.sendMessages()` は「トーク文脈からの起動時のみ」有効
+- 予約完了時にトークへメッセージを残す `sendMessages` は、**リッチメニュー/トークから起動したとき**は使えるが、**プロフィールや外部ブラウザ起動**では使えないことがある。
+- → 必ず `liff.isApiAvailable('sendMessages')` でガードし、失敗は握りつぶす（予約自体は GAS の push 通知で担保）。`shareTargetPicker` も同様に `isApiAvailable` ガード。
+
+### 無料枠（月200通）— `message/quota` は上限を返さないことがある
+- LINE Messaging API のコミュニケーション（無料）プランは **push 系が月200通**。だが **`/message/quota` は free プランで上限を返さない**（type:`none` 等）ことがある。
+- → 上限は **Script Property `MONTHLY_FREE_QUOTA`（既定200）** に固定で持ち、**消費数は `/message/quota/consumption` の `totalUsage`** を信頼する。`checkQuota_` が80%超でオーナー警告（`QUOTA_WARNED_YYYYMM` で月内多重警告を防止）。
+- 「200通」はあくまで現行プラン前提。プラン変更時はこの固定値の追従が必要（実態より少なく/多く表示しない）。
+
+### リマインド/フォローの二重送信防止はイベントタグで
+- `sendReminders_`/`sendFollowUps_` は日次トリガーで複数回走り得るため、送信済みイベントに **`reminded`/`followedUp` タグ**を付けて多重送信を防ぐ（`setEventProps_` と同じ `setTag` 機構）。対象は **`status===confirmed`** のみ（仮予約には送らない）。
+- 送信は push 枠を消費するため、これらも `checkQuota_` の監視対象に含める前提で運用する。
+
+### LIFF SDK の読込タイミング
+- SDK は `LIFF_ID` 設定時のみ `<head>` に**同期 script**（`static.line-scdn.net/liff/edge/2/sdk.js`）で読み込む。ページ末尾の `define:vars` スクリプトより先に `window.liff` が定義される。`LIFF_ID` 未設定なら SDK もロードされず、`initLiff` は `!window.liff` で早期 return＝**従来フロー（OAuth/手入力）に無影響**。
