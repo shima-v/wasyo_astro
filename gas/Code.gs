@@ -903,14 +903,16 @@ function bookingSummary_(menu, start, eff, isFirst) {
 // ============================================================
 // 定期実行（時間トリガー）：前日リマインド / 来店後フォロー / 無料枠監視
 //   GAS の「トリガー」で日次（毎朝）実行を登録する。手順は docs/SETUP.md 参照。
-//   ※リマインド/フォローは push 枠を消費するため checkQuota_ の監視対象。
+//   ※リマインド/フォローは push 枠を消費するため checkQuota の監視対象。
+//   トリガーから選べるよう、エントリポイントは末尾 _ を付けない公開関数にする
+//   （末尾 _ の関数はトリガーUIの一覧に出ない）。
 // ============================================================
 
 /**
  * 前日リマインド。翌日に予定されている【確定】予約のお客様へ LINE/メールで通知する。
  * 二重送信防止に送信済みイベントへ reminded=true タグを付ける（再実行しても多重送信しない）。
  */
-function sendReminders_() {
+function sendReminders() {
   var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
   if (!cal) return;
   var from = startOfDay_(addDays_(new Date(), 1)); // 翌日 0:00
@@ -934,7 +936,7 @@ function sendReminders_() {
  * 来店後フォロー。前日に終了した【確定】予約のお客様へお礼/再来店メッセージを送る。
  * 二重送信防止に followedUp=true タグを付ける。
  */
-function sendFollowUps_() {
+function sendFollowUps() {
   var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
   if (!cal) return;
   var from = startOfDay_(addDays_(new Date(), -1)); // 前日 0:00
@@ -990,7 +992,7 @@ function adminGetQuota_() {
  * 無料枠監視（日次トリガー）。当月送信数が上限の80%以上ならオーナーへ警告する。
  * 月内の多重警告を避けるため、警告済みの月(yyyy-MM)を QUOTA_WARNED_YYYYMM に記録する。
  */
-function checkQuota_() {
+function checkQuota() {
   var used = getQuotaConsumption_();
   if (used == null) return;
   var limit = monthlyFreeQuota_();

@@ -156,8 +156,8 @@
 ### 5.1 GAS バックエンド 🤖
 - [x] 5.1.1 `verifyLineIdToken_(idToken)` を抽出（`lineLogin_` の verify 部を共通化・email クレームも返す）
 - [x] 5.1.2 `liffVerify_(b)` 新規＋`doPost` に `case 'liffVerify'`（id_token をサーバ検証して userId 確定＝なりすまし防止）
-- [x] 5.1.3 `sendReminders_()`（前日・確定予約へ LINE/メール・`reminded` タグで多重防止）/ `sendFollowUps_()`（来店翌日・`followedUp` タグ）
-- [x] 5.1.4 無料枠監視：`getQuotaConsumption_`/`adminGetQuota_`/`case 'getQuota'`/`checkQuota_`（80%でオーナー警告・月単位ガード `QUOTA_WARNED_YYYYMM`）
+- [x] 5.1.3 `sendReminders()`（前日・確定予約へ LINE/メール・`reminded` タグで多重防止）/ `sendFollowUps()`（来店翌日・`followedUp` タグ）
+- [x] 5.1.4 無料枠監視：`getQuotaConsumption_`/`adminGetQuota_`/`case 'getQuota'`/`checkQuota`（80%でオーナー警告・月単位ガード `QUOTA_WARNED_YYYYMM`）
 - [x] 5.1.5 送信ログ：`linePushMessages_` に `kind` 引数＋`logPush_`（台帳の「送信ログ」シートへ日時/種別/宛先マスク/成否を記録）
 
 ### 5.2 フロント 🤖
@@ -174,7 +174,7 @@
 - [ ] 5.4.1 dev/prod の LINE Login チャネルに LIFF アプリ追加（エンドポイント=各 `/reserve/`・サイズ Full・スコープ `profile openid email` `chat_message.write`・`bot_prompt=normal`）→ `LIFF_ID` 控え
 - [ ] 5.4.2 LINE Login チャネルに公式アカウント（Messaging API）を連携（`getFriendship`/友だち追加の前提）＋ email 取得申請
 - [ ] 5.4.3 リッチメニュー/トークカード/プロフィールに LIFF URL（`https://liff.line.me/{LIFF_ID}`）設定
-- [ ] 5.4.4 GAS 時間トリガー登録：`sendReminders_`/`sendFollowUps_`/`checkQuota_` を日次（毎朝）＋ Script Property `MONTHLY_FREE_QUOTA`（既定200）
+- [ ] 5.4.4 GAS 時間トリガー登録：`sendReminders`/`sendFollowUps`/`checkQuota` を日次（毎朝）＋ Script Property `MONTHLY_FREE_QUOTA`（既定200）
 - [ ] 5.4.5 e2e：dev Workers URL→LINEアプリで LIFF 起動→自動入力→予約→`liffVerify` 検証・リマインド/フォロー多重防止・無料枠表示・警告
 
 ---

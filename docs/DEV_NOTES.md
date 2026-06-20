@@ -192,7 +192,7 @@
 
 ## 2026-06-20 — LIFF（LINEアプリ内予約）導入のハマりどころ
 
-> LINEアプリ内で予約を完結させる LIFF 化に伴う注意点。設計は [`../RESERVATION_PLAN.md`](../RESERVATION_PLAN.md)「LIFF構成」、進捗は [`../WBS.md`](../WBS.md) Phase 5、実装は [`../gas/Code.gs`](../gas/Code.gs)（`verifyLineIdToken_`/`liffVerify_`/`sendReminders_`/`checkQuota_`）・[`../src/pages/reserve/index.astro`](../src/pages/reserve/index.astro)（`initLiff`/`liffAfterBooking`）。
+> LINEアプリ内で予約を完結させる LIFF 化に伴う注意点。設計は [`../RESERVATION_PLAN.md`](../RESERVATION_PLAN.md)「LIFF構成」、進捗は [`../WBS.md`](../WBS.md) Phase 5、実装は [`../gas/Code.gs`](../gas/Code.gs)（`verifyLineIdToken_`/`liffVerify_`/`sendReminders`/`checkQuota`）・[`../src/pages/reserve/index.astro`](../src/pages/reserve/index.astro)（`initLiff`/`liffAfterBooking`）。
 
 ### LIFF エンドポイントは HTTPS 必須 — `localhost` では検証不可
 - LIFF アプリのエンドポイントURLは **HTTPS 必須**。`http://localhost:4321/reserve/` は登録できず、`liff.init` 後の `isInClient` 経路を実機で確認できない。
@@ -208,12 +208,12 @@
 
 ### 無料枠（月200通）— `message/quota` は上限を返さないことがある
 - LINE Messaging API のコミュニケーション（無料）プランは **push 系が月200通**。だが **`/message/quota` は free プランで上限を返さない**（type:`none` 等）ことがある。
-- → 上限は **Script Property `MONTHLY_FREE_QUOTA`（既定200）** に固定で持ち、**消費数は `/message/quota/consumption` の `totalUsage`** を信頼する。`checkQuota_` が80%超でオーナー警告（`QUOTA_WARNED_YYYYMM` で月内多重警告を防止）。
+- → 上限は **Script Property `MONTHLY_FREE_QUOTA`（既定200）** に固定で持ち、**消費数は `/message/quota/consumption` の `totalUsage`** を信頼する。`checkQuota` が80%超でオーナー警告（`QUOTA_WARNED_YYYYMM` で月内多重警告を防止）。
 - 「200通」はあくまで現行プラン前提。プラン変更時はこの固定値の追従が必要（実態より少なく/多く表示しない）。
 
 ### リマインド/フォローの二重送信防止はイベントタグで
-- `sendReminders_`/`sendFollowUps_` は日次トリガーで複数回走り得るため、送信済みイベントに **`reminded`/`followedUp` タグ**を付けて多重送信を防ぐ（`setEventProps_` と同じ `setTag` 機構）。対象は **`status===confirmed`** のみ（仮予約には送らない）。
-- 送信は push 枠を消費するため、これらも `checkQuota_` の監視対象に含める前提で運用する。
+- `sendReminders`/`sendFollowUps` は日次トリガーで複数回走り得るため、送信済みイベントに **`reminded`/`followedUp` タグ**を付けて多重送信を防ぐ（`setEventProps_` と同じ `setTag` 機構）。対象は **`status===confirmed`** のみ（仮予約には送らない）。
+- 送信は push 枠を消費するため、これらも `checkQuota` の監視対象に含める前提で運用する。
 
 ### LIFF SDK の読込タイミング
 - SDK は `LIFF_ID` 設定時のみ `<head>` に**同期 script**（`static.line-scdn.net/liff/edge/2/sdk.js`）で読み込む。ページ末尾の `define:vars` スクリプトより先に `window.liff` が定義される。`LIFF_ID` 未設定なら SDK もロードされず、`initLiff` は `!window.liff` で早期 return＝**従来フロー（OAuth/手入力）に無影響**。
