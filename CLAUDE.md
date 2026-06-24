@@ -4,50 +4,65 @@
 
 ## 設計・進捗ドキュメント
 
-- 予約機能の設計プラン: ./RESERVATION_PLAN.md
-- 予約機能の WBS（進捗管理）: ./WBS.md
+- 予約機能の設計プラン: ./docs/RESERVATION_PLAN.md
+- 予約機能の WBS（進捗管理）: ./docs/WBS.md
+- 外部サービスの初期設定手順: ./docs/SETUP.md
 - 開発メモ・既知のハマりどころ（備忘録）: ./docs/DEV_NOTES.md
+- GAS バックエンド（予約システム）: ./gas/README.md
 
 ## コマンド
 
 ```bash
-pnpm dev        # ローカル開発サーバー起動 (http://localhost:4321/wasyo_astro/)
+pnpm dev        # ローカル開発サーバー起動 (http://localhost:4321/)
 pnpm build      # 本番ビルド → dist/ に出力
 pnpm preview    # 本番ビルドをローカルでプレビュー
 ```
 
-パッケージマネージャーは **pnpm**。テストランナーは未設定。
+パッケージマネージャーは **pnpm**（`packageManager: pnpm@11.7.0`）。テストランナーは未設定。
 
-## デプロイ
+## デプロイ（本番 / 開発で分離）
 
-`main` ブランチへのプッシュで GitHub Actions が起動し、`https://shima-v.github.io/wasyo_astro/` へ自動デプロイされる。
+- **本番(prod)**: `main` ブランチへのプッシュで GitHub Actions（`.github/workflows/deploy.yml`）が起動し、GitHub Pages → カスタムドメイン `https://wwwasyo.com/` へ自動デプロイ。
+- **開発(dev)**: `develop` ブランチを Cloudflare Workers(Builds) が自動ビルド/デプロイ（`wasyo-dev.<account>.workers.dev`）。
 
-`base` パス（`wasyo_astro`）は `astro.config.mjs` で設定。サイト内のアセットパスはすべて `import.meta.env.BASE_URL` を使う必要があり、`index.astro` 冒頭で `const base` として定義済み。
+`base` は `astro.config.mjs` で `'/'`（カスタムドメイン移行済み。旧 GitHub Pages サブパス `wasyo_astro` は廃止）。サイト内パスは移植性のため `import.meta.env.BASE_URL` を使い、`index.astro` 冒頭で末尾スラッシュを正規化した `const base` として定義済み。`site` は環境変数 `PUBLIC_SITE_URL` で切替（既定=prod）。環境分離の全体像は README.md「環境分離」節と docs/RESERVATION_PLAN.md を参照。
 
 ## アーキテクチャ
 
-**単一ファイル構成の Astro サイト**。コンテンツ・スタイル・ロジックはすべて `src/pages/index.astro` に集約されており、コンポーネント・レイアウト・独立した CSS ファイルは原則存在しない（例外: dev 環境表示用の `src/components/EnvBadge.astro` のみ。全ページ共通で使う唯一の共有コンポーネント）。
+トップLP（`src/pages/index.astro`）は**単一ファイル構成**（コンテンツ・スタイル・ロジックを集約、独立 CSS なし）。これに**サイト内予約システム**（Astro 複数ページ＋GAS バックエンド）が加わった構成。
 
-- `src/pages/index.astro` — サイト全体：フロントマター変数、HTML、`<style>` ブロック
-- `src/components/EnvBadge.astro` — **dev のときだけ**画面右上に斜めリボン「🚧 開発環境」を表示（prod は DOM も CSS も非出力。スタイルはインライン指定で prod を完全無変更に保つ）。`config.js` の `IS_DEV`（=`PUBLIC_ENV==='development'`）で切替。GAS 管理画面（`gas/admin.html`）にも同じリボンをインラインで設置済み。タブの `【開発】` は各ページ `<title>` 冒頭の `{ENV_LABEL}` で付与。環境分離の全体像は README.md「環境分離」節を参照
+### フロント（`src/`）
+
+- `src/pages/index.astro` — トップLP：フロントマター変数、HTML、`<style>` ブロック
+- `src/pages/reserve/index.astro` — 予約UI（メニュー→日時→フォーム送信。LINE Login／LIFF 対応）
+- `src/pages/reserve/manage.astro` — お客様の予約変更・キャンセル（トークン受取）
+- `src/pages/privacy/index.astro` — プライバシーポリシー
+- `src/data/config.js` — 環境設定（`PUBLIC_*` を読む。`IS_DEV`/`ENV_LABEL`/`RESERVE_API`/`LIFF_ID` 等）
+- `src/data/menu.js` — メニュー定義（`MENU`／通常・初回の料金・所要時間）。GAS 側の `MENU` と二重管理
+- `src/components/EnvBadge.astro` — **dev のときだけ**画面右上に斜めリボン「🚧 開発環境」を表示（prod は DOM も CSS も非出力。スタイルはインライン指定で prod を完全無変更に保つ）。`config.js` の `IS_DEV`（=`PUBLIC_ENV==='development'`）で切替。GAS 管理画面（`gas/admin.html`）にも同じリボンをインラインで設置済み。タブの `【開発】` は各ページ `<title>` 冒頭の `{ENV_LABEL}` で付与
 - `src/pages/assets/images/` — 元画像ファイル（`logo.jpg`、`naisou.jpg`）
 - `public/` — ルートで配信される静的アセット（favicon・画像）
   - `public/favicon.jpg` — favicon として使用
   - `public/images/naisou.jpg` — コンセプトセクションの内装写真
   - `public/images/logo.jpg` — アクセスセクションの看板写真
 
-### 主要なフロントマター変数（`index.astro` 行 1〜6）
+### バックエンド（`gas/`）
+
+Google Apps Script の予約システム（空き枠計算／仮予約／承認・辞退／変更・取消／新規・常連判定／LINE・メール通知）。保存先はサロン所有の Google（カレンダー＋顧客台帳シート）と LINE のみで独自DBなし。詳細は ./gas/README.md と ./docs/RESERVATION_PLAN.md を参照。
+
+### 主要なフロントマター変数（`index.astro` 冒頭）
 
 | 変数 | 用途 |
 |------|------|
 | `salonName` | `<title>` とヘッダーに表示 |
+| `base` | `import.meta.env.BASE_URL`（末尾スラッシュ正規化）— サイト内パスのプレフィックス |
+| `reservePath` | サイト内予約システム `/reserve/`（メインCTA） |
+| `reservaUrl` | RESERVA（移行期間のフォールバックCTA） |
 | `tel` | アクセスセクションの `tel:` リンクに使用 |
-| `reserveUrl` | 外部予約URL。全CTAボタンで共通使用 |
-| `base` | `import.meta.env.BASE_URL` — ローカルアセットパスのプレフィックス |
 
 ### CSS デザイントークン（`<style>` 内の `:root`）
 
-テーマは「和モダン・エレガント」。ロゴ（サロン和笑〜Violane〜）の色調に統一している。
+テーマは「和×アジアンラグジュアリー」（ゴールド × ダークブラウン × モーヴ紫）。ロゴ（サロン和笑〜Violane〜）の色調に統一している。
 
 | 変数 | 値 | 用途 |
 |------|----|------|
@@ -58,21 +73,25 @@ pnpm preview    # 本番ビルドをローカルでプレビュー
 | `--c-border` | `#E2D0D8` | 罫線（ピンクがかった） |
 | `--c-purple` | `#8B6080` | **メインモーヴ**（ベージュ+マゼンタを薄く混ぜた温かみのある紫） |
 | `--c-purple-lt` | `#B09AB0` | 中間モーヴ |
-| `--c-purple-dk` | `#6B4860` | 濃いモーヴ（ホバー・セカンダリ） |
+| `--c-purple-dk` | `#3E2B4A` | 濃いモーヴ（ホバー・セカンダリ） |
 | `--c-purple-pale` | `#C8A8C4` | 薄モーヴ（装飾・補助） |
-| `--c-accent` | `#F7E58E` | イエロー（ドット装飾・ホバー・フッターライン） |
 | `--c-reserve` | `#8B6080` | 予約ボタン色（= `--c-purple` 同値） |
+| `--c-reserve-hv` | `#3E2B4A` | 予約ボタンホバー |
+| `--c-accent` | `#C9A84C` | **ゴールド**（アクセント・ドット装飾・フッター上ライン） |
+| `--c-brown` | `#4A3728` | ダークブラウン（区切り・フッター） |
+| `--c-brown-lt` | `#8B6A50` | ミディアムブラウン（ルーバーライン） |
+| `--c-glow` | `rgba(201,168,76,.12)` | ゴールドグロー（四隅装飾） |
 
 フォントは `--f-serif`（Noto Serif JP / 游明朝）を `body` に適用済み。`--f-sans` は一部ナビ等に残存。レスポンシブブレークポイントは `700px`。
 
 ### セクション装飾パターン
 
 - **区切り線**: `border-top: double 5px var(--c-purple)`（紫の二重線）
-- **見出しドット**: `section-heading-en::before/::after` に `--c-accent`（イエロー）の円（6px）
+- **見出しドット**: `section-heading-en::before/::after` に `--c-accent`（ゴールド）の円（6px）
 - **見出し下線**: `--c-purple` → `--c-accent` のグラデーション
 - **ボタン**: `border-radius: 24px`（ピル型）、`min-height: 44px`（モバイルタップ対応）
 - **カード・マップ**: `border-radius: 12px`
-- **フッター**: 背景 `#1A0F24`（深紫黒）、上ボーダー `--c-accent`（イエロー）、LINEボタン（`#06C755`）あり
+- **フッター**: 背景 `#2A1A0E → #1A0F24` のグラデ（深紫黒）、上ボーダー `--c-accent`（ゴールド）、LINEボタン（`#06C755`）あり
 
 ### 主要セクション
 

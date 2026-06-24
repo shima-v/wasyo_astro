@@ -1,7 +1,7 @@
 # 予約システム 外部セットアップ手順（dev / prod 完全分離）
 
 予約機能で使う外部サービス（Google / LINE / GAS / Cloudflare / GitHub）の設定手順。
-**開発(dev)** と **本番(prod)** で資源をすべて分けます。設計は [`../RESERVATION_PLAN.md`](../RESERVATION_PLAN.md)、進捗は [`../WBS.md`](../WBS.md)。
+**開発(dev)** と **本番(prod)** で資源をすべて分けます。設計は [`RESERVATION_PLAN.md`](./RESERVATION_PLAN.md)、進捗は [`WBS.md`](./WBS.md)。
 
 > このドキュメントの作業は基本「👤 ユーザーが手動」で行います。各ステップで取得した ID/トークンは末尾の[チェックリスト](#値の控え一覧チェックリスト)に控えてください。
 
@@ -78,7 +78,7 @@
 
 ## E-2. LIFF アプリ（dev / prod 各1）— LINEアプリ内予約用（任意）
 
-> 公式アカウントのリッチメニュー/トーク/プロフィールから **LINEアプリ内で予約を完結**させる場合に設定。E の LINE Login チャネル配下に LIFF アプリを作る。仕様は [`../RESERVATION_PLAN.md`](../RESERVATION_PLAN.md)「LIFF構成」、ハマりどころは [`DEV_NOTES.md`](./DEV_NOTES.md)「LIFF導入のハマりどころ」。
+> 公式アカウントのリッチメニュー/トーク/プロフィールから **LINEアプリ内で予約を完結**させる場合に設定。E の LINE Login チャネル配下に LIFF アプリを作る。仕様は [`RESERVATION_PLAN.md`](./RESERVATION_PLAN.md)「LIFF構成」、ハマりどころは [`DEV_NOTES.md`](./DEV_NOTES.md)「LIFF導入のハマりどころ」。
 
 1. E で作成した **LINE Login チャネル**（dev/prod 別）を開く →「LIFF」タブ →「追加」。
 2. 設定:
@@ -197,7 +197,7 @@ J のリポジトリ Secrets に prod 値を登録。
    - **`PROD_RESERVE_API`**（prod GAS の `/exec` URL）← **必須**。`deploy.yml` が env `PUBLIC_RESERVE_API` に注入する。
    - （任意・LINE Login 導入時のみ）`PROD_LINE_LOGIN_CHANNEL_ID` / `PROD_LINE_LOGIN_REDIRECT`。
    - （任意・LIFF 導入時のみ）`PROD_LIFF_ID`（prod LIFF ID・E-2）。`deploy.yml` の Build env に `PUBLIC_LIFF_ID: ${{ secrets.PROD_LIFF_ID }}` を注入済み🤖。
-2. `deploy.yml` の Build ステップで env 注入済み🤖：`PUBLIC_ENV: production`（dev 限定の開発バッジ/タブ【開発】を出さない）・`PUBLIC_RESERVE_API: ${{ secrets.PROD_RESERVE_API }}`・`PUBLIC_SITE_URL: https://www.wwwasyo.com`（prod ドメインは secret ではなく直書き）。
+2. `deploy.yml` の Build ステップで env 注入済み🤖：`PUBLIC_ENV: production`（dev 限定の開発バッジ/タブ【開発】を出さない）・`PUBLIC_RESERVE_API: ${{ secrets.PROD_RESERVE_API }}`・`PUBLIC_SITE_URL: https://wwwasyo.com`（prod ドメインは secret ではなく直書き）。
 
 > secret 未登録でも `PUBLIC_RESERVE_API` は空文字になりビルドは通る（予約API未接続の状態でデプロイされるだけ）。prod 公開前に必ず登録する。
 

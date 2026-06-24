@@ -3,7 +3,7 @@
 サロン和笑〜Violane〜 予約システム開発で実際に踏んだ落とし穴と対策の記録。
 同種の事故を繰り返さないために、原因が非自明だったものをここに蓄積する。
 
-- 設計: [`../RESERVATION_PLAN.md`](../RESERVATION_PLAN.md) ／ 進捗: [`../WBS.md`](../WBS.md) ／ GAS: [`../gas/README.md`](../gas/README.md)
+- 設計: [`RESERVATION_PLAN.md`](./RESERVATION_PLAN.md) ／ 進捗: [`WBS.md`](./WBS.md) ／ GAS: [`../gas/README.md`](../gas/README.md)
 
 ---
 
@@ -149,7 +149,7 @@
 - 真因: **`sessionStorage` はタブ/アプリ内ブラウザをまたぐと共有されない**。スマホの LINE アプリ内ブラウザ→外部ブラウザ復帰や別タブ復帰で消える。→ **`localStorage`（同一オリジンでタブ共有）** に退避し、復帰時に必ず削除する方式へ変更（キー `wasyo_line_oauth`）。
 - 注意: `localStorage` も**オリジン（scheme+host+port）単位**。**プレビューURL**（版別 `*-wasyo-dev.<account>.workers.dev`）で開始し正規URLへ戻ると別オリジンで共有されず再発する。**開始ホスト＝redirect_uri のホスト**（正規 workers.dev）で操作すること。
 
-参考: 仕様は [`../WBS.md`](../WBS.md)「LINE連携・管理画面レスポンシブ（確定仕様）」、設定は [`SETUP.md`](./SETUP.md) E、実装は [`../gas/Code.gs`](../gas/Code.gs)（`lineLogin_`）・[`../src/pages/reserve/index.astro`](../src/pages/reserve/index.astro)。
+参考: 仕様は [`WBS.md`](./WBS.md)「LINE連携・管理画面レスポンシブ（確定仕様）」、設定は [`SETUP.md`](./SETUP.md) E、実装は [`../gas/Code.gs`](../gas/Code.gs)（`lineLogin_`）・[`../src/pages/reserve/index.astro`](../src/pages/reserve/index.astro)。
 
 ---
 
@@ -192,7 +192,7 @@
 
 ## 2026-06-20 — LIFF（LINEアプリ内予約）導入のハマりどころ
 
-> LINEアプリ内で予約を完結させる LIFF 化に伴う注意点。設計は [`../RESERVATION_PLAN.md`](../RESERVATION_PLAN.md)「LIFF構成」、進捗は [`../WBS.md`](../WBS.md) Phase 5、実装は [`../gas/Code.gs`](../gas/Code.gs)（`verifyLineIdToken_`/`liffVerify_`/`sendReminders`/`checkQuota`）・[`../src/pages/reserve/index.astro`](../src/pages/reserve/index.astro)（`initLiff`/`liffAfterBooking`）。
+> LINEアプリ内で予約を完結させる LIFF 化に伴う注意点。設計は [`RESERVATION_PLAN.md`](./RESERVATION_PLAN.md)「LIFF構成」、進捗は [`WBS.md`](./WBS.md) Phase 5、実装は [`../gas/Code.gs`](../gas/Code.gs)（`verifyLineIdToken_`/`liffVerify_`/`sendReminders`/`checkQuota`）・[`../src/pages/reserve/index.astro`](../src/pages/reserve/index.astro)（`initLiff`/`liffAfterBooking`）。
 
 ### LIFF エンドポイントは HTTPS 必須 — `localhost` では検証不可
 - LIFF アプリのエンドポイントURLは **HTTPS 必須**。`http://localhost:4321/reserve/` は登録できず、`liff.init` 後の `isInClient` 経路を実機で確認できない。

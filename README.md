@@ -24,9 +24,11 @@
 |------|-----------|------|
 | [Astro](https://astro.build/) | ^6.1.1 | 静的サイトジェネレーター |
 | Node.js | >=22.12.0 | ランタイム |
-| pnpm | — | パッケージマネージャー |
-| GitHub Pages | — | ホスティング |
+| pnpm | 11.7.0 | パッケージマネージャー |
+| GitHub Pages | — | 本番(prod)ホスティング（`main` → `wwwasyo.com`） |
+| Cloudflare Workers | — | 開発(dev)ホスティング（`develop` → `*.workers.dev`） |
 | GitHub Actions | — | CI/CD（main push → 自動デプロイ） |
+| Google Apps Script | — | サイト内予約システムのバックエンド |
 
 ### 開発支援
 
@@ -36,22 +38,32 @@
 
 ## アーキテクチャ
 
-**シングルファイル構成**。コンテンツ・スタイル・ロジックはすべて `src/pages/index.astro` に集約しています。独立したコンポーネント・レイアウトファイル・外部 CSS は持ちません。
+トップLP（`src/pages/index.astro`）は**シングルファイル構成**（コンテンツ・スタイル・ロジックを集約、独立コンポーネント・外部 CSS なし）。これに**サイト内予約システム**（`reserve/`・`privacy/` ページ＋ `gas/` の Google Apps Script バックエンド）が加わっています。詳細は [`CLAUDE.md`](./CLAUDE.md)・[`docs/RESERVATION_PLAN.md`](./docs/RESERVATION_PLAN.md) を参照。
 
 ```
 wasyo/
 ├── src/
-│   └── pages/
-│       └── index.astro        # サイト全体（HTML + <style> + <script>）
+│   ├── pages/
+│   │   ├── index.astro            # トップLP（HTML + <style> + <script>）
+│   │   ├── reserve/
+│   │   │   ├── index.astro        # 予約UI（メニュー→日時→送信。LINE Login/LIFF）
+│   │   │   └── manage.astro       # 予約の変更・キャンセル（トークン受取）
+│   │   └── privacy/index.astro    # プライバシーポリシー
+│   ├── data/
+│   │   ├── config.js              # 環境設定（PUBLIC_* を読む）
+│   │   └── menu.js                # メニュー定義（料金・所要時間）
+│   └── components/
+│       └── EnvBadge.astro         # dev 限定の「🚧 開発環境」リボン
+├── gas/                           # 予約システム バックエンド（Google Apps Script）
 ├── public/
 │   ├── favicon.jpg
-│   ├── CNAME                  # カスタムドメイン設定
 │   └── images/
-│       ├── naisou.jpg         # 内装写真（コンセプトセクション）
-│       └── logo.jpg           # 看板写真（アクセスセクション）
+│       ├── naisou.jpg             # 内装写真（コンセプトセクション）
+│       └── logo.jpg               # 看板写真（アクセスセクション）
+├── docs/                          # 設計・進捗・セットアップ手順・開発メモ
 ├── astro.config.mjs
 ├── package.json
-└── CLAUDE.md                  # Claude Code 向け開発ガイド
+└── CLAUDE.md                      # Claude Code 向け開発ガイド
 ```
 
 ---
@@ -81,7 +93,9 @@ pnpm preview    # ビルド済みをローカルでプレビュー
 
 ## デプロイ
 
-`main` ブランチへの push で GitHub Actions が自動起動し、GitHub Pages へデプロイされます。カスタムドメイン（`wwwasyo.com`）は `public/CNAME` で設定しています。
+`main` ブランチへの push で GitHub Actions（[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)）が自動起動し、GitHub Pages へデプロイされます。カスタムドメイン（`wwwasyo.com`）は GitHub リポジトリの **Settings → Pages → Custom domain** で設定しています（`public/CNAME` ファイルは使用していません）。
+
+開発(dev)フロントは `develop` ブランチを Cloudflare Workers が配信します。詳細は下記「環境分離」節を参照。
 
 ---
 
@@ -105,7 +119,7 @@ pnpm preview    # ビルド済みをローカルでプレビュー
   - 環境の切替フラグは **`PUBLIC_ENV`**（dev=`development` / prod=`production`）。`config.js` の `IS_DEV` / `ENV_LABEL` がこれを参照し、上記の開発バッジ・タブ表示を切り替えます。
 - **秘密情報**（LINE チャネルトークン・HMAC secret 等）はフロント/リポジトリに置かず、**GAS の Script Properties にのみ**保管します。`.env*` は gitignore 済み。
 
-> 詳細は [`RESERVATION_PLAN.md`](./RESERVATION_PLAN.md)（設計）・[`docs/SETUP.md`](./docs/SETUP.md)（外部サービス初期設定）・[`gas/README.md`](./gas/README.md)（バックエンド）を参照。
+> 詳細は [`docs/RESERVATION_PLAN.md`](./docs/RESERVATION_PLAN.md)（設計）・[`docs/SETUP.md`](./docs/SETUP.md)（外部サービス初期設定）・[`gas/README.md`](./gas/README.md)（バックエンド）を参照。
 
 ---
 
@@ -119,3 +133,7 @@ pnpm preview    # ビルド済みをローカルでプレビュー
 - [x] お品書きスタイルのメニュー刷新（最新料金・初回バッジ）
 - [x] スマホ追従ナビ（電話予約・ネット予約の固定2ボタン）
 - [x] カスタムドメイン（wwwasyo.com）への移行
+- [x] サイト内予約システム（GAS バックエンド＋本番/開発の環境分離）
+- [x] 本番初リリース（2026-06-19）
+- [x] プライバシーポリシーページ（LINE ユーザーデータポリシー準拠）
+- [ ] LIFF 化（LINEアプリ内予約・リマインド/フォロー・無料枠監視）— コード実装済み、LINE コンソール設定・トリガー登録が残
