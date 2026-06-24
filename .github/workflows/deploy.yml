@@ -14,17 +14,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
 
       - name: Install pnpm
         # バージョンは package.json の packageManager(pnpm@11.7.0) を参照（ローカルと統一）。
         # 旧 version:8 だと lockfileVersion 9.0 を読めず install が失敗する。
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@v4
 
       - name: Install dependencies
         run: pnpm install
@@ -45,7 +45,7 @@ jobs:
           PUBLIC_SITE_URL: https://wwwasyo.com
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: ./dist
 

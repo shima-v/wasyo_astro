@@ -1,0 +1,326 @@
+---
+import { ENV_LABEL } from '../../data/config.js';
+import EnvBadge from '../../components/EnvBadge.astro';
+
+const _base = import.meta.env.BASE_URL;
+const base = _base.endsWith('/') ? _base : _base + '/';
+const salonName = 'サロン和笑〜Violane〜';
+const tel = '090-9095-6034';
+const address = '富山県高岡市野村1180-1';
+// title は単一の式にする（<title> RCDATA で式＋生テキストの混在を避ける）
+const pageTitle = `${ENV_LABEL}プライバシーポリシー | ${salonName}`;
+
+// 制定日・最終改定日（改定時はここを更新）
+const establishedDate = '2026年6月24日';
+const revisedDate = '2026年6月24日';
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{pageTitle}</title>
+    <meta
+      name="description"
+      content="サロン和笑〜Violane〜 のプライバシーポリシー（個人情報保護方針）。取得する情報・利用目的・第三者提供・LINE関連データの取扱い・安全管理措置について。"
+    />
+  </head>
+  <body>
+    <EnvBadge />
+    <header class="site-header">
+      <a class="home-link" href={base}>‹ {salonName}</a>
+      <span class="head-title">プライバシーポリシー</span>
+    </header>
+
+    <main class="wrap">
+      <h1 class="page-title">プライバシーポリシー</h1>
+      <p class="lead">
+        {salonName}（以下「当店」といいます）は、お客様の個人情報の重要性を認識し、
+        個人情報の保護に関する法律その他の関係法令を遵守するとともに、以下の方針に基づき
+        個人情報を適切に取り扱います。
+      </p>
+
+      <section class="policy">
+        <h2>1. 取得する個人情報</h2>
+        <p>当店は、ご予約・お問い合わせ等に際して、以下の情報を取得することがあります。</p>
+        <ul>
+          <li>お名前</li>
+          <li>電話番号</li>
+          <li>性別</li>
+          <li>メールアドレス（ご入力いただいた場合）</li>
+          <li>ご予約内容（ご希望メニュー・日時等）</li>
+          <li>
+            LINE をご利用の場合：LINE のユーザー識別子（userId）、表示名、
+            および LINE 上で取得をご承諾いただいた場合のメールアドレス
+          </li>
+        </ul>
+      </section>
+
+      <section class="policy">
+        <h2>2. 利用目的</h2>
+        <p>取得した個人情報は、以下の目的の範囲内で利用します。</p>
+        <ul>
+          <li>ご予約の受付・確認・確定のご連絡</li>
+          <li>ご予約日前のリマインドおよびご来店後のフォローのご連絡</li>
+          <li>お問い合わせへの対応</li>
+          <li>本人確認（なりすまし等の不正利用の防止）</li>
+          <li>サービス・施術内容の向上、当店からのご案内</li>
+        </ul>
+        <p class="note">
+          上記の目的を超えて個人情報を利用する場合は、あらかじめご本人の同意を得たうえで行います。
+        </p>
+      </section>
+
+      <section class="policy">
+        <h2>3. 第三者提供</h2>
+        <p>
+          当店は、次の場合を除き、お客様の同意なく個人情報を第三者に提供しません。
+        </p>
+        <ul>
+          <li>法令に基づく場合</li>
+          <li>人の生命・身体・財産の保護のために必要で、ご本人の同意取得が困難な場合</li>
+          <li>下記「4. 外部サービスの利用（委託）」に定める範囲で業務を委託する場合</li>
+        </ul>
+      </section>
+
+      <section class="policy">
+        <h2>4. 外部サービスの利用（委託）</h2>
+        <p>
+          当店は、ご予約の管理・ご連絡のために以下の外部サービスを利用しており、
+          利用目的の達成に必要な範囲で個人情報の取扱いを委託しています。
+          各サービスにおける情報の取扱いは、それぞれの提供事業者のプライバシーポリシーに従います。
+        </p>
+        <ul>
+          <li>
+            <strong>Google LLC</strong>（Google カレンダー / Google スプレッドシート /
+            Google Apps Script）……ご予約の登録・管理・お客様台帳のため
+          </li>
+          <li>
+            <strong>LINEヤフー株式会社</strong>（LINE Messaging API / LINE ログイン / LIFF）
+            ……ご予約の受付・本人確認・各種ご連絡のため
+          </li>
+          <li>
+            サイトの配信（ホスティング）に係るクラウド事業者……Web ページの表示のため
+          </li>
+        </ul>
+      </section>
+
+      <section class="policy">
+        <h2>5. LINE 関連データの取扱い</h2>
+        <p>
+          当店は、LINE ログインおよび LIFF（LINE アプリ内ブラウザ）を用いたご予約機能を
+          提供しています。この機能では、お客様が LINE 上で同意（許可）された範囲で、
+          次の情報を取得・保存します。
+        </p>
+        <ul>
+          <li>
+            ユーザー識別子（userId）……ご予約者の本人確認・ご連絡先の特定に使用し、
+            お客様台帳に保存します
+          </li>
+          <li>表示名……ご予約フォームのお名前欄の自動入力に使用します</li>
+          <li>
+            メールアドレス……お客様が LINE 上で取得に同意され、かつ当店が必要とする場合に限り
+            取得し、ご連絡に使用します
+          </li>
+        </ul>
+        <p>
+          これらの情報は、お客様が LINE の同意画面で許可された場合にのみ取得します。
+          取得した LINE 由来の情報は、上記「2. 利用目的」に定める目的の範囲でのみ利用し、
+          <strong>当該目的以外には利用しません</strong>。また、これらの情報を当店の他の
+          サービスや外部のデータと紐付けることや、第三者へ販売・提供すること（本ポリシー
+          「3. 第三者提供」「4. 外部サービスの利用（委託）」に定める場合を除く）はいたしません。
+        </p>
+        <p>
+          ご予約完了時に、お客様のご予約内容を確認のためお客様の LINE トークへメッセージを
+          お送りすることがあります。これはお客様ご自身のご予約操作に伴って行うものです。
+          メールその他の手段によるご連絡は、あらかじめお客様の同意を得た範囲で行い、
+          迷惑メールの防止に関する法令・ガイドラインを遵守します。
+        </p>
+        <p class="note">
+          LINE における情報の取扱いについては、
+          <a
+            href="https://terms2.line.me/LINE_Developers_user_data_policy?lang=ja"
+            target="_blank"
+            rel="noopener noreferrer">LINE ユーザーデータポリシー</a
+          >および
+          <a
+            href="https://line.me/ja/terms/policy/"
+            target="_blank"
+            rel="noopener noreferrer">LINEヤフー プライバシーポリシー</a
+          >をあわせてご確認ください。
+        </p>
+      </section>
+
+      <section class="policy">
+        <h2>6. 安全管理措置</h2>
+        <p>
+          当店は、個人情報の漏えい・滅失・毀損の防止その他の安全管理のため、必要かつ適切な措置を講じます。
+          システムの管理・運用にあたっては、経済産業省「システム管理基準」等の考え方も参考に、
+          以下の取組みを行っています。
+        </p>
+        <ul>
+          <li>取得する情報を、利用目的の達成に必要な範囲に限定すること</li>
+          <li>管理画面へのアクセスを、認証された管理者本人に限定すること</li>
+          <li>通信の暗号化（HTTPS）を行うこと</li>
+          <li>送信履歴等のログにおいて、連絡先の識別子を一部マスクして記録すること</li>
+        </ul>
+        <p class="note">
+          上記は当店が実際に講じている措置を記載したものであり、特定の認証・認定の取得を
+          表すものではありません。
+        </p>
+      </section>
+
+      <section class="policy">
+        <h2>7. Cookie・ローカルストレージ等の利用</h2>
+        <p>
+          当店の予約ページでは、再度のご予約時の入力の手間を省くため、ブラウザの
+          ローカルストレージにお客様がご入力・連携された情報（お名前・連絡先・LINE 連携情報等）を
+          <strong>お客様ご自身の端末内に</strong>保存することがあります。これらはお客様の端末内に
+          保存されるもので、予約ページの「連携を解除／別の人として予約」等の操作によりお客様自身で
+          削除いただけます。
+        </p>
+      </section>
+
+      <section class="policy">
+        <h2>8. 個人情報の保有期間・廃棄</h2>
+        <p>
+          当店は、利用目的の達成に必要な期間に限り個人情報を保有し、不要となった情報は
+          遅滞なく適切な方法で消去・廃棄します。
+        </p>
+      </section>
+
+      <section class="policy">
+        <h2>9. 開示・訂正・利用停止等のご請求</h2>
+        <p>
+          お客様は、当店が保有するご自身の個人情報について、開示・訂正・追加・削除・利用停止・
+          消去等をご請求いただけます。ご請求の際は、下記お問い合わせ窓口までご連絡ください。
+          ご本人であることを確認のうえ、法令に従い対応いたします。
+        </p>
+      </section>
+
+      <section class="policy">
+        <h2>10. 本ポリシーの改定</h2>
+        <p>
+          当店は、法令の変更やサービス内容の変更等に応じて、本ポリシーを改定することがあります。
+          改定後の内容は本ページに掲載した時点から効力を生じます。
+        </p>
+      </section>
+
+      <section class="policy">
+        <h2>11. お問い合わせ窓口</h2>
+        <p>本ポリシーおよび個人情報の取扱いに関するお問い合わせは、下記までご連絡ください。</p>
+        <dl class="contact">
+          <dt>店舗名</dt>
+          <dd>{salonName}</dd>
+          <dt>所在地</dt>
+          <dd>{address}</dd>
+          <dt>電話番号</dt>
+          <dd><a href={`tel:${tel}`}>{tel}</a></dd>
+          <dt>LINE</dt>
+          <dd>
+            <a href="https://lin.ee/7ZvbqEb" target="_blank" rel="noopener noreferrer"
+              >LINE でのお問い合わせ</a
+            >
+          </dd>
+        </dl>
+      </section>
+
+      <p class="dates">
+        制定日：{establishedDate}<br />
+        最終改定日：{revisedDate}
+      </p>
+    </main>
+
+    <footer class="site-footer">
+      <p>{salonName}</p>
+      <p class="small">{address} / <a href={`tel:${tel}`}>{tel}</a></p>
+      <p class="small"><a href={base}>トップページへ戻る</a></p>
+    </footer>
+
+    <style is:global>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      :root {
+        --c-bg: #FDF2F5;
+        --c-surface: #FFFFFF;
+        --c-ink: #2C1F3A;
+        --c-muted: #7A6080;
+        --c-border: #E2D0D8;
+        --c-purple: #8B6080;
+        --c-purple-dk: #3E2B4A;
+        --c-accent: #C9A84C;
+        --f-serif: 'Noto Serif JP', 'YuMincho', 'Yu Mincho', serif;
+      }
+      body {
+        font-family: var(--f-serif);
+        background: var(--c-bg);
+        color: var(--c-ink);
+        line-height: 1.9;
+        font-size: 16px;
+      }
+      a { color: var(--c-purple-dk); }
+
+      .site-header {
+        position: sticky; top: 0; z-index: 10;
+        display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+        padding: .7rem 1rem;
+        background: rgba(253, 242, 245, .92);
+        backdrop-filter: blur(6px);
+        border-bottom: 1px solid var(--c-border);
+      }
+      .home-link { text-decoration: none; color: var(--c-purple-dk); font-size: .9rem; }
+      .head-title { font-size: .9rem; color: var(--c-muted); }
+
+      .wrap { max-width: 720px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+
+      .page-title {
+        font-size: 1.5rem; font-weight: 700; color: var(--c-purple-dk);
+        text-align: center; letter-spacing: .04em;
+        padding-bottom: .6rem; margin-bottom: 1rem;
+        border-bottom: double 4px var(--c-purple);
+      }
+      .lead { margin-bottom: 1.75rem; }
+
+      .policy {
+        background: var(--c-surface);
+        border: 1px solid var(--c-border);
+        border-radius: 12px;
+        padding: 1.1rem 1.2rem;
+        margin-bottom: 1.1rem;
+      }
+      .policy h2 {
+        font-size: 1.05rem; color: var(--c-purple-dk);
+        margin-bottom: .6rem; padding-left: .55rem;
+        border-left: 4px solid var(--c-accent);
+      }
+      .policy p { margin-bottom: .6rem; }
+      .policy p:last-child { margin-bottom: 0; }
+      .policy ul { margin: 0 0 .6rem 1.3rem; }
+      .policy ul:last-child { margin-bottom: 0; }
+      .policy li { margin-bottom: .25rem; }
+      .policy .note {
+        font-size: .88rem; color: var(--c-muted);
+      }
+
+      .contact { display: grid; grid-template-columns: 6.5em 1fr; gap: .35rem .8rem; }
+      .contact dt { color: var(--c-muted); font-size: .92rem; }
+      .contact dd { color: var(--c-ink); }
+
+      .dates {
+        text-align: right; font-size: .85rem; color: var(--c-muted);
+        margin-top: 1.5rem;
+      }
+
+      .site-footer {
+        text-align: center; color: var(--c-muted); font-size: .82rem;
+        padding: 1.5rem 1rem 2.5rem;
+        border-top: 1px solid var(--c-border);
+      }
+      .site-footer .small { font-size: .78rem; margin-top: .25rem; }
+
+      @media (max-width: 700px) {
+        .contact { grid-template-columns: 5.5em 1fr; }
+      }
+    </style>
+  </body>
+</html>
