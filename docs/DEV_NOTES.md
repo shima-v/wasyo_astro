@@ -217,3 +217,8 @@
 
 ### LIFF SDK の読込タイミング
 - SDK は `LIFF_ID` 設定時のみ `<head>` に**同期 script**（`static.line-scdn.net/liff/edge/2/sdk.js`）で読み込む。ページ末尾の `define:vars` スクリプトより先に `window.liff` が定義される。`LIFF_ID` 未設定なら SDK もロードされず、`initLiff` は `!window.liff` で早期 return＝**従来フロー（OAuth/手入力）に無影響**。
+
+### リッチメニューは「本番LIFF専用」／dev検証は直URLで
+- 公式アカウント（Messaging API チャネル）は **dev/prod 共通で1つ**。リッチメニューが指せる LIFF URL も**1つだけ**なので、ここに **dev の LIFF URL を載せない**（本番のお客様まで【開発】環境に飛んでしまう）。**リッチメニューは prod LIFF URL 専用**にする。
+- **dev 検証にリッチメニューは不要**。LIFF アプリは固有 URL `https://liff.line.me/{LIFF_ID}` で直接起動できるため、**dev LIFF URL を自分の LINE トーク（Keepメモ等）に貼ってタップ**すれば実機検証できる（リッチメニュー＝あくまで入口ショートカット）。dev/prod で LIFF アプリ・LINE Login チャネルは別物なので、リッチメニューを本番用に固定しても dev 検証に支障なし。
+- **リッチメニューはこのリポジトリのコード作業ではない**。LINE 公式アカウントマネージャー（or Messaging API）コンソールの**GUI設定**で、ボタンのアクションに LIFF URL を割り当てるだけ。Astro/GAS 側に追加実装・デプロイは不要（Messaging API でプログラム生成も可能だが本件では不要）。
