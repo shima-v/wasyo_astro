@@ -149,7 +149,9 @@ const grouped = groupOrder.map((g) => ({
           <div class="field">
             <label for="f-email">メールアドレス <span class="req" id="emailReq">必須</span></label>
             <input type="email" id="f-email" name="email" inputmode="email" autocomplete="email" required />
-            <small class="hint" id="emailHint">ご予約の確認・確定のご連絡をお送りします。</small>
+            <small class="hint" id="emailHint">ご予約の確認・確定・リマインドのご連絡に使用します。</small>
+            <small class="hint" id="emailFromLine" hidden>※ LINE アカウントのメールアドレスを表示しています。ご予約の確認・確定・リマインドのご連絡に使用します。</small>
+            <small class="hint">利用目的・管理方法の詳細は<a href={`${base}privacy/`} target="_blank" rel="noopener noreferrer">プライバシーポリシー</a>をご覧ください。</small>
           </div>
 
           <div class="field" id="contact-field">
@@ -193,10 +195,11 @@ const grouped = groupOrder.map((g) => ({
             <label class="check">
               <input type="checkbox" id="f-consent" required />
               <span>
-                入力内容（お名前・連絡先・性別・ご要望）、およびLINE連携時はLINEのユーザーID・表示名を、
-                予約管理・ご連絡・初回／常連判定の目的で当サロンが利用することに同意します。情報は当サロンの
+                入力内容（お名前・電話番号・メールアドレス・性別・ご要望）、およびLINE連携時はLINEのユーザーID・表示名・メールアドレスを、
+                予約管理・ご予約の確認／確定・リマインド等のご連絡・初回／常連判定の目的で当サロンが取得・利用することに同意します。
+                メールアドレスは上記のご連絡にのみ使用し、目的外には利用しません。情報は当サロンの
                 Google（予約カレンダー・顧客台帳）と通知サービス（LINE）内でのみ管理します。連携情報は次回の入力省略のため
-                ご利用の端末内に保存される場合があり、「連携を解除」でいつでも削除できます。
+                ご利用の端末内に保存される場合があり、「連携を解除」でいつでも削除できます。詳しくは<a href={`${base}privacy/`} target="_blank" rel="noopener noreferrer">プライバシーポリシー</a>をご覧ください。
               </span>
             </label>
           </div>
@@ -453,7 +456,10 @@ const grouped = groupOrder.map((g) => ({
           state.displayName = data.displayName || '';
           state.inLiff = true;
           if (state.displayName && !$('#f-name').value.trim()) $('#f-name').value = state.displayName;
-          if (data.email && !$('#f-email').value.trim()) $('#f-email').value = data.email; // メール自動入力
+          if (data.email && !$('#f-email').value.trim()) {
+            $('#f-email').value = data.email; // メール自動入力
+            $('#emailFromLine').hidden = false; // LINEから取得した旨と利用目的を明示
+          }
           applyLinkState();
           return true;
         } catch (_) {
