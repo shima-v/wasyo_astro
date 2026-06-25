@@ -157,14 +157,17 @@ const grouped = groupOrder.map((g) => ({
           <div class="field" id="contact-field">
             <span class="field-label">ご希望の連絡方法</span>
             <div class="radio-row">
-              {CONTACT_METHODS.map((c, i) => (
+              {CONTACT_METHODS.map((c) => (
                 <label class="radio-pill">
-                  <input type="radio" name="contactMethod" value={c.value} checked={i === CONTACT_METHODS.length - 1} />
+                  <input type="radio" name="contactMethod" value={c.value} checked={c.value === 'line'} />
                   <span>{c.label}</span>
                 </label>
               ))}
             </div>
-            <small class="hint">LINEで自動連絡をご希望の場合は、上の「LINEで連携」をご利用ください。連携なしの場合はメールでお送りします。</small>
+            <p class="contact-line-note">
+              <span class="line-ico" aria-hidden="true">LINE</span>
+              <span><strong>LINEで自動連絡をご希望の場合は、上の「LINEで連携」をご利用ください。</strong>連携なしの場合はメールでお送りします。</span>
+            </p>
           </div>
 
           <div class="field">
@@ -702,6 +705,18 @@ const grouped = groupOrder.map((g) => ({
         });
       });
 
+      // 未連携のまま「LINEで連絡を受け取る」を選んだら、上の連携ボタンへ誘導
+      document.querySelectorAll('input[name="contactMethod"]').forEach((r) => {
+        r.addEventListener('change', () => {
+          if (r.value !== 'line' || !r.checked) return;
+          if (state.lineUserId || !LINE_ENABLED) return; // 連携済み/連携不可なら何もしない
+          $('#lineLink').scrollIntoView({ behavior: 'smooth', block: 'center' });
+          const btn = $('#lineLinkBtn');
+          btn.classList.add('attention');
+          setTimeout(() => btn.classList.remove('attention'), 1600);
+        });
+      });
+
       function updateSummary() {
         const s = $('#summary');
         if (!state.menu || !state.date || !state.time) { s.hidden = true; return; }
@@ -1037,6 +1052,23 @@ const grouped = groupOrder.map((g) => ({
         background: none; border: none; text-decoration: underline; cursor: pointer; padding: .2rem 0;
       }
       .line-unlink:hover { color: var(--c-purple-dk); }
+
+      /* 連絡方法フィールドの「LINEで連携をご利用ください」強調 */
+      .contact-line-note {
+        display: flex; gap: .5rem; align-items: flex-start;
+        font-size: .85rem; line-height: 1.7; color: var(--c-ink);
+        background: #F4FBF6; border: 1px solid #BfE6CC; border-radius: 8px;
+        padding: .55rem .7rem; margin-top: .5rem;
+      }
+      .contact-line-note strong { color: #05912F; font-weight: 700; }
+      .contact-line-note .line-ico { flex: none; margin-top: .15rem; }
+
+      /* 「LINEで連絡を受け取る」選択時に連携ボタンを一瞬パルスさせて誘導 */
+      .line-btn.attention { animation: lineNudge 1.6s ease; }
+      @keyframes lineNudge {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(6,199,85,0); }
+        25%, 65% { box-shadow: 0 0 0 4px rgba(6,199,85,.45); }
+      }
 
       /* 再訪：ご登録情報の折りたたみ */
       .known-summary {
