@@ -763,6 +763,8 @@ const grouped = groupOrder.map((g) => ({
             : '現在 LINE でのご連絡はご利用いただけません。「メールで連絡を受け取る」をお選びください。');
         }
         if (!state.lineUserId && !email) return showError('メールアドレスをご入力ください。');
+        // 入力があれば形式も検証（連携済みで任意入力の場合も含む。novalidate のため type=email の組込み検証は効かない）
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showError('メールアドレスの形式が正しくありません。ご確認ください。');
         if (!gender) return showError('性別をお選びください。');
         if (gender === 'male' && !referrer) return showError('男性のお客様はご紹介者のお名前が必須です。');
         if (!$('#f-consent').checked) return showError('内容のお取り扱いに同意のうえお進みください。');
