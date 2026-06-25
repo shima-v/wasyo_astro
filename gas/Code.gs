@@ -709,13 +709,23 @@ function notifyOwner_(text) {
 }
 
 function notifyCustomer_(b, text) {
-  if (b.lineUserId) linePush_(b.lineUserId, text, 'customer');
+  // LINE は dev/prod 共有のため dev は ENV_LABEL を先頭に付ける。
+  // メールは sendMail_ 内で付与されるため、ここでは LINE 分岐のみ付ける（二重付与回避）。
+  if (b.lineUserId) linePush_(b.lineUserId, withEnvLabel_(text), 'customer');
   else if (b.email) sendMail_(b.email, 'サロン和笑〜Violane〜 ご予約', text);
 }
 
 function notifyCustomerProps_(props, text, kind) {
-  if (props.lineUserId) linePush_(props.lineUserId, text, kind || 'customer');
+  // LINE は dev/prod 共有のため dev は ENV_LABEL を先頭に付ける。
+  // メールは sendMail_ 内で付与されるため、ここでは LINE 分岐のみ付ける（二重付与回避）。
+  if (props.lineUserId) linePush_(props.lineUserId, withEnvLabel_(text), kind || 'customer');
   else if (props.email) sendMail_(props.email, 'サロン和笑〜Violane〜 ご予約', text);
+}
+
+/** dev のとき本文の先頭に ENV_LABEL（例:【開発】）を付ける。prod はキー未登録＝無印のまま。 */
+function withEnvLabel_(text) {
+  var label = prop_('ENV_LABEL');
+  return (label ? label + '\n' : '') + text;
 }
 
 function linePush_(to, text, kind) {
