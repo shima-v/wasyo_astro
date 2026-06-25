@@ -756,6 +756,12 @@ const grouped = groupOrder.map((g) => ({
 
         if (!name) return showError('お名前をご入力ください。');
         if (!phone) return showError('電話番号をご入力ください。');
+        // 未連携のまま「LINEで連絡を受け取る」は不可（送る宛先の userId が無く実際にはLINEを送れないため）
+        if (!state.lineUserId && contactMethod === 'line') {
+          return showError(LINE_ENABLED
+            ? '「LINEで連絡を受け取る」を選ぶには、上の「LINEで連携」が必要です。連携いただくか、「メールで連絡を受け取る」をお選びください。'
+            : '現在 LINE でのご連絡はご利用いただけません。「メールで連絡を受け取る」をお選びください。');
+        }
         if (!state.lineUserId && !email) return showError('メールアドレスをご入力ください。');
         if (!gender) return showError('性別をお選びください。');
         if (gender === 'male' && !referrer) return showError('男性のお客様はご紹介者のお名前が必須です。');
