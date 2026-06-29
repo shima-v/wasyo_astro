@@ -317,7 +317,16 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
         --f-serif: 'Noto Serif JP', 'YuMincho', 'Yu Mincho', serif;
       }
       body { font-family: var(--f-serif); background: var(--c-bg); color: var(--c-ink); line-height: 1.9; font-size: 16px; }
+      /* 横方向の意図しないはみ出しを切り落とす（縦スクロール・sticky は維持） */
+      html, body { overflow-x: clip; }
       a { color: var(--c-purple-dk); }
+
+      /* C6: キーボードフォーカスをゴールド輪郭で明示 */
+      :focus-visible {
+        outline: 2px solid var(--c-accent);
+        outline-offset: 2px;
+        border-radius: 2px;
+      }
       .site-header {
         position: sticky; top: 0; z-index: 10;
         display: flex; align-items: center; justify-content: space-between; gap: 1rem;
@@ -440,6 +449,19 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
 
       .site-footer { text-align: center; color: var(--c-muted); font-size: .82rem; padding: 1.5rem 1rem 2.5rem; }
       .site-footer .small { font-size: .78rem; }
+
+      /* C5: 動きを抑える設定の利用者にはアニメ・自動スクロールを無効化 */
+      @media (prefers-reduced-motion: reduce) {
+        html { scroll-behavior: auto; }
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.001ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
     </style>
   </body>
 </html>
