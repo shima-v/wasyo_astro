@@ -812,10 +812,11 @@ function notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst) {
   // Discord Webhook が設定されていればそちらへ（顧客PIIを LINE の履歴に残さない移行）。
   // 承認/辞退はプレーンテキストのURLで併記する（Discord はテンプレートボタン不可）。
   if (prop_('OWNER_DISCORD_WEBHOOK_URL')) {
-    notifyOwnerDiscord_(detail + '\n\n✅ 承認: ' + approve + '\n❌ 辞退: ' + decline);
-    return;
+    // Discord 送信が成功したら終了。失敗（非2xx/例外で false）なら下の LINE 経路へフォールバックし、
+    // オーナー通知を取りこぼさない（通知が静かに消えないようにする恒久ハードニング）。
+    if (notifyOwnerDiscord_(detail + '\n\n✅ 承認: ' + approve + '\n❌ 辞退: ' + decline)) return;
   }
-  // 従来の LINE 経路（フォールバック）。詳細はテキスト、承認/辞退は confirm テンプレのボタンで送る（長いURLを直接見せない）
+  // LINE 経路（Discord 未設定 or 送信失敗時のフォールバック）。詳細はテキスト、承認/辞退は confirm テンプレのボタンで送る（長いURLを直接見せない）
   linePushMessages_(prop_('LINE_OWNER_USER_ID'), [
     { type: 'text', text: detail },
     {
@@ -837,8 +838,8 @@ function notifyOwner_(text) {
   // LINE Messaging API は dev/prod 共有のため、dev は ENV_LABEL(例:【開発】)を先頭に付けて区別する
   var label = prop_('ENV_LABEL');
   var body = (label ? label + '\n' : '') + text;
-  // Discord Webhook が設定されていればそちらへ。無ければ従来どおり LINE（無停止フォールバック）。
-  if (prop_('OWNER_DISCORD_WEBHOOK_URL')) { notifyOwnerDiscord_(body); return; }
+  // Discord 優先。送信成功なら終了、失敗（false）なら LINE へフォールバック。未設定時も LINE。
+  if (prop_('OWNER_DISCORD_WEBHOOK_URL') && notifyOwnerDiscord_(body)) return;
   linePush_(prop_('LINE_OWNER_USER_ID'), body, 'owner');
 }
 
