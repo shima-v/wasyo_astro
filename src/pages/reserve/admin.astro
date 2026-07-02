@@ -161,6 +161,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
           <div class="actions">
             <button class="reserve-btn sm" id="ownerTest" type="button">接続テストを送る</button>
           </div>
+          <div id="ownerTestResult"></div>
         </section>
       </section>
     </main>
@@ -622,16 +623,27 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       // ============================================================
       el('ownerTest').addEventListener('click', async () => {
         const btn = el('ownerTest'); btn.disabled = true;
+        const area = el('ownerTestResult');
+        area.innerHTML = '<div class="status loading"><span class="spinner" aria-hidden="true"></span><span>送信中…</span></div>';
         let res;
         try {
           res = await apiPost('ownerChannelTest');
         } catch (_) {
-          btn.disabled = false; toast('通信エラー。時間をおいて再度お試しください。'); return;
+          btn.disabled = false; area.innerHTML = '<div class="empty">通信エラー。時間をおいて再度お試しください。</div>'; return;
         }
         btn.disabled = false;
         if (res && res.error === 'forbidden') { handleForbidden(); return; }
-        if (res && res.ok) toast(res.via === 'discord' ? 'Discord に接続テストを送りました' : 'LINE に接続テストを送りました（Discord未設定）');
-        else toast('テストに失敗: ' + ((res && res.error) || '不明'));
+        if (!res || !res.ok) { area.innerHTML = '<div class="empty">テストに失敗しました: ' + esc((res && res.error) || '不明') + '</div>'; return; }
+        // 診断結果（Discord設定・送信成否・HTTPコード・エラー・実到達先）を表示
+        let rows = '<dt>Discord設定</dt><dd>' + (res.discordConfigured ? 'あり' : 'なし') + '</dd>';
+        if (res.discordConfigured) {
+          rows += '<dt>Discord送信</dt><dd>' + (res.discordOk ? '✅ 成功' : '❌ 失敗') + '</dd>';
+          rows += '<dt>HTTPコード</dt><dd>' + esc(res.discordCode) + '</dd>';
+          if (!res.discordOk && res.discordError) rows += '<dt>エラー</dt><dd style="word-break:break-all">' + esc(res.discordError) + '</dd>';
+        }
+        rows += '<dt>実際の到達先</dt><dd>' + (res.via === 'discord' ? 'Discord' : 'LINE') + '</dd>';
+        area.innerHTML = '<div class="empty"><dl class="detail-dl">' + rows + '</dl></div>';
+        toast(res.via === 'discord' ? 'Discord に届きました' : 'LINE に届きました');
       });
 
       // ---- ゲートのイベント配線 ----
