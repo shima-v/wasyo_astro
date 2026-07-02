@@ -531,23 +531,24 @@ function renderMessagePage_(p) {
       '<p>すでに処理済み、または取消済みの可能性があります。</p>');
   }
   // 連絡先はマスク（電話/メール/lineUserId は表示しない）。名前・日時・メニューのみ。
+  // 連絡先はマスク（電話/メール/lineUserId は表示しない）。名前・日時・メニューのみ。
   var summary = esc_(b.name) + ' 様' + (b.isFirstTime ? '（新規）' : '（常連）') + '<br>' +
     esc_(b.menuName) + '<br>' + b.date + ' ' + b.time + '〜（' + b.durationMin + '分）';
   var statusNote = b.status === STATUS.CONFIRMED
-    ? '<p style="color:#2e7d32;margin:.2rem 0">この予約は「確定」済みです。</p>'
-    : '<p style="color:#b26a00;margin:.2rem 0">この予約は「仮予約」の状態です。</p>';
-  // 入力フォント16px以上でスマホの自動ズームを防ぐ / 送信ボタン min-height 48px・幅100%（html_() が viewport を持つ）
+    ? '<p style="color:#2e7d32;font-size:1.15rem;margin:.4rem 0">この予約は「確定」済みです。</p>'
+    : '<p style="color:#b26a00;font-size:1.15rem;margin:.4rem 0">この予約は「仮予約」の状態です。</p>';
+  // スマホで読みやすいよう本文・入力・ボタンを大きめに。入力16px以上で iOS の自動ズームも防ぐ（html_() が addMetaTag で viewport を付与）。
   var msgBox =
-    '<label for="custMsg" style="display:block;text-align:left;font-size:.9rem;margin:.2rem 0 .35rem">お客様へのメッセージ</label>' +
-    '<textarea id="custMsg" rows="5" placeholder="お客様へお送りするメッセージを入力してください" ' +
-    'style="width:100%;font-family:inherit;font-size:16px;padding:.6rem .7rem;border:1px solid #E2D0D8;border-radius:8px;box-sizing:border-box"></textarea>';
+    '<label for="custMsg" style="display:block;text-align:left;font-size:1.1rem;margin:.3rem 0 .45rem">お客様へのメッセージ</label>' +
+    '<textarea id="custMsg" rows="6" placeholder="お客様へお送りするメッセージを入力してください" ' +
+    'style="width:100%;font-family:inherit;font-size:1.25rem;line-height:1.6;padding:.9rem .95rem;border:1px solid #E2D0D8;border-radius:10px;box-sizing:border-box"></textarea>';
   var page = '' +
-    '<h2 style="font-size:1.1rem;margin:0 0 .5rem">お客様へメッセージを送る</h2>' +
+    '<h2 style="font-size:1.65rem;margin:0 0 .7rem">お客様へメッセージを送る</h2>' +
     statusNote +
-    '<div style="background:#f6f3f6;border-radius:10px;padding:1rem;margin:1rem 0;text-align:left">' + summary + '</div>' +
+    '<div style="background:#f6f3f6;border-radius:12px;padding:1.25rem 1.2rem;margin:1.1rem 0;text-align:left;font-size:1.2rem;line-height:1.75">' + summary + '</div>' +
     msgBox +
-    '<button id="go" style="width:100%;min-height:48px;margin-top:1rem;border:0;border-radius:24px;color:#fff;background:#8B6080;font-size:16px;cursor:pointer">送信する</button>' +
-    '<p id="msg" style="color:#666;margin-top:1rem;min-height:1.2em"></p>' +
+    '<button id="go" style="width:100%;min-height:60px;margin-top:1.2rem;border:0;border-radius:30px;color:#fff;background:#8B6080;font-size:1.4rem;cursor:pointer">送信する</button>' +
+    '<p id="msg" style="color:#666;font-size:1.05rem;margin-top:1rem;min-height:1.2em"></p>' +
     '<script>' +
     'var T=' + JSON.stringify(p.token) + ',S=' + JSON.stringify(p.sig) + ';' +
     'document.getElementById("go").onclick=function(){' +
@@ -760,21 +761,17 @@ function ledgerUpsert_(props, visitDate) {
 // ============================================================
 
 /**
- * カレンダーイベントの説明欄に入れる管理者向けリンク集を生成する。
- * オーナーはカレンダー（名前/メニューで検索可）で予約を開き、説明欄のリンクから操作できる。
- * PII（連絡先）は載せない。載せるのは署名付きの操作リンクのみ。
- *  - 承認/辞退: 公開API①（executeAs=自分・匿名可）基底。'decision:' 署名。
+ * カレンダーイベントの説明欄に入れる管理者向けリンクを生成する。
+ * オーナーはカレンダー（名前/メニューで検索可）で予約を開き、説明欄のリンクから
+ * お客様へメッセージを送れる。PII（連絡先）は載せない。載せるのは署名付きリンクのみ。
+ * 承認/辞退は管理画面(admin)・LINE通知の導線で行うため、説明欄には置かない。
  *  - メッセージ: 管理デプロイ②（executeAs=アクセスユーザー・要ログイン）基底。'message:' 署名。
  */
 function adminEventDescription_(token) {
-  var pub = publicExecUrl_();
   var admin = adminExecUrl_();
-  var decSig = encodeURIComponent(sign_('decision:' + token));
   var msgSig = encodeURIComponent(sign_('message:' + token));
-  return '【管理者用リンク】\n' +
-    '✅ 承認: ' + pub + '?action=approve&token=' + token + '&sig=' + decSig + '\n' +
-    '❌ 辞退: ' + pub + '?action=decline&token=' + token + '&sig=' + decSig + '\n' +
-    '✉️ メッセージを送る: ' + admin + '?action=message&token=' + token + '&sig=' + msgSig;
+  return '【管理者用】\n' +
+    '✉️ お客様へメッセージを送る:\n' + admin + '?action=message&token=' + token + '&sig=' + msgSig;
 }
 
 function notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst) {
