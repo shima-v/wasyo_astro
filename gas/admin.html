@@ -160,6 +160,61 @@
       <div id="quotaArea"><div class="spin">読み込み中…</div></div>
     </section>
 
+    <!-- 臨時のお知らせを一斉送信 / 臨時営業・休業の登録 -->
+    <section>
+      <h2>📣 臨時のお知らせ・臨時営業/休業</h2>
+      <p class="muted">お客様へのお知らせ送信と、臨時営業・臨時休業の登録（営業設定＋Googleカレンダーに反映）を行います。LINE は無料枠を消費するため、送信前に「対象と残枠を確認」で人数と残りを確かめてください。</p>
+
+      <!-- モード選択：やることを切り替える -->
+      <div class="row">
+        <label><input type="radio" name="bcMode" value="message" checked /> メッセージのみ</label>
+        <label><input type="radio" name="bcMode" value="schedule" /> 臨時営業・休業の登録のみ</label>
+        <label><input type="radio" name="bcMode" value="both" /> 両方（登録＋告知）</label>
+      </div>
+
+      <!-- 臨時営業・休業の入力（mode=schedule/both のときだけ表示） -->
+      <div id="bcSchedule" style="display:none">
+        <div class="row">
+          <label><input type="radio" name="bcKind" value="closed" checked /> 臨時休業</label>
+          <label><input type="radio" name="bcKind" value="open" /> 臨時営業</label>
+        </div>
+        <div class="row">
+          <input type="date" id="bcDate" />
+          <label><input type="checkbox" id="bcAllDay" checked /> 終日</label>
+        </div>
+        <div class="row" id="bcTimeRange" style="display:none">
+          <input type="time" id="bcStart" step="1800" />〜<input type="time" id="bcEnd" step="1800" />
+        </div>
+      </div>
+
+      <!-- お知らせ本文と送信対象（mode=message/both のときだけ表示） -->
+      <div id="bcMessageBlock">
+        <div class="row" id="bcScopeRow">
+          <label><input type="radio" name="bcScope" value="regulars" checked /> 常連（2回以上）</label>
+          <label><input type="radio" name="bcScope" value="all" /> 全予約客</label>
+        </div>
+
+        <textarea id="bcMessage" rows="4" placeholder="例）本日◯日は都合により臨時休業いたします。ご不便をおかけします。" style="width:100%;box-sizing:border-box;margin:.4rem 0"></textarea>
+      </div>
+
+      <div id="bcPreviewArea"></div>
+
+      <div class="row">
+        <button class="ghost sm" id="bcPreview" type="button">対象と残枠を確認</button>
+        <button class="ghost sm" id="bcTest" type="button">オーナーに試し送信</button>
+        <button class="sm" id="bcSend" type="button" disabled>この内容で一斉送信</button>
+      </div>
+    </section>
+
+    <!-- オーナー通知の接続テスト -->
+    <section>
+      <h2>🔔 オーナー通知の接続テスト</h2>
+      <p class="muted">新規予約などの「お店への通知」がどこに届くか確認します。OWNER_DISCORD_WEBHOOK_URL を設定していれば Discord、未設定なら LINE に届きます。</p>
+      <div class="row">
+        <button class="ghost sm" id="ownerTest" type="button">接続テストを送る</button>
+      </div>
+    </section>
+
     <!-- 空き枠の開閉設定 -->
     <section>
       <h2>
@@ -326,6 +381,241 @@
           : '');
     }
     el('reloadQuota').addEventListener('click', loadQuota);
+
+    // ============================================================
+    // 臨時のお知らせを一斉送信 / 臨時営業・休業の登録
+    // ============================================================
+    // 送信 confirm で使うため、直近プレビューの対象人数を保持する
+    var bcCounts = { line: 0, mail: 0 };
+
+    function bcScope() {
+      var r = document.querySelector('input[name="bcScope"]:checked');
+      return r ? r.value : 'regulars';
+    }
+    function bcMessage() { return el('bcMessage').value; }
+
+    // 選択中モード（message / schedule / both）
+    function bcMode() {
+      var r = document.querySelector('input[name="bcMode"]:checked');
+      return r ? r.value : 'message';
+    }
+    // 選択中の臨時登録の種別（closed / open）
+    function bcKind() {
+      var r = document.querySelector('input[name="bcKind"]:checked');
+      return r ? r.value : 'closed';
+    }
+
+    // モードに応じて入力欄・ボタンの表示と送信ボタンのラベルを出し分ける
+    function applyBcMode() {
+      var mode = bcMode();
+      var showSchedule = (mode === 'schedule' || mode === 'both');
+      var showMessage = (mode === 'message' || mode === 'both');
+      el('bcSchedule').style.display = showSchedule ? '' : 'none';
+      el('bcMessageBlock').style.display = showMessage ? '' : 'none';
+      // プレビュー/試し送信はメッセージを伴うモードでのみ使う
+      el('bcPreview').style.display = showMessage ? '' : 'none';
+      el('bcTest').style.display = showMessage ? '' : 'none';
+      // 送信（実行）ボタンのラベルと初期活性
+      var sendBtn = el('bcSend');
+      if (mode === 'schedule') {
+        sendBtn.textContent = '登録する';
+        sendBtn.disabled = false; // 登録はプレビュー不要
+      } else if (mode === 'both') {
+        sendBtn.textContent = '登録して一斉送信';
+        sendBtn.disabled = true;  // プレビューで対象確認できるまで無効（既存 gating を流用）
+      } else {
+        sendBtn.textContent = 'この内容で一斉送信';
+        sendBtn.disabled = true;
+      }
+      el('bcPreviewArea').innerHTML = ''; // モード切替でプレビュー結果はリセット
+    }
+
+    // 時間帯入力（bcTimeRange）は「終日」オフのときだけ表示
+    function applyBcAllDay() {
+      el('bcTimeRange').style.display = el('bcAllDay').checked ? 'none' : '';
+    }
+
+    // スケジュール入力の payload を組み立てる
+    function bcSchedulePayload() {
+      return {
+        kind: bcKind(),
+        date: el('bcDate').value,
+        allDay: el('bcAllDay').checked,
+        start: el('bcStart').value,
+        end: el('bcEnd').value,
+      };
+    }
+
+    // スケジュール入力の妥当性チェック（不正なら toast を出して false）
+    function validateSchedule() {
+      var p = bcSchedulePayload();
+      if (!p.date) { toast('日付を入力してください'); return false; }
+      if (!p.allDay) {
+        if (!p.start || !p.end) { toast('開始と終了の時刻を入力してください'); return false; }
+        if (p.start >= p.end) { toast('終了は開始より後にしてください'); return false; }
+      }
+      return true;
+    }
+
+    // 種別/日付/時間の人間向け説明（toast 用）
+    function scheduleLabel(res) {
+      var kindStr = res.kind === 'closed' ? '臨時休業' : '臨時営業';
+      var timeStr = res.allDay ? '終日' : (res.start + '〜' + res.end);
+      return kindStr + '／' + res.date + '／' + timeStr;
+    }
+
+    document.querySelectorAll('input[name="bcMode"]').forEach(function (r) {
+      r.addEventListener('change', applyBcMode);
+    });
+    el('bcAllDay').addEventListener('change', applyBcAllDay);
+    applyBcMode();
+    applyBcAllDay();
+
+    // 本文（プレビュー）を作る。送信後見込み used+lineCount も併記
+    function renderBcPreview(res) {
+      var area = el('bcPreviewArea');
+      if (!res || !res.ok) {
+        area.innerHTML = '<div class="empty">' + (res && res.error === 'forbidden'
+          ? 'このGoogleアカウントには管理権限がありません。'
+          : '確認に失敗しました。') + '</div>';
+        el('bcSend').disabled = true;
+        return;
+      }
+      bcCounts.line = res.lineCount;
+      bcCounts.mail = res.mailCount;
+      var quotaStr = (res.used == null)
+        ? '無料枠は取得できませんでした'
+        : '今月 ' + res.used + '/' + res.limit + ' 通（残 ' + res.available + '）・送信後見込み ' + (res.used + res.lineCount);
+      var head = '<div class="card"><div class="title">送信対象</div>'
+        + '<div class="row">LINE ' + res.lineCount + '人 / メール ' + res.mailCount + '人 / 届かない ' + res.unreachable + '人</div>'
+        + '<div class="muted">' + esc(quotaStr) + '</div>';
+      if (res.willExceed) {
+        // 残枠不足：送信ボタンは無効のまま
+        area.innerHTML = head
+          + '<div class="empty" style="color:var(--c-ng)">⚠ 残枠不足のため送信できません（LINE対象 ' + res.lineCount + '人 > 残 ' + res.available + '）。</div></div>';
+        el('bcSend').disabled = true;
+      } else {
+        area.innerHTML = head + '</div>';
+        el('bcSend').disabled = false;
+      }
+    }
+
+    // 対象と残枠を確認
+    el('bcPreview').addEventListener('click', function () {
+      if (!bcMessage().trim()) { toast('本文を入力してください'); return; }
+      el('bcPreviewArea').innerHTML = '<div class="spin">確認中…</div>';
+      var btn = el('bcPreview'); btn.disabled = true;
+      google.script.run
+        .withSuccessHandler(function (res) { btn.disabled = false; renderBcPreview(res); })
+        .withFailureHandler(function (err) {
+          btn.disabled = false;
+          el('bcPreviewArea').innerHTML = '<div class="empty">確認に失敗しました: ' + esc(err && err.message) + '</div>';
+        })
+        .adminApiBroadcastPreview(bcScope());
+    });
+
+    // オーナーに試し送信
+    el('bcTest').addEventListener('click', function () {
+      if (!bcMessage().trim()) { toast('本文を入力してください'); return; }
+      var btn = el('bcTest'); btn.disabled = true;
+      google.script.run
+        .withSuccessHandler(function (res) {
+          btn.disabled = false;
+          if (res && res.ok) toast('オーナーに試し送信しました');
+          else toast('試し送信に失敗: ' + ((res && res.error) || '不明'));
+        })
+        .withFailureHandler(function (err) {
+          btn.disabled = false; toast('通信エラー: ' + (err && err.message));
+        })
+        .adminApiBroadcastTest(bcMessage());
+    });
+
+    // 一斉送信の実行本体（message / both で共通利用）。btn は完了後に無効維持する送信ボタン
+    function runBroadcast_(btn) {
+      if (!confirm('LINE ' + bcCounts.line + '人・メール ' + bcCounts.mail + '人へ送信します。よろしいですか？')) {
+        btn.disabled = false; return;
+      }
+      google.script.run
+        .withSuccessHandler(function (res) {
+          if (res && res.ok) {
+            toast('送信しました（LINE ' + res.sentLine + '人 / メール ' + res.sentMail + '人）');
+          } else {
+            toast('送信に失敗: ' + ((res && res.error) || '不明'));
+          }
+          // 送信後は再確認を促すため無効化（残枠が変わるため）
+          btn.disabled = true;
+        })
+        .withFailureHandler(function (err) {
+          btn.disabled = false; toast('通信エラー: ' + (err && err.message));
+        })
+        .adminApiBroadcast(bcScope(), bcMessage());
+    }
+
+    // 実行ボタン：モードに応じて「登録のみ / 送信のみ / 登録して送信」を切り替える
+    el('bcSend').addEventListener('click', function () {
+      var mode = bcMode();
+      var btn = el('bcSend');
+
+      // メッセージ送信を伴うモードでは本文必須（プレビュー済み前提の bcCounts を使う）
+      if (mode === 'message' || mode === 'both') {
+        if (!bcMessage().trim()) { toast('本文を入力してください'); return; }
+      }
+      // 臨時登録を伴うモードでは入力妥当性をフロントでもチェック
+      if (mode === 'schedule' || mode === 'both') {
+        if (!validateSchedule()) return;
+      }
+
+      btn.disabled = true;
+
+      if (mode === 'message') {
+        runBroadcast_(btn);
+        return;
+      }
+
+      if (mode === 'schedule') {
+        // 登録のみ：カレンダー＋営業設定へ反映して完了
+        google.script.run
+          .withSuccessHandler(function (res) {
+            btn.disabled = false;
+            if (res && res.ok) toast('登録しました（' + scheduleLabel(res) + '）');
+            else toast('登録に失敗: ' + ((res && res.error) || '不明'));
+          })
+          .withFailureHandler(function (err) {
+            btn.disabled = false; toast('通信エラー: ' + (err && err.message));
+          })
+          .adminApiSetTempSchedule(bcSchedulePayload());
+        return;
+      }
+
+      // both：まず臨時登録 → 成功後に既存の一斉送信フロー
+      google.script.run
+        .withSuccessHandler(function (res) {
+          if (!res || !res.ok) {
+            btn.disabled = false;
+            toast('登録に失敗したため送信を中止しました: ' + ((res && res.error) || '不明'));
+            return;
+          }
+          toast('登録しました（' + scheduleLabel(res) + '）。続けて送信します');
+          runBroadcast_(btn);
+        })
+        .withFailureHandler(function (err) {
+          btn.disabled = false; toast('通信エラー: ' + (err && err.message));
+        })
+        .adminApiSetTempSchedule(bcSchedulePayload());
+    });
+
+    // オーナー通知（Discord/LINE）の接続テスト
+    el('ownerTest').addEventListener('click', function () {
+      var btn = el('ownerTest'); btn.disabled = true;
+      google.script.run
+        .withSuccessHandler(function (res) {
+          btn.disabled = false;
+          if (res && res.ok) toast(res.via === 'discord' ? 'Discord に接続テストを送りました' : 'LINE に接続テストを送りました（Discord未設定）');
+          else toast('テストに失敗: ' + ((res && res.error) || '不明'));
+        })
+        .withFailureHandler(function (err) { btn.disabled = false; toast('通信エラー: ' + (err && err.message)); })
+        .adminApiOwnerChannelTest();
+    });
 
     // ============================================================
     // 空き枠の開閉設定

@@ -241,6 +241,7 @@ function getAvailability_(p) {
   var busyByDate = {};
   if (cal) {
     cal.getEvents(startOfDay_(from), addDays_(startOfDay_(to), 1)).forEach(function (ev) {
+      if (ev.getTag('wasyoBlock')) return; // 臨時営業/休業マーカーは busy にしない（受付可否の正は SLOT_CONFIG）
       var dk = fmt_(ev.getStartTime(), 'yyyy-MM-dd');
       (busyByDate[dk] || (busyByDate[dk] = [])).push({ start: ev.getStartTime().getTime(), end: ev.getEndTime().getTime() });
     });
@@ -273,6 +274,7 @@ function getAvailability_(p) {
 function receptionWindows_(d, config, holidaySet) {
   var dateStr = fmt_(d, 'yyyy-MM-dd');
   if (config.closedDates && config.closedDates.indexOf(dateStr) >= 0) return [];
+  if (config.openWindows && config.openWindows[dateStr]) return config.openWindows[dateStr]; // 臨時営業（時間帯指定）
   if (config.openDates && config.openDates.indexOf(dateStr) >= 0) return RULES.tempOpenWindow; // 臨時営業
   if (holidaySet && holidaySet[dateStr]) return []; // 祝日休
   var dow = d.getDay(); // 0=日, 6=土
@@ -684,6 +686,18 @@ function adminApiDecision(token, approve, message) {
   return requireAdmin_(function () { return adminDecision_({ token: token, approve: !!approve, message: message }); });
 }
 function adminApiGetQuota() { return requireAdmin_(adminGetQuota_); }
+function adminApiBroadcastPreview(scope) { return requireAdmin_(function () { return adminBroadcastPreview_({ scope: scope }); }); }
+function adminApiBroadcast(scope, message) { return requireAdmin_(function () { return adminBroadcast_({ scope: scope, message: message }); }); }
+function adminApiBroadcastTest(message) { return requireAdmin_(function () { return adminBroadcastTest_({ message: message }); }); }
+function adminApiSetTempSchedule(payload) { return requireAdmin_(function () { return adminSetTempSchedule_(payload); }); }
+// オーナー通知（新規予約・枠警告）の接続テスト。実際の notifyOwner_ 経路で1通送る。
+// OWNER_DISCORD_WEBHOOK_URL 設定時は Discord、未設定なら LINE に届く。届いたチャネルを via で返す。
+function adminApiOwnerChannelTest() {
+  return requireAdmin_(function () {
+    notifyOwner_('【接続テスト】オーナー通知の接続確認です。この通知が届けば設定は正常です。');
+    return { ok: true, via: prop_('OWNER_DISCORD_WEBHOOK_URL') ? 'discord' : 'line' };
+  });
+}
 
 function adminGetSlotConfig_() { return { ok: true, config: readSlotConfig_() }; }
 
@@ -783,14 +797,20 @@ function notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst) {
   var approve = base + '?action=approve&token=' + token + '&sig=' + encodeURIComponent(sig);
   var decline = base + '?action=decline&token=' + token + '&sig=' + encodeURIComponent(sig);
   var label = prop_('ENV_LABEL'); // dev のみ【開発】
+  // 顧客PII（電話・メール）は本文に載せない。名前・日時/メニュー・性別・紹介者・要望のみ。
   var detail = (label ? label + '\n' : '') +
     '【新規 仮予約】\n' +
     'お名前: ' + b.name + (isFirst ? '（新規）' : '（常連）') + '\n' +
     bookingSummary_(menu, start, eff, isFirst) + '\n' +
-    '性別: ' + (b.gender === 'male' ? '男性' : '女性') + (b.gender === 'male' ? '\n紹介者: ' + b.referrer : '') + '\n' +
-    '連絡: ' + (b.phone || '') + ' ' + (b.email || '') +
+    '性別: ' + (b.gender === 'male' ? '男性' : '女性') + (b.gender === 'male' ? '\n紹介者: ' + b.referrer : '') +
     (b.note ? '\n要望: ' + b.note : '');
-  // 詳細はテキスト、承認/辞退は confirm テンプレートのボタンで送る（長いURLを直接見せない）
+  // Discord Webhook が設定されていればそちらへ（顧客PIIを LINE の履歴に残さない移行）。
+  // 承認/辞退はプレーンテキストのURLで併記する（Discord はテンプレートボタン不可）。
+  if (prop_('OWNER_DISCORD_WEBHOOK_URL')) {
+    notifyOwnerDiscord_(detail + '\n\n✅ 承認: ' + approve + '\n❌ 辞退: ' + decline);
+    return;
+  }
+  // 従来の LINE 経路（フォールバック）。詳細はテキスト、承認/辞退は confirm テンプレのボタンで送る（長いURLを直接見せない）
   linePushMessages_(prop_('LINE_OWNER_USER_ID'), [
     { type: 'text', text: detail },
     {
@@ -811,7 +831,35 @@ function notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst) {
 function notifyOwner_(text) {
   // LINE Messaging API は dev/prod 共有のため、dev は ENV_LABEL(例:【開発】)を先頭に付けて区別する
   var label = prop_('ENV_LABEL');
-  linePush_(prop_('LINE_OWNER_USER_ID'), (label ? label + '\n' : '') + text, 'owner');
+  var body = (label ? label + '\n' : '') + text;
+  // Discord Webhook が設定されていればそちらへ。無ければ従来どおり LINE（無停止フォールバック）。
+  if (prop_('OWNER_DISCORD_WEBHOOK_URL')) { notifyOwnerDiscord_(body); return; }
+  linePush_(prop_('LINE_OWNER_USER_ID'), body, 'owner');
+}
+
+/**
+ * オーナー通知を Discord Webhook へ送る。
+ * OWNER_DISCORD_WEBHOOK_URL 未設定なら false（呼び出し側で LINE にフォールバック）。
+ * Discord はメッセージ受理時に 200/204 を返す。成否を返す。
+ */
+function notifyOwnerDiscord_(text) {
+  var url = prop_('OWNER_DISCORD_WEBHOOK_URL');
+  if (!url) return false;
+  try {
+    var res = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ content: text }),
+      muteHttpExceptions: true,
+    });
+    var code = res.getResponseCode();
+    var ok = code === 200 || code === 204;
+    if (!ok) console.error('notifyOwnerDiscord_ http ' + code + ': ' + res.getContentText());
+    return ok;
+  } catch (err) {
+    console.error('notifyOwnerDiscord_ failed: ' + err);
+    return false;
+  }
 }
 
 function notifyCustomer_(b, text) {
@@ -1102,6 +1150,197 @@ function adminGetQuota_() {
   var used = getQuotaConsumption_();
   var limit = monthlyFreeQuota_();
   return { ok: true, used: used, limit: limit, available: used == null ? null : Math.max(0, limit - used) };
+}
+
+// ============================================================
+// 臨時のお知らせを常連さんへ一斉送信
+//   台帳から対象（LINE/メール）を集計し、LINE は multicast・メールは個別送信する。
+//   LINE は無料枠を消費するため、送信前に残枠を確認できる（プレビュー）。
+// ============================================================
+
+/**
+ * 一斉送信の対象を台帳から集計する。
+ * scope='all' は全予約客（来店1回以上）、それ以外は常連（既定 REGULAR_MIN_VISITS=2 回以上）。
+ * type=phone は連絡手段を持たない（LINE/メール不可）ため unreachable にカウントする。
+ *  返り値: { lineUserIds:[], emails:[], unreachable:Number, total:Number }
+ */
+function broadcastRecipients_(scope) {
+  var sh = ledgerSheet_();
+  if (!sh) return { lineUserIds: [], emails: [], unreachable: 0, total: 0 };
+  var threshold = (scope === 'all') ? 1 : (Number(prop_('REGULAR_MIN_VISITS')) || 2);
+  var values = sh.getDataRange().getValues();
+  var lineUserIds = [];
+  var emails = [];
+  var unreachable = 0;
+  for (var r = 1; r < values.length; r++) { // 0行目はヘッダ
+    var row = values[r];
+    if (Number(row[4]) < threshold) continue; // 5列目=来店回数
+    var type = row[1];
+    if (type === 'line') lineUserIds.push(String(row[0]).replace(/^line:/, ''));
+    else if (type === 'email') emails.push(String(row[0]).replace(/^email:/, ''));
+    else if (type === 'phone') unreachable++;
+  }
+  return {
+    lineUserIds: lineUserIds, emails: emails, unreachable: unreachable,
+    total: lineUserIds.length + emails.length + unreachable,
+  };
+}
+
+/**
+ * LINE の multicast で複数ユーザーへ同報する。
+ * multicast は1リクエスト最大500件のため 500 件ずつに分割して送る。
+ * kind は送信ログの種別。成功送信できた人数の合計を返す（userIds 空なら 0）。
+ */
+function lineMulticast_(userIds, messages, kind) {
+  var token = prop_('LINE_CHANNEL_ACCESS_TOKEN');
+  if (!token || !userIds || !userIds.length) return 0;
+  var sent = 0;
+  for (var i = 0; i < userIds.length; i += 500) {
+    var chunk = userIds.slice(i, i + 500);
+    var ok = false;
+    try {
+      var res = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/multicast', {
+        method: 'post',
+        contentType: 'application/json',
+        headers: { Authorization: 'Bearer ' + token },
+        payload: JSON.stringify({ to: chunk, messages: messages }),
+        muteHttpExceptions: true,
+      });
+      ok = res.getResponseCode() === 200;
+      if (!ok) console.error('lineMulticast_ http ' + res.getResponseCode() + ': ' + res.getContentText());
+    } catch (err) { console.error('lineMulticast_ failed: ' + err); }
+    if (ok) sent += chunk.length;
+    logPush_(kind || 'broadcast', 'multicast:' + chunk.length, ok);
+  }
+  return sent;
+}
+
+/**
+ * 管理画面用：一斉送信のプレビュー（対象人数と残枠）。送信はしない。
+ * willExceed は LINE 対象人数が残枠を超えるか（available 取得失敗時は判定しない）。
+ */
+function adminBroadcastPreview_(b) {
+  var scope = b.scope || 'regulars';
+  var rec = broadcastRecipients_(scope);
+  var q = adminGetQuota_();
+  return {
+    ok: true, scope: scope,
+    lineCount: rec.lineUserIds.length, mailCount: rec.emails.length, unreachable: rec.unreachable,
+    used: q.used, limit: q.limit, available: q.available,
+    willExceed: q.available != null && rec.lineUserIds.length > q.available,
+  };
+}
+
+/**
+ * 管理画面用：一斉送信を実行する。LINE は multicast、メールは個別送信。
+ * 残枠（available）を LINE 対象人数が超える場合は送信せず quota_exceeded を返す。
+ */
+function adminBroadcast_(b) {
+  var message = (b && b.message) || '';
+  if (!message.trim()) return { ok: false, error: 'empty_message' };
+  var scope = b.scope || 'regulars';
+  var rec = broadcastRecipients_(scope);
+  var q = adminGetQuota_();
+  if (q.available != null && rec.lineUserIds.length > q.available) {
+    return { ok: false, error: 'quota_exceeded', need: rec.lineUserIds.length, available: q.available };
+  }
+  // LINE：無料枠を消費するため multicast でまとめ送り（dev は ENV_LABEL 付与）
+  var sentLine = lineMulticast_(rec.lineUserIds, [{ type: 'text', text: withEnvLabel_(message.trim()) }], 'broadcast');
+  // メール：無料枠外。各宛先へ個別送信（sendMail_ 内で ENV_LABEL 付与）
+  var sentMail = 0;
+  rec.emails.forEach(function (email) {
+    sendMail_(email, 'サロン和笑〜Violane〜 からのお知らせ', message.trim());
+    sentMail++;
+  });
+  return { ok: true, sentLine: sentLine, sentMail: sentMail, unreachable: rec.unreachable };
+}
+
+/**
+ * 管理画面用：一斉送信の試し送り。オーナー本人にだけ LINE で送る（本番送信の前確認）。
+ */
+function adminBroadcastTest_(b) {
+  var message = (b && b.message) || '';
+  if (!message.trim()) return { ok: false, error: 'empty_message' };
+  var owner = prop_('LINE_OWNER_USER_ID');
+  if (!owner) return { ok: false, error: 'no_owner' };
+  linePush_(owner, withEnvLabel_('【一斉送信テスト】\n' + message.trim()), 'broadcast_test');
+  return { ok: true };
+}
+
+/**
+ * 管理画面用：臨時営業・臨時休業を登録する。
+ *   ① 営業設定（SLOT_CONFIG）へ反映＝ネット予約の受付可否に効く
+ *   ② Google カレンダー（予約カレンダー）へ目印イベントを作成（wasyoBlock タグ付き＝空き枠計算の busy からは除外）
+ * b = { kind:'closed'|'open', date:'yyyy-MM-dd', allDay:Boolean, start?:'HH:MM', end?:'HH:MM' }
+ *   kind='closed' 終日 → closedDates に追加 ／ 時間帯 → closedSlots[date] に 30分刻みで追加
+ *   kind='open'   終日 → openDates に追加   ／ 時間帯 → openWindows[date] に受付ウィンドウを設定
+ */
+function adminSetTempSchedule_(b) {
+  b = b || {};
+  // ---- バリデーション ----
+  if (b.kind !== 'closed' && b.kind !== 'open') return { ok: false, error: 'invalid_input' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.date || ''))) return { ok: false, error: 'invalid_input' };
+  var allDay = !!b.allDay;
+  if (!allDay) {
+    if (!/^\d{2}:\d{2}$/.test(String(b.start || '')) || !/^\d{2}:\d{2}$/.test(String(b.end || ''))) return { ok: false, error: 'invalid_input' };
+    if (b.start >= b.end) return { ok: false, error: 'invalid_input' }; // 'HH:MM' は辞書順＝時刻順で比較可
+  }
+
+  // start,end('HH:MM') を [start,end) で slotStepMin 刻みの 'HH:MM' 配列に展開する
+  function expandSlots_(start, end) {
+    var d = parseDate_(b.date);
+    var s = atTime_(d, start), e = atTime_(d, end);
+    var step = RULES.slotStepMin * 60000;
+    var out = [];
+    for (var t = new Date(s); t.getTime() < e.getTime(); t = new Date(t.getTime() + step)) out.push(fmt_(t, 'HH:mm'));
+    return out;
+  }
+  // 配列に値を（重複なく）追加する
+  function union_(arr, v) { if (arr.indexOf(v) < 0) arr.push(v); }
+
+  var config = readSlotConfig_();
+
+  if (b.kind === 'closed') {
+    if (allDay) {
+      config.closedDates = config.closedDates || [];
+      union_(config.closedDates, b.date);
+    } else {
+      config.closedSlots = config.closedSlots || {};
+      var list = config.closedSlots[b.date] || (config.closedSlots[b.date] = []);
+      expandSlots_(b.start, b.end).forEach(function (hhmm) { union_(list, hhmm); });
+    }
+  } else { // open
+    if (allDay) {
+      config.openDates = config.openDates || [];
+      union_(config.openDates, b.date);
+    } else {
+      config.openWindows = config.openWindows || {};
+      config.openWindows[b.date] = [{ start: b.start, end: b.end }];
+    }
+  }
+
+  PropertiesService.getScriptProperties().setProperty('SLOT_CONFIG', JSON.stringify(config));
+
+  // ---- Google カレンダーへ目印イベントを作成（失敗しても登録自体は成功扱い） ----
+  try {
+    var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
+    if (cal) {
+      var label = prop_('ENV_LABEL'); // dev のみ【開発】
+      var title = b.kind === 'closed' ? '【臨時休業】' : '【臨時営業】';
+      var ev;
+      if (allDay) {
+        ev = cal.createAllDayEvent((label ? label : '') + title, parseDate_(b.date));
+      } else {
+        var s = atTime_(parseDate_(b.date), b.start), e = atTime_(parseDate_(b.date), b.end);
+        ev = cal.createEvent((label ? label : '') + title + ' ' + b.start + '-' + b.end, s, e);
+      }
+      ev.setTag('wasyoBlock', '1'); // 空き枠計算の busy から除外する目印
+    }
+  } catch (err) {
+    console.error('adminSetTempSchedule_ calendar failed: ' + err);
+  }
+
+  return { ok: true, kind: b.kind, date: b.date, allDay: allDay, start: b.start || '', end: b.end || '' };
 }
 
 /**
