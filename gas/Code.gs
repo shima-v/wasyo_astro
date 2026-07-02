@@ -174,6 +174,11 @@ function doPost(e) {
       case 'listPending': return json_(requireAdminToken_(body, adminListPending_));
       case 'getQuota': return json_(requireAdminToken_(body, adminGetQuota_));
       case 'adminDecision': return json_(requireAdminToken_(body, function () { return adminDecision_(body); }));
+      case 'broadcastPreview': return json_(requireAdminToken_(body, function () { return adminBroadcastPreview_(body); }));
+      case 'broadcast': return json_(requireAdminToken_(body, function () { return adminBroadcast_(body); }));
+      case 'broadcastTest': return json_(requireAdminToken_(body, function () { return adminBroadcastTest_(body); }));
+      case 'setTempSchedule': return json_(requireAdminToken_(body, function () { return adminSetTempSchedule_(body); }));
+      case 'ownerChannelTest': return json_(requireAdminToken_(body, adminOwnerChannelTest_));
       default: return json_({ ok: false, error: 'unknown_action' });
     }
   } catch (err) {
@@ -711,12 +716,11 @@ function adminApiBroadcastTest(message) { return requireAdmin_(function () { ret
 function adminApiSetTempSchedule(payload) { return requireAdmin_(function () { return adminSetTempSchedule_(payload); }); }
 // オーナー通知（新規予約・枠警告）の接続テスト。実際の notifyOwner_ 経路で1通送る。
 // OWNER_DISCORD_WEBHOOK_URL 設定時は Discord、未設定なら LINE に届く。届いたチャネルを via で返す。
-function adminApiOwnerChannelTest() {
-  return requireAdmin_(function () {
-    notifyOwner_('【接続テスト】オーナー通知の接続確認です。この通知が届けば設定は正常です。');
-    return { ok: true, via: prop_('OWNER_DISCORD_WEBHOOK_URL') ? 'discord' : 'line' };
-  });
+function adminOwnerChannelTest_() {
+  notifyOwner_('【接続テスト】オーナー通知の接続確認です。この通知が届けば設定は正常です。');
+  return { ok: true, via: prop_('OWNER_DISCORD_WEBHOOK_URL') ? 'discord' : 'line' };
 }
+function adminApiOwnerChannelTest() { return requireAdmin_(adminOwnerChannelTest_); }
 
 function adminGetSlotConfig_() { return { ok: true, config: readSlotConfig_() }; }
 
