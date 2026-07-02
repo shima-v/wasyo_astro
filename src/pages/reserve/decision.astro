@@ -1,0 +1,307 @@
+---
+import { RESERVE_API, ENV_LABEL } from '../../data/config.js';
+import EnvBadge from '../../components/EnvBadge.astro';
+
+const _base = import.meta.env.BASE_URL;
+const base = _base.endsWith('/') ? _base : _base + '/';
+const salonName = 'サロン和笑〜Violane〜';
+const tel = '090-9095-6034';
+// title は単一の式にする（<title> RCDATA で式＋生テキストの混在を避ける）
+const pageTitle = `${ENV_LABEL}ご予約の承認/辞退 | ${salonName}`;
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <EnvBadge />
+    <header class="site-header">
+      <a class="home-link" href={base}>‹ {salonName}</a>
+      <span class="head-title">ご予約の承認/辞退</span>
+    </header>
+
+    <main class="wrap">
+      <div id="loading" class="status loading"><span class="spinner" aria-hidden="true"></span><span>予約内容を読み込んでいます…</span></div>
+      <div id="notfound" class="status err" hidden>
+        ご予約が見つかりませんでした。<br />
+        すでに処理済み、または取消済みの可能性があります。
+      </div>
+
+      <section class="card" id="detail" hidden>
+        <h2 id="askTitle"></h2>
+        <div id="statusBadge"></div>
+        <dl class="detail-dl">
+          <dt>メニュー</dt><dd id="d-menu"></dd>
+          <dt>日時</dt><dd id="d-when"></dd>
+          <dt>料金</dt><dd id="d-price"></dd>
+          <dt>お名前</dt><dd id="d-name"></dd>
+        </dl>
+        <div id="noteBox" class="note-box" hidden>
+          <div class="note-label">ご要望</div>
+          <div id="d-note" class="note-body"></div>
+        </div>
+
+        <div class="msg-field">
+          <label id="msgLabel" for="custMsg"></label>
+          <textarea id="custMsg" rows="4"></textarea>
+        </div>
+
+        <div class="actions">
+          <button type="button" class="reserve-btn" id="decideBtn"></button>
+        </div>
+      </section>
+
+      <section class="card done" id="result" hidden>
+        <div class="done-mark" id="resultMark">✓</div>
+        <h2 id="resultTitle"></h2>
+        <p id="resultBody"></p>
+        <a class="reserve-btn ghost" href={base}>トップへ戻る</a>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>{salonName}</p>
+      <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
+    </footer>
+
+    <script define:vars={{ RESERVE_API, tel }}>
+      const WD = ['日', '月', '火', '水', '木', '金', '土'];
+      const $ = (s) => document.querySelector(s);
+      const params = new URLSearchParams(location.search);
+      const token = params.get('token') || '';
+      // sig は %3D 等が自動デコードされ、生の base64url 文字列で得られる。そのまま POST に載せる。
+      const sig = params.get('sig') || '';
+      const action = params.get('action') || ''; // 'approve' | 'decline'
+      const approve = action === 'approve';
+
+      const fmtYen = (n) => '¥' + Number(n).toLocaleString('ja-JP');
+      const fmtWhen = (ymd, hm, durationMin) => {
+        const [y, m, d] = ymd.split('-').map(Number);
+        const dt = new Date(y, m - 1, d);
+        return `${m}/${d}(${WD[dt.getDay()]}) ${hm}〜（${durationMin}分）`;
+      };
+
+      async function postAction(payload) {
+        const res = await fetch(RESERVE_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload),
+        });
+        return res.json();
+      }
+
+      function showResult(ok, title, body) {
+        $('#detail').hidden = true;
+        $('#notfound').hidden = true;
+        $('#resultMark').textContent = ok ? '✓' : '！';
+        $('#resultTitle').textContent = title;
+        $('#resultBody').textContent = body;
+        $('#result').hidden = false;
+        $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      function showNotFound() {
+        $('#loading').hidden = true;
+        $('#detail').hidden = true;
+        $('#notfound').hidden = false;
+      }
+
+      // ---- 初期読み込み（GET・読み取り専用。ここでは確定/辞退はしない） ----
+      async function load() {
+        if (!token || !RESERVE_API) {
+          showNotFound();
+          return;
+        }
+        try {
+          const res = await fetch(`${RESERVE_API}?action=booking&token=${encodeURIComponent(token)}`);
+          const data = await res.json();
+          if (!data.ok) throw new Error('not_found');
+          renderDetail(data);
+        } catch (e) {
+          showNotFound();
+        }
+      }
+
+      function renderDetail(b) {
+        $('#loading').hidden = true;
+        $('#detail').hidden = false;
+
+        // 承認/辞退で見出し・色・ボタン文言を出し分け
+        $('#askTitle').textContent = approve ? 'この予約を承認しますか？' : 'この予約を辞退しますか？';
+        $('#askTitle').style.color = approve ? '#2e7d32' : '#b00020';
+
+        const confirmed = b.status === 'confirmed';
+        $('#statusBadge').innerHTML = confirmed
+          ? '<span class="badge ok">確定済み</span>'
+          : '<span class="badge pending">仮予約（確認中）</span>';
+
+        $('#d-menu').textContent = b.menuName + (b.isFirstTime ? '（初回）' : '');
+        $('#d-when').textContent = fmtWhen(b.date, b.time, b.durationMin);
+        $('#d-price').textContent = fmtYen(b.price);
+        $('#d-name').textContent = b.name + ' 様';
+        if (b.note) {
+          $('#noteBox').hidden = false;
+          $('#d-note').textContent = b.note;
+        }
+
+        // メッセージ欄。辞退の空送信は GAS 側の定型文(DECLINE_DEFAULT_MSG)が入るため front では定型文を持たない。
+        const msgLabel = approve ? 'お客様へのひとこと（任意）' : 'お客様へのメッセージ（空なら定型文で送信）';
+        $('#msgLabel').textContent = msgLabel;
+
+        const btn = $('#decideBtn');
+        btn.textContent = approve ? '承認する' : '辞退する';
+        if (!approve) btn.classList.add('decline');
+      }
+
+      // ---- 承認/辞退の実行（POST） ----
+      $('#decideBtn').addEventListener('click', async () => {
+        const btn = $('#decideBtn');
+        btn.disabled = true;
+        const message = $('#custMsg').value;
+        try {
+          const r = await postAction({ action: 'decide', token, sig, approve, message });
+          if (r && r.ok) {
+            showResult(
+              true,
+              approve ? '承認しました' : '辞退しました',
+              (approve ? '承認しました。' : '辞退しました。') + 'お客様へ通知済みです。'
+            );
+          } else if (r && r.error === 'bad_signature') {
+            btn.disabled = false;
+            showResult(false, 'エラー', '署名が無効です。リンクが正しいかご確認ください。');
+          } else if (r && r.error === 'not_found') {
+            btn.disabled = false;
+            showResult(false, '見つかりませんでした', 'この予約は見つかりませんでした（処理済み／取消済みの可能性があります）。');
+          } else {
+            btn.disabled = false;
+            showResult(false, 'エラー', '処理できませんでした。時間をおいて再度お試しください。');
+          }
+        } catch (e) {
+          btn.disabled = false;
+          showResult(false, '通信エラー', '通信に失敗しました。時間をおいて再度お試しください。');
+        }
+      });
+
+      load();
+    </script>
+
+    <style is:global>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      /* display:flex 等を指定した要素でも hidden 属性が確実に効くようにする */
+      [hidden] { display: none !important; }
+      :root {
+        --c-bg: #FDF2F5; --c-surface: #FFFFFF; --c-ink: #2C1F3A; --c-muted: #7A6080;
+        --c-border: #E2D0D8; --c-purple: #8B6080; --c-purple-lt: #B09AB0; --c-purple-dk: #3E2B4A;
+        --c-reserve: #8B6080; --c-reserve-hv: #3E2B4A; --c-accent: #C9A84C;
+        --f-serif: 'Noto Serif JP', 'YuMincho', 'Yu Mincho', serif;
+      }
+      body { font-family: var(--f-serif); background: var(--c-bg); color: var(--c-ink); line-height: 1.9; font-size: 16px; }
+      /* 横方向の意図しないはみ出しを切り落とす（縦スクロール・sticky は維持） */
+      html, body { overflow-x: clip; }
+      a { color: var(--c-purple-dk); }
+
+      /* キーボードフォーカスをゴールド輪郭で明示 */
+      :focus-visible {
+        outline: 2px solid var(--c-accent);
+        outline-offset: 2px;
+        border-radius: 2px;
+      }
+      .site-header {
+        position: sticky; top: 0; z-index: 10;
+        display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+        padding: .7rem 1rem; background: rgba(253,242,245,.92); backdrop-filter: blur(6px);
+        border-bottom: 1px solid var(--c-border);
+      }
+      .home-link { text-decoration: none; color: var(--c-purple-dk); font-size: .9rem; }
+      .head-title { font-size: .9rem; color: var(--c-muted); }
+      .wrap { max-width: 600px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+
+      .status { color: var(--c-muted); font-size: .92rem; padding: .5rem 0; }
+      .status.err { color: #8E2230; }
+      .status.loading {
+        display: flex; align-items: center; gap: .55rem;
+        color: var(--c-purple-dk); font-weight: 600;
+        background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 8px;
+        padding: .65rem .8rem;
+      }
+      .spinner {
+        width: 18px; height: 18px; flex: none;
+        border: 3px solid var(--c-border); border-top-color: var(--c-purple);
+        border-radius: 50%; animation: spin .8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      .card {
+        background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 12px;
+        padding: 1.1rem 1rem 1.3rem; margin-bottom: 1.25rem;
+      }
+      .card > h2 { font-size: 1.15rem; margin-bottom: .8rem; padding-bottom: .55rem; border-bottom: 1px solid var(--c-border); }
+
+      .badge { display: inline-block; font-size: .8rem; padding: .15rem .7rem; border-radius: 14px; margin-bottom: .8rem; }
+      .badge.ok { background: #E2F0E8; color: #2E7D5B; }
+      .badge.pending { background: #F6EFC9; color: #8a6d1a; }
+
+      .detail-dl { display: grid; grid-template-columns: auto 1fr; gap: .25rem .9rem; font-size: .95rem; }
+      .detail-dl dt { color: var(--c-muted); white-space: nowrap; }
+      .detail-dl dd { margin: 0; }
+
+      .note-box {
+        margin-top: 1rem; background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 8px; padding: .7rem .8rem;
+      }
+      .note-label { font-size: .82rem; color: var(--c-muted); margin-bottom: .25rem; }
+      .note-body { font-size: .92rem; white-space: pre-wrap; }
+
+      .msg-field { margin-top: 1.1rem; }
+      .msg-field label { display: block; font-size: .9rem; color: var(--c-muted); margin-bottom: .35rem; }
+      .msg-field textarea {
+        width: 100%; font-family: inherit; font-size: 1rem; line-height: 1.7;
+        padding: .6rem .7rem; border: 1px solid var(--c-border); border-radius: 8px;
+        background: #fff; color: var(--c-ink); resize: vertical;
+      }
+      .msg-field textarea:focus { border-color: var(--c-purple-lt); }
+
+      .actions { display: flex; flex-direction: column; gap: .6rem; margin-top: 1.2rem; }
+
+      .reserve-btn {
+        display: inline-flex; align-items: center; justify-content: center; width: 100%;
+        font-family: inherit; font-size: 1rem; cursor: pointer; background: var(--c-reserve); color: #fff;
+        border: none; border-radius: 24px; padding: .75rem 1.2rem; min-height: 48px; text-decoration: none;
+        transition: background .15s, transform .15s;
+      }
+      .reserve-btn:hover { background: var(--c-reserve-hv); transform: translateY(-1px); }
+      .reserve-btn:disabled { opacity: .55; cursor: default; transform: none; }
+      .reserve-btn.ghost { background: transparent; color: var(--c-purple-dk); border: 1px solid var(--c-border); }
+      /* 辞退ボタンは赤系で承認と取り違えないように */
+      .reserve-btn.decline { background: #b00020; }
+      .reserve-btn.decline:hover { background: #8a0019; }
+
+      .done { text-align: center; }
+      .done-mark {
+        width: 3rem; height: 3rem; margin: 0 auto .5rem; border-radius: 50%; background: var(--c-purple);
+        color: #fff; font-size: 1.5rem; display: flex; align-items: center; justify-content: center;
+      }
+      .done p { margin: .8rem 0 1rem; }
+
+      .site-footer { text-align: center; color: var(--c-muted); font-size: .82rem; padding: 1.5rem 1rem 2.5rem; }
+      .site-footer .small { font-size: .78rem; }
+
+      /* 動きを抑える設定の利用者にはアニメ・自動スクロールを無効化 */
+      @media (prefers-reduced-motion: reduce) {
+        html { scroll-behavior: auto; }
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.001ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
+    </style>
+  </body>
+</html>

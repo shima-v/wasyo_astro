@@ -118,6 +118,9 @@
 > - 対策: GAS の Script Property `ENV_LABEL`（dev のみ `【開発】` 等）を**店向け通知の先頭に付与**して区別する（**prod はキーを登録しない**＝GAS は空文字保存不可のため未登録でラベルなし）。承認/辞退リンクは各環境の GAS URL を指すため、誤承認は起きない（dev リンク→dev GAS、prod リンク→prod GAS）。
 > - 注意: dev で実際に LINE push すると本番と同じ友だち（オーナー）に届くため、テストは通知本文の `【開発】` 表示で識別する。お客様への LINE 通知も同一チャネル経由（MVP はメール既定のため影響小）。
 
+> **承認/辞退リンクは front `/reserve/decision` 経由**
+> オーナー通知（Discord/LINE）の「承認/辞退」リンクは、GAS の `/exec`（script.google.com）直リンクではなく、**非 Google ドメインの自社サイト `/reserve/decision`** を指す。オーナーのスマホが複数 Google アカウントにログイン中だと Google が `/exec` を `/u/N/` に回して「ファイルを開けません」になる癖を根絶するため。リンク土台は Script Property `FRONT_BASE_URL`（prod=`wwwasyo.com` / dev=`workers.dev`）。決定処理は GAS の公開 `decide` アクション（**POST・HMAC sig 検証**。GET プリフェッチでの誤確定を防ぐため POST 限定）。HMAC 署名(token+sig)モデルは従来どおり維持。
+
 ### 設定の切り替え
 - フロント: GAS URL・LINE Login channel 等を `import.meta.env.PUBLIC_*` で注入。`src/data/config.js` が読む。
   - ローカル/dev: `.env.development`（dev値）。Cloudflare Workers はプロジェクト環境変数（dev値）。
