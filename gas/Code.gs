@@ -444,7 +444,8 @@ function renderDecisionPage_(p, approve) {
   var color = approve ? '#2e7d32' : '#b00020';
   var statusNote = b.status === STATUS.CONFIRMED ? '<p style="color:#2e7d32">※この予約はすでに「確定」済みです。</p>' : '';
   var summary = esc_(b.name) + ' 様' + (b.isFirstTime ? '（新規）' : '（常連）') + '<br>' +
-    esc_(b.menuName) + '<br>' + b.date + ' ' + b.time + '〜（' + b.durationMin + '分） ¥' + b.price;
+    esc_(b.menuName) + '<br>' + b.date + ' ' + b.time + '〜（' + b.durationMin + '分） ¥' + b.price +
+    (b.note ? '<br><br><b>ご要望</b><br><span style="white-space:pre-wrap">' + esc_(b.note) + '</span>' : '');
   // 承認・辞退どちらでもお客様へメッセージを添えられる。辞退は既定文をプリセット、承認は任意で空。
   var msgLabel = approve ? 'お客様へのひとことメッセージ（任意）' : 'お客様へのメッセージ（このまま送信／編集可）';
   var msgDefault = approve ? '' : DECLINE_DEFAULT_MSG;
@@ -533,7 +534,8 @@ function renderMessagePage_(p) {
   // 連絡先はマスク（電話/メール/lineUserId は表示しない）。名前・日時・メニューのみ。
   // 連絡先はマスク（電話/メール/lineUserId は表示しない）。名前・日時・メニューのみ。
   var summary = esc_(b.name) + ' 様' + (b.isFirstTime ? '（新規）' : '（常連）') + '<br>' +
-    esc_(b.menuName) + '<br>' + b.date + ' ' + b.time + '〜（' + b.durationMin + '分）';
+    esc_(b.menuName) + '<br>' + b.date + ' ' + b.time + '〜（' + b.durationMin + '分）' +
+    (b.note ? '<br><br><b>ご要望</b><br><span style="white-space:pre-wrap">' + esc_(b.note) + '</span>' : '');
   var statusNote = b.status === STATUS.CONFIRMED
     ? '<p style="color:#2e7d32;font-size:1.15rem;margin:.4rem 0">この予約は「確定」済みです。</p>'
     : '<p style="color:#b26a00;font-size:1.15rem;margin:.4rem 0">この予約は「仮予約」の状態です。</p>';
@@ -654,6 +656,7 @@ function getBookingByToken_(token) {
     date: fmt_(found.event.getStartTime(), 'yyyy-MM-dd'), time: fmt_(found.event.getStartTime(), 'HH:mm'),
     durationMin: displayDurationMin_(p, found.event), price: Number(p.price || 0),
     canCancel: withinCancelDeadline_(found.event.getStartTime()),
+    note: p.note || '',
   };
 }
 
