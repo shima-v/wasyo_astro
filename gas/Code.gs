@@ -132,6 +132,8 @@ function doGet(e) {
         return renderDecisionPage_(e.parameter, true);
       case 'decline':
         return renderDecisionPage_(e.parameter, false);
+      case 'message': // 予約客への任意メッセージ送信（管理デプロイ：要Googleログイン。GETは入力ページのみ）
+        return renderMessagePage_(e.parameter);
       case 'admin': { // 管理パネル（別デプロイ：executeAs=アクセスユーザー / アクセス=自分のみ）
         var envLabel = prop_('ENV_LABEL') || ''; // dev のみ '【開発】'。dev インジケータの出し分けに使う
         var t = HtmlService.createTemplateFromFile('admin');
@@ -201,7 +203,10 @@ function html_(message) {
   var page = '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<div style="font-family:sans-serif;max-width:480px;margin:3rem auto;padding:1.5rem;text-align:center;line-height:1.8">' +
     message + '</div>';
-  return HtmlService.createHtmlOutput(page);
+  // GAS の HtmlService は iframe 表示のため、HTML内の <meta viewport> は効かない。
+  // addMetaTag('viewport', ...) で明示しないとスマホで縮小表示になる（admin は doGet:143 で同様に対応済み）。
+  return HtmlService.createHtmlOutput(page)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
 // ============================================================
@@ -399,6 +404,9 @@ function createBooking_(b) {
       note: b.note || '',
     });
     try { ev.setColor(CalendarApp.EventColor.ORANGE); } catch (_) {}
+    // カレンダー説明欄に管理者向けリンクを入れる（オーナーが予約を開いて操作できる導線）。
+    // 説明欄には PII（連絡先）を生書きしない。載せるのは署名付きリンクのみ。
+    try { ev.setDescription(adminEventDescription_(token)); } catch (_) {}
   } finally {
     lock.releaseLock();
   }
@@ -498,6 +506,83 @@ function decide_(token, approve, message) {
     ev.deleteEvent();
   }
   return { ok: true, status: approve ? STATUS.CONFIRMED : 'declined' };
+}
+
+// ============================================================
+// 予約客への任意メッセージ送信（管理者・要Googleログイン）
+// ============================================================
+
+/**
+ * 予約客へのメッセージ送信ページ（GET・`?action=message`）。**状態変更はしない**確認/入力ページを返す。
+ * `renderDecisionPage_` を手本にした「GET は読み取り専用 → ボタン押下で google.script.run 実行」パターン。
+ *
+ * 重要（デプロイ形態）: 送信本体 `sendCustomerMessageBySig` は `requireAdmin_`（Googleログイン照合）を
+ * 使うため、このページは **管理デプロイ（executeAs=アクセスユーザー・要ログイン）** で開く必要がある。
+ * リンクの基底URLは公開API（①）ではなく管理デプロイ（②）の /exec を指すこと（createBooking_ 参照）。
+ *
+ * プライバシー: 表示は「名前・日時・メニュー」のみ。連絡先（電話・メール・lineUserId）はマスク（出さない）。
+ * 署名は承認系（'decision:'）と分離するため 'message:' プレフィックスで検証する。
+ */
+function renderMessagePage_(p) {
+  if (!verifySig_('message:' + p.token, p.sig)) return html_('署名が無効です。');
+  var b = getBookingByToken_(p.token);
+  if (!b.ok) {
+    return html_('<h2 style="font-size:1.1rem">この予約は見つかりませんでした</h2>' +
+      '<p>すでに処理済み、または取消済みの可能性があります。</p>');
+  }
+  // 連絡先はマスク（電話/メール/lineUserId は表示しない）。名前・日時・メニューのみ。
+  var summary = esc_(b.name) + ' 様' + (b.isFirstTime ? '（新規）' : '（常連）') + '<br>' +
+    esc_(b.menuName) + '<br>' + b.date + ' ' + b.time + '〜（' + b.durationMin + '分）';
+  var statusNote = b.status === STATUS.CONFIRMED
+    ? '<p style="color:#2e7d32;margin:.2rem 0">この予約は「確定」済みです。</p>'
+    : '<p style="color:#b26a00;margin:.2rem 0">この予約は「仮予約」の状態です。</p>';
+  // 入力フォント16px以上でスマホの自動ズームを防ぐ / 送信ボタン min-height 48px・幅100%（html_() が viewport を持つ）
+  var msgBox =
+    '<label for="custMsg" style="display:block;text-align:left;font-size:.9rem;margin:.2rem 0 .35rem">お客様へのメッセージ</label>' +
+    '<textarea id="custMsg" rows="5" placeholder="お客様へお送りするメッセージを入力してください" ' +
+    'style="width:100%;font-family:inherit;font-size:16px;padding:.6rem .7rem;border:1px solid #E2D0D8;border-radius:8px;box-sizing:border-box"></textarea>';
+  var page = '' +
+    '<h2 style="font-size:1.1rem;margin:0 0 .5rem">お客様へメッセージを送る</h2>' +
+    statusNote +
+    '<div style="background:#f6f3f6;border-radius:10px;padding:1rem;margin:1rem 0;text-align:left">' + summary + '</div>' +
+    msgBox +
+    '<button id="go" style="width:100%;min-height:48px;margin-top:1rem;border:0;border-radius:24px;color:#fff;background:#8B6080;font-size:16px;cursor:pointer">送信する</button>' +
+    '<p id="msg" style="color:#666;margin-top:1rem;min-height:1.2em"></p>' +
+    '<script>' +
+    'var T=' + JSON.stringify(p.token) + ',S=' + JSON.stringify(p.sig) + ';' +
+    'document.getElementById("go").onclick=function(){' +
+    'var box=document.getElementById("custMsg");var MSG=box?box.value:"";' +
+    'if(!MSG||!MSG.trim()){document.getElementById("msg").textContent="メッセージを入力してください。";return;}' +
+    'this.disabled=true;this.style.opacity=.5;this.textContent="送信中…";' +
+    'google.script.run.withSuccessHandler(function(r){' +
+    'var m=document.getElementById("msg");' +
+    'if(r&&r.ok){m.innerHTML="<b>送信しました。</b>お客様へ通知済みです。";document.getElementById("go").style.display="none";if(box)box.disabled=true;}' +
+    'else{m.textContent="エラー: "+errText_(r);var g=document.getElementById("go");g.disabled=false;g.style.opacity=1;g.textContent="送信する";}' +
+    '}).withFailureHandler(function(e){var m=document.getElementById("msg");m.textContent="通信エラー: "+e;var g=document.getElementById("go");g.disabled=false;g.style.opacity=1;g.textContent="送信する";}).sendCustomerMessageBySig(T,S,MSG);' +
+    '};' +
+    'function errText_(r){var e=(r&&r.error)||"unknown";' +
+    'return {bad_signature:"署名が無効です",forbidden:"管理権限がありません（要Googleログイン）",empty_message:"メッセージが空です",no_channel:"送信先（LINE/メール）が登録されていません",not_found:"予約が見つかりません"}[e]||e;}' +
+    '</script>';
+  return html_(page);
+}
+
+/**
+ * メッセージ送信ページのボタン（google.script.run）から呼ばれる。
+ * 二重チェック: ①HMAC 署名（'message:' プレフィックス）②requireAdmin_（Googleログイン照合）。
+ * どちらも通れば notifyCustomerProps_ で LINE/メール自動フォールバック送信する。
+ */
+function sendCustomerMessageBySig(token, sig, message) {
+  if (!verifySig_('message:' + token, sig)) return { ok: false, error: 'bad_signature' };
+  return requireAdmin_(function () {
+    if (!message || !String(message).trim()) return { ok: false, error: 'empty_message' };
+    var found = findEventByToken_(token);
+    if (!found) return { ok: false, error: 'not_found' };
+    var props = found.props;
+    if (!props.lineUserId && !props.email) return { ok: false, error: 'no_channel' };
+    // お店からの自由文メッセージ。承認/辞退の定型文とは独立（テンプレなし・毎回自由記述）。
+    notifyCustomerProps_(props, '【サロン和笑〜Violane〜より】\n' + String(message).trim(), 'message');
+    return { ok: true };
+  });
 }
 
 // ============================================================
@@ -673,6 +758,24 @@ function ledgerUpsert_(props, visitDate) {
 // ============================================================
 // 通知（LINE / メール）
 // ============================================================
+
+/**
+ * カレンダーイベントの説明欄に入れる管理者向けリンク集を生成する。
+ * オーナーはカレンダー（名前/メニューで検索可）で予約を開き、説明欄のリンクから操作できる。
+ * PII（連絡先）は載せない。載せるのは署名付きの操作リンクのみ。
+ *  - 承認/辞退: 公開API①（executeAs=自分・匿名可）基底。'decision:' 署名。
+ *  - メッセージ: 管理デプロイ②（executeAs=アクセスユーザー・要ログイン）基底。'message:' 署名。
+ */
+function adminEventDescription_(token) {
+  var pub = publicExecUrl_();
+  var admin = adminExecUrl_();
+  var decSig = encodeURIComponent(sign_('decision:' + token));
+  var msgSig = encodeURIComponent(sign_('message:' + token));
+  return '【管理者用リンク】\n' +
+    '✅ 承認: ' + pub + '?action=approve&token=' + token + '&sig=' + decSig + '\n' +
+    '❌ 辞退: ' + pub + '?action=decline&token=' + token + '&sig=' + decSig + '\n' +
+    '✉️ メッセージを送る: ' + admin + '?action=message&token=' + token + '&sig=' + msgSig;
+}
 
 function notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst) {
   var sig = sign_('decision:' + token);
@@ -1097,6 +1200,18 @@ function esc_(s) {
  */
 function publicExecUrl_() {
   return prop_('PUBLIC_EXEC_URL') || ScriptApp.getService().getUrl();
+}
+
+/**
+ * 管理デプロイ（②・executeAs=アクセスユーザー・要ログイン）の /exec 基底URL。
+ * 予約客へのメッセージ送信リンク（?action=message）はここを指す必要がある
+ * （公開API① だと requireAdmin_ の getActiveUser() が空になり必ず弾かれるため）。
+ * Script Property `ADMIN_EXEC_URL` に管理デプロイの /exec を登録する（SETUP.md F 参照）。
+ * 未設定時は publicExecUrl_() にフォールバックするが、その場合メッセージ送信は
+ * requireAdmin_ で forbidden になる（＝安全側。誤送信は起きない）。
+ */
+function adminExecUrl_() {
+  return prop_('ADMIN_EXEC_URL') || publicExecUrl_();
 }
 
 // HMAC 署名（base64url）
