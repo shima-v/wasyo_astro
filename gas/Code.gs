@@ -164,6 +164,9 @@ function doPost(e) {
       case 'changeBooking': return json_(changeBooking_(body));
       case 'lineLogin': return json_(lineLogin_(body));
       case 'liffVerify': return json_(liffVerify_(body));
+      // 承認/辞退（front /reserve/decision 経由・POST限定）。token+sig の capability で保護するため requireAdmin_ は付けない。
+      // GET プリフェッチでの誤確定を防ぐ既存方針に沿い POST 限定。
+      case 'decide': return json_(decideBySig(body.token, body.sig, !!body.approve, body.message));
       // 管理（Googleログイン必須）
       case 'getSlotConfig': return json_(requireAdmin_(adminGetSlotConfig_));
       case 'setSlotConfig': return json_(requireAdmin_(function () { return adminSetSlotConfig_(body); }));
@@ -793,7 +796,9 @@ function adminEventDescription_(token) {
 
 function notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst) {
   var sig = sign_('decision:' + token);
-  var base = publicExecUrl_();
+  // 承認/辞退リンクは front の /reserve/decision（非 Google ドメイン）へ。
+  // Google 複数アカウント時の /u/N/ リダイレクトエラーを回避する（sig 検証モデルは維持）。
+  var base = decisionBaseUrl_();
   var approve = base + '?action=approve&token=' + token + '&sig=' + encodeURIComponent(sig);
   var decline = base + '?action=decline&token=' + token + '&sig=' + encodeURIComponent(sig);
   var label = prop_('ENV_LABEL'); // dev のみ【開発】
@@ -1439,6 +1444,17 @@ function esc_(s) {
  */
 function publicExecUrl_() {
   return prop_('PUBLIC_EXEC_URL') || ScriptApp.getService().getUrl();
+}
+
+/**
+ * 店通知の承認/辞退リンクの基底URL（front の /reserve/decision）。
+ * クリック先を非 Google ドメインの自社サイトにすることで、オーナーのスマホが
+ * 複数 Google アカウントにログイン中に script.google.com が /u/N/ へ回して
+ * 「ファイルを開けません」になる Google 側の癖を根絶する。
+ * リンク土台は既存 Script Property `FRONT_BASE_URL`（prod=wwwasyo.com / dev=workers.dev）。
+ */
+function decisionBaseUrl_() {
+  return prop_('FRONT_BASE_URL').replace(/\/$/, '') + '/reserve/decision/';
 }
 
 /**
