@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <base target="_top" />
   <style>
     :root {
@@ -108,13 +109,21 @@
       .wrap { padding: 1rem .75rem 3.5rem; }
       section { padding: .9rem .8rem 1.1rem; }
       h2 { flex-wrap: wrap; }
-      /* 入力欄は行内で幅いっぱい＋縮小可（min-width:0 でオーバーフロー防止） */
+      /* 入力欄は行内で幅いっぱい＋縮小可（min-width:0 でオーバーフロー防止）。
+         font-size:16px は iOS Safari のフォーカス時自動ズームを防ぐ下限 */
       input[type="date"], input[type="time"], textarea {
         flex: 1 1 100%; width: 100%; min-width: 0;
+        font-size: 16px; padding: .55rem .6rem;
       }
-      /* 日付＋時刻＋ボタンの行は縦並び寄りにして各要素を押しやすく */
+      /* 日付＋時刻の行：date と time は横並びペア、追加ボタンは次行で全幅（指で押しやすく） */
       .row { gap: .45rem; }
+      .row > input[type="date"], .row > input[type="time"] { flex: 1 1 40%; }
       .row > button { flex: 1 1 100%; }
+      /* 主要操作（.sm 含む）を指で押しやすいタップ高さに */
+      button { min-height: 48px; }
+      button.sm { min-height: 44px; font-size: .85rem; }
+      /* チップの × は小さいままだと押しにくいので当たり判定を確保 */
+      .chip button { min-height: 32px; min-width: 32px; font-size: 1.15rem; }
       /* 承認/辞退は横並びのまま均等幅で大きく */
       .card .actions { gap: .45rem; }
       .card .actions button { flex: 1 1 0; }
