@@ -1,0 +1,315 @@
+---
+import { RESERVE_API, ENV_LABEL } from '../../data/config.js';
+import EnvBadge from '../../components/EnvBadge.astro';
+
+const _base = import.meta.env.BASE_URL;
+const base = _base.endsWith('/') ? _base : _base + '/';
+const salonName = 'サロン和笑〜Violane〜';
+const tel = '090-9095-6034';
+// title は単一の式にする（<title> RCDATA で式＋生テキストの混在を避ける）
+const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <EnvBadge />
+    <header class="site-header">
+      <a class="home-link" href={base}>‹ {salonName}</a>
+      <span class="head-title">予約管理</span>
+    </header>
+
+    <main class="wrap">
+      <!-- 管理トークン入力ゲート（未認証時のみ表示） -->
+      <section class="card" id="gate">
+        <h2>管理ログイン</h2>
+        <p class="gate-lead">管理トークンを入力してください。トークンはこの端末にのみ保存され、外部には送られません。</p>
+        <div id="gateErr" class="status err" hidden></div>
+        <div class="msg-field">
+          <label for="tokenInput">管理トークン</label>
+          <input type="password" id="tokenInput" autocomplete="off" inputmode="text" placeholder="管理トークン" />
+        </div>
+        <div class="actions">
+          <button type="button" class="reserve-btn" id="gateBtn">接続する</button>
+        </div>
+      </section>
+
+      <!-- 管理パネル（認証後に表示） -->
+      <section id="panel" hidden>
+        <div class="panel-bar">
+          <button type="button" class="reserve-btn ghost sm" id="reloadPending">再読み込み</button>
+          <button type="button" class="linkish" id="logoutBtn">トークンを消去</button>
+        </div>
+
+        <h2 class="section-title">承認待ちの仮予約</h2>
+        <div id="pendingArea"><div class="status loading"><span class="spinner" aria-hidden="true"></span><span>読み込んでいます…</span></div></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>{salonName}</p>
+      <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
+    </footer>
+
+    <div id="toast"></div>
+
+    <script define:vars={{ RESERVE_API }}>
+      const $ = (s) => document.querySelector(s);
+      const el = (id) => document.getElementById(id);
+      const TOKEN_KEY = 'wasyoAdminToken';
+
+      function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
+          ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      }
+
+      function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (_) { return ''; } }
+      function setToken(t) { try { localStorage.setItem(TOKEN_KEY, t); } catch (_) {} }
+      function clearToken() { try { localStorage.removeItem(TOKEN_KEY); } catch (_) {} }
+
+      function toast(msg) {
+        const t = el('toast');
+        t.textContent = msg;
+        t.classList.add('show');
+        clearTimeout(toast._t);
+        toast._t = setTimeout(() => t.classList.remove('show'), 2600);
+      }
+
+      // 管理 API は全て POST（text/plain で CORS プリフライト回避）。adminToken を毎回添付。
+      async function apiPost(action, extra) {
+        const payload = Object.assign({ action, adminToken: getToken() }, extra || {});
+        const res = await fetch(RESERVE_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload),
+        });
+        return res.json();
+      }
+
+      // ---- 認証ゲートの出し入れ ----
+      function showGate(errMsg) {
+        el('panel').hidden = true;
+        el('gate').hidden = false;
+        const e = el('gateErr');
+        if (errMsg) { e.textContent = errMsg; e.hidden = false; } else { e.hidden = true; }
+        el('tokenInput').focus();
+      }
+      function showPanel() {
+        el('gate').hidden = true;
+        el('panel').hidden = false;
+      }
+
+      // forbidden（トークン不正）を検知したら token を消してゲートへ戻す
+      function handleForbidden() {
+        clearToken();
+        showGate('管理トークンが無効です。正しいトークンを入力してください。');
+      }
+
+      // ---- 承認待ち一覧 ----
+      async function loadPending() {
+        el('pendingArea').innerHTML =
+          '<div class="status loading"><span class="spinner" aria-hidden="true"></span><span>読み込んでいます…</span></div>';
+        let res;
+        try {
+          res = await apiPost('listPending');
+        } catch (_) {
+          el('pendingArea').innerHTML = '<div class="empty">通信に失敗しました。時間をおいて再度お試しください。</div>';
+          return;
+        }
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        renderPending(res);
+      }
+
+      function renderPending(res) {
+        const area = el('pendingArea');
+        if (!res || !res.ok) { area.innerHTML = '<div class="empty">取得に失敗しました。</div>'; return; }
+        const list = res.pending || [];
+        if (!list.length) { area.innerHTML = '<div class="empty">承認待ちの仮予約はありません。</div>'; return; }
+        area.innerHTML = list.map((p) => {
+          const badges = (p.isFirstTime ? '<span class="badge first">新規</span>' : '')
+            + (p.gender === 'male' ? '<span class="badge male">男性</span>' : '');
+          const contact = [p.phone, p.email].filter(Boolean).map(esc).join(' / ');
+          return '<div class="pcard" data-token="' + esc(p.token) + '">'
+            + '<div class="pcard-title">' + esc(p.name) + ' 様' + badges + '</div>'
+            + '<dl class="detail-dl">'
+            + '<dt>メニュー</dt><dd>' + esc(p.menuName) + '</dd>'
+            + '<dt>日時</dt><dd>' + esc(p.date) + ' ' + esc(p.time) + '</dd>'
+            + (p.gender === 'male' ? '<dt>紹介者</dt><dd>' + esc(p.referrer || '（未記入）') + '</dd>' : '')
+            + (contact ? '<dt>連絡先</dt><dd>' + contact + '</dd>' : '')
+            + (p.note ? '<dt>ご要望</dt><dd>' + esc(p.note) + '</dd>' : '')
+            + '</dl>'
+            + '<textarea class="cust-msg" rows="2" placeholder="お客様へのメッセージ（任意・承認/辞退の通知に添えます）"></textarea>'
+            + '<div class="actions row">'
+            + '<button class="reserve-btn sm" type="button" data-act="approve">承認して確定</button>'
+            + '<button class="reserve-btn sm decline" type="button" data-act="decline">辞退</button>'
+            + '</div></div>';
+        }).join('');
+      }
+
+      async function decide(token, approve, btn) {
+        const card = btn.closest('.pcard');
+        const msgEl = card.querySelector('.cust-msg');
+        const message = msgEl ? msgEl.value : '';
+        const btns = card.querySelectorAll('button');
+        btns.forEach((b) => { b.disabled = true; });
+        let res;
+        try {
+          res = await apiPost('adminDecision', { token, approve, message });
+        } catch (_) {
+          toast('通信エラー。時間をおいて再度お試しください。');
+          btns.forEach((b) => { b.disabled = false; });
+          return;
+        }
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        if (res && res.ok) {
+          toast(approve ? '確定しました（お客様へ通知済み）' : '辞退しました（お客様へ通知済み）');
+          card.parentNode.removeChild(card);
+          if (!el('pendingArea').querySelector('.pcard')) {
+            el('pendingArea').innerHTML = '<div class="empty">承認待ちの仮予約はありません。</div>';
+          }
+        } else {
+          toast('失敗: ' + ((res && res.error) || '不明なエラー'));
+          btns.forEach((b) => { b.disabled = false; });
+        }
+      }
+
+      // ---- イベント配線 ----
+      el('pendingArea').addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-act]');
+        if (!btn) return;
+        const token = btn.closest('.pcard').getAttribute('data-token');
+        const approve = btn.getAttribute('data-act') === 'approve';
+        if (!approve && !confirm('この仮予約を辞退します。お客様へ通知されます。よろしいですか？')) return;
+        decide(token, approve, btn);
+      });
+      el('reloadPending').addEventListener('click', loadPending);
+      el('logoutBtn').addEventListener('click', () => { clearToken(); showGate(); });
+
+      el('gateBtn').addEventListener('click', () => {
+        const t = el('tokenInput').value.trim();
+        if (!t) { showGate('管理トークンを入力してください。'); return; }
+        setToken(t);
+        el('tokenInput').value = '';
+        showPanel();
+        loadPending();
+      });
+      el('tokenInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') el('gateBtn').click(); });
+
+      // ---- 起動 ----
+      if (getToken()) { showPanel(); loadPending(); } else { showGate(); }
+    </script>
+
+    <style is:global>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      [hidden] { display: none !important; }
+      :root {
+        --c-bg: #FDF2F5; --c-surface: #FFFFFF; --c-ink: #2C1F3A; --c-muted: #7A6080;
+        --c-border: #E2D0D8; --c-purple: #8B6080; --c-purple-lt: #B09AB0; --c-purple-dk: #3E2B4A;
+        --c-reserve: #8B6080; --c-reserve-hv: #3E2B4A; --c-accent: #C9A84C;
+        --f-serif: 'Noto Serif JP', 'YuMincho', 'Yu Mincho', serif;
+      }
+      body { font-family: var(--f-serif); background: var(--c-bg); color: var(--c-ink); line-height: 1.9; font-size: 16px; }
+      html, body { overflow-x: clip; }
+      a { color: var(--c-purple-dk); }
+      :focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; border-radius: 2px; }
+
+      .site-header {
+        position: sticky; top: 0; z-index: 10;
+        display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+        padding: .7rem 1rem; background: rgba(253,242,245,.92); backdrop-filter: blur(6px);
+        border-bottom: 1px solid var(--c-border);
+      }
+      .home-link { text-decoration: none; color: var(--c-purple-dk); font-size: .9rem; }
+      .head-title { font-size: .9rem; color: var(--c-muted); }
+      .wrap { max-width: 640px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+
+      .status { color: var(--c-muted); font-size: .92rem; padding: .5rem 0; }
+      .status.err { color: #8E2230; }
+      .status.loading {
+        display: flex; align-items: center; gap: .55rem;
+        color: var(--c-purple-dk); font-weight: 600;
+        background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 8px; padding: .65rem .8rem;
+      }
+      .spinner {
+        width: 18px; height: 18px; flex: none;
+        border: 3px solid var(--c-border); border-top-color: var(--c-purple);
+        border-radius: 50%; animation: spin .8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      .card {
+        background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 12px;
+        padding: 1.1rem 1rem 1.3rem; margin-bottom: 1.25rem;
+      }
+      .card > h2 { font-size: 1.15rem; margin-bottom: .8rem; padding-bottom: .55rem; border-bottom: 1px solid var(--c-border); }
+      .gate-lead { font-size: .9rem; color: var(--c-muted); margin-bottom: .9rem; }
+
+      .section-title { font-size: 1.05rem; margin: .4rem 0 .9rem; color: var(--c-purple-dk); }
+      .panel-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+      .linkish { background: none; border: none; color: var(--c-muted); font-size: .85rem; cursor: pointer; text-decoration: underline; font-family: inherit; }
+
+      .empty { color: var(--c-muted); font-size: .92rem; background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 8px; padding: .8rem; }
+
+      .pcard { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 12px; padding: 1rem; margin-bottom: 1rem; }
+      .pcard-title { font-size: 1.05rem; font-weight: 600; margin-bottom: .6rem; }
+
+      .badge { display: inline-block; font-size: .72rem; padding: .1rem .55rem; border-radius: 12px; margin-left: .4rem; vertical-align: middle; }
+      .badge.first { background: #F6EFC9; color: #8a6d1a; }
+      .badge.male { background: #E4E9F5; color: #3a4a7a; }
+
+      .detail-dl { display: grid; grid-template-columns: auto 1fr; gap: .2rem .9rem; font-size: .92rem; }
+      .detail-dl dt { color: var(--c-muted); white-space: nowrap; }
+      .detail-dl dd { margin: 0; word-break: break-word; }
+
+      .msg-field { margin-top: .3rem; }
+      .msg-field label { display: block; font-size: .9rem; color: var(--c-muted); margin-bottom: .35rem; }
+      .msg-field input, .cust-msg {
+        width: 100%; font-family: inherit; font-size: 1rem; line-height: 1.7;
+        padding: .6rem .7rem; border: 1px solid var(--c-border); border-radius: 8px;
+        background: #fff; color: var(--c-ink);
+      }
+      .cust-msg { margin-top: .5rem; resize: vertical; }
+      .msg-field input:focus, .cust-msg:focus { border-color: var(--c-purple-lt); }
+
+      .actions { display: flex; flex-direction: column; gap: .6rem; margin-top: 1rem; }
+      .actions.row { flex-direction: row; }
+
+      .reserve-btn {
+        display: inline-flex; align-items: center; justify-content: center; width: 100%;
+        font-family: inherit; font-size: 1rem; cursor: pointer; background: var(--c-reserve); color: #fff;
+        border: none; border-radius: 24px; padding: .7rem 1.2rem; min-height: 46px; text-decoration: none;
+        transition: background .15s, transform .15s;
+      }
+      .reserve-btn:hover { background: var(--c-reserve-hv); transform: translateY(-1px); }
+      .reserve-btn:disabled { opacity: .55; cursor: default; transform: none; }
+      .reserve-btn.ghost { background: transparent; color: var(--c-purple-dk); border: 1px solid var(--c-border); }
+      .reserve-btn.sm { width: auto; font-size: .9rem; padding: .5rem 1rem; min-height: 40px; }
+      .reserve-btn.decline { background: #b00020; }
+      .reserve-btn.decline:hover { background: #8a0019; }
+
+      #toast {
+        position: fixed; left: 50%; bottom: 1.4rem; transform: translateX(-50%) translateY(1rem);
+        background: var(--c-purple-dk); color: #fff; font-size: .9rem; padding: .6rem 1.1rem; border-radius: 22px;
+        opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; max-width: 90vw; text-align: center;
+      }
+      #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      .site-footer { text-align: center; color: var(--c-muted); font-size: .82rem; padding: 1.5rem 1rem 2.5rem; }
+      .site-footer .small { font-size: .78rem; }
+
+      @media (prefers-reduced-motion: reduce) {
+        html { scroll-behavior: auto; }
+        *, *::before, *::after {
+          animation-duration: 0.001ms !important; animation-iteration-count: 1 !important;
+          transition-duration: 0.001ms !important; scroll-behavior: auto !important;
+        }
+      }
+    </style>
+  </body>
+</html>

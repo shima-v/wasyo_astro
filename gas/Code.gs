@@ -167,12 +167,13 @@ function doPost(e) {
       // 承認/辞退（front /reserve/decision 経由・POST限定）。token+sig の capability で保護するため requireAdmin_ は付けない。
       // GET プリフェッチでの誤確定を防ぐ既存方針に沿い POST 限定。
       case 'decide': return json_(decideBySig(body.token, body.sig, !!body.approve, body.message));
-      // 管理（Googleログイン必須）
-      case 'getSlotConfig': return json_(requireAdmin_(adminGetSlotConfig_));
-      case 'setSlotConfig': return json_(requireAdmin_(function () { return adminSetSlotConfig_(body); }));
-      case 'listPending': return json_(requireAdmin_(adminListPending_));
-      case 'getQuota': return json_(requireAdmin_(adminGetQuota_));
-      case 'adminDecision': return json_(requireAdmin_(function () { return adminDecision_(body); }));
+      // 管理（front /reserve/admin 経由）。bearer トークン ADMIN_TOKENS で保護＝Googleログイン不要。
+      // これにより管理操作も公開デプロイ①（executeAs=オーナー）で完結し、管理デプロイ②を不要にする布石。
+      case 'getSlotConfig': return json_(requireAdminToken_(body, adminGetSlotConfig_));
+      case 'setSlotConfig': return json_(requireAdminToken_(body, function () { return adminSetSlotConfig_(body); }));
+      case 'listPending': return json_(requireAdminToken_(body, adminListPending_));
+      case 'getQuota': return json_(requireAdminToken_(body, adminGetQuota_));
+      case 'adminDecision': return json_(requireAdminToken_(body, function () { return adminDecision_(body); }));
       default: return json_({ ok: false, error: 'unknown_action' });
     }
   } catch (err) {
@@ -673,6 +674,21 @@ function requireAdmin_(fn) {
   var email = Session.getActiveUser().getEmail();
   var allow = prop_('ADMIN_EMAILS').split(',').map(function (s) { return s.trim(); });
   if (!email || allow.indexOf(email) < 0) return { ok: false, error: 'forbidden' };
+  return fn();
+}
+
+/**
+ * bearer トークン認証（Googleログイン非依存）。front /reserve/admin から POST body の
+ * adminToken を受け取り、Script Property `ADMIN_TOKENS`（カンマ区切りの強ランダム）に
+ * 含まれるかを照合する。複数管理者に個別トークンを配れば個別失効も可能。
+ * ①公開デプロイ（executeAs=オーナー・匿名到達可）上でも管理操作を安全側で保護でき、
+ * 管理デプロイ②（executeAs=アクセスユーザー・要Googleログイン）を不要にする。
+ * ※秘密は Script Properties のみ。リポ/フロントには置かない。
+ */
+function requireAdminToken_(body, fn) {
+  var tokens = (prop_('ADMIN_TOKENS') || '').split(',').map(function (s) { return s.trim(); }).filter(String);
+  var given = (body && body.adminToken) || '';
+  if (!given || tokens.indexOf(given) < 0) return { ok: false, error: 'forbidden' };
   return fn();
 }
 
