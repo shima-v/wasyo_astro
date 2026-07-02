@@ -437,23 +437,24 @@ function renderDecisionPage_(p, approve) {
   var statusNote = b.status === STATUS.CONFIRMED ? '<p style="color:#2e7d32">※この予約はすでに「確定」済みです。</p>' : '';
   var summary = esc_(b.name) + ' 様' + (b.isFirstTime ? '（新規）' : '（常連）') + '<br>' +
     esc_(b.menuName) + '<br>' + b.date + ' ' + b.time + '〜（' + b.durationMin + '分） ¥' + b.price;
-  // 辞退時はお客様へ送るメッセージを入力できる（既定文をプリセット）
-  var declineBox = approve ? '' : (
-    '<label for="declineMsg" style="display:block;text-align:left;font-size:.9rem;margin:.2rem 0 .35rem">お客様へのメッセージ（このまま送信／編集可）</label>' +
-    '<textarea id="declineMsg" rows="4" style="width:100%;font-family:inherit;font-size:1rem;padding:.6rem .7rem;border:1px solid #E2D0D8;border-radius:8px;box-sizing:border-box">' +
-    esc_(DECLINE_DEFAULT_MSG) + '</textarea>'
-  );
+  // 承認・辞退どちらでもお客様へメッセージを添えられる。辞退は既定文をプリセット、承認は任意で空。
+  var msgLabel = approve ? 'お客様へのひとことメッセージ（任意）' : 'お客様へのメッセージ（このまま送信／編集可）';
+  var msgDefault = approve ? '' : DECLINE_DEFAULT_MSG;
+  var msgBox =
+    '<label for="custMsg" style="display:block;text-align:left;font-size:.9rem;margin:.2rem 0 .35rem">' + msgLabel + '</label>' +
+    '<textarea id="custMsg" rows="4" style="width:100%;font-family:inherit;font-size:1rem;padding:.6rem .7rem;border:1px solid #E2D0D8;border-radius:8px;box-sizing:border-box">' +
+    esc_(msgDefault) + '</textarea>';
   var page = '' +
     '<h2 style="font-size:1.1rem;margin:0 0 .5rem">予約を' + act + 'しますか？</h2>' +
     statusNote +
     '<div style="background:#f6f3f6;border-radius:10px;padding:1rem;margin:1rem 0;text-align:left">' + summary + '</div>' +
-    declineBox +
+    msgBox +
     '<button id="go" style="width:100%;min-height:48px;margin-top:1rem;border:0;border-radius:24px;color:#fff;background:' + color + ';font-size:1rem;cursor:pointer">' + act + 'する</button>' +
     '<p id="msg" style="color:#666;margin-top:1rem;min-height:1.2em"></p>' +
     '<script>' +
     'var T=' + JSON.stringify(p.token) + ',S=' + JSON.stringify(p.sig) + ',A=' + (approve ? 'true' : 'false') + ';' +
     'document.getElementById("go").onclick=function(){' +
-    'var box=document.getElementById("declineMsg");var MSG=box?box.value:"";' +
+    'var box=document.getElementById("custMsg");var MSG=box?box.value:"";' +
     'this.disabled=true;this.style.opacity=.5;this.textContent="処理中…";' +
     'google.script.run.withSuccessHandler(function(r){' +
     'var m=document.getElementById("msg");' +
@@ -486,9 +487,11 @@ function decide_(token, approve, message) {
     setEventProps_(ev, { status: STATUS.CONFIRMED });
     try { ev.setColor(CalendarApp.EventColor.GREEN); } catch (_) {}
     ledgerUpsert_(props, ev.getStartTime());
+    // 承認時もお店からお客様へひとこと添えられる（空なら従来どおり固定文のみ）
+    var extra = (message && String(message).trim()) ? '\n\n― サロンより ―\n' + String(message).trim() : '';
     notifyCustomerProps_(props, '【ご予約が確定しました】\n' +
       bookingSummary_(menu, ev.getStartTime(), { durationMin: displayDurationMin_(props, ev), price: Number(props.price || 0) }, props.isFirstTime === 'true') +
-      '\nご来店をお待ちしております。');
+      '\nご来店をお待ちしております。' + extra);
   } else {
     var msg = (message && String(message).trim()) ? String(message).trim() : DECLINE_DEFAULT_MSG;
     notifyCustomerProps_(props, '【ご予約について】\n' + msg);
@@ -588,8 +591,8 @@ function adminApiSetConfig(config) {
   return requireAdmin_(function () { return adminSetSlotConfig_({ config: config }); });
 }
 function adminApiListPending() { return requireAdmin_(adminListPending_); }
-function adminApiDecision(token, approve) {
-  return requireAdmin_(function () { return adminDecision_({ token: token, approve: !!approve }); });
+function adminApiDecision(token, approve, message) {
+  return requireAdmin_(function () { return adminDecision_({ token: token, approve: !!approve, message: message }); });
 }
 function adminApiGetQuota() { return requireAdmin_(adminGetQuota_); }
 

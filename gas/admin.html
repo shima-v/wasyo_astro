@@ -240,6 +240,7 @@
           + (contact ? '<dt>連絡先</dt><dd>' + contact + '</dd>' : '')
           + (p.note ? '<dt>ご要望</dt><dd>' + esc(p.note) + '</dd>' : '')
           + '</dl>'
+          + '<textarea class="cust-msg" rows="2" placeholder="お客様へのメッセージ（任意・承認/辞退の通知に添えます）" style="width:100%;margin-top:.4rem;box-sizing:border-box"></textarea>'
           + '<div class="actions">'
           + '<button class="ok sm" type="button" data-act="approve">承認して確定</button>'
           + '<button class="ng sm" type="button" data-act="decline">辞退</button>'
@@ -249,6 +250,8 @@
 
     function decide(token, approve, btn) {
       var card = btn.closest('.card');
+      var msgEl = card.querySelector('.cust-msg');
+      var message = msgEl ? msgEl.value : '';
       var btns = card.querySelectorAll('button');
       btns.forEach(function (b) { b.disabled = true; });
       google.script.run
@@ -268,7 +271,7 @@
           toast('通信エラー: ' + (err && err.message));
           btns.forEach(function (b) { b.disabled = false; });
         })
-        .adminApiDecision(token, approve);
+        .adminApiDecision(token, approve, message);
     }
 
     el('pendingArea').addEventListener('click', function (e) {
