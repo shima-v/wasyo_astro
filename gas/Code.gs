@@ -1267,6 +1267,8 @@ function sendOwnerDailyDigest() {
   lines.push('');
   lines.push('■ 未確定の仮予約（' + pending.length + '件）');
   lines.push(pending.length ? pending.join('\n') : '・未確定の仮予約はありません');
+  // 未確定があるときだけ、承認/辞退に進める予約管理画面へ誘導する
+  if (pending.length) lines.push('\n▼ 承認/辞退はこちら（予約管理画面）\n' + adminUrl_());
   notifyOwner_(lines.join('\n'));
 }
 
@@ -1568,6 +1570,11 @@ function readSlotConfig_() {
 function manageUrl_(token) {
   var base = prop_('FRONT_BASE_URL').replace(/\/$/, '');
   return base + '/reserve/manage/?token=' + token;
+}
+
+/** オーナー向け予約管理画面（bearer トークンで開く）の URL。日次ダイジェスト等の導線に使う。 */
+function adminUrl_() {
+  return prop_('FRONT_BASE_URL').replace(/\/$/, '') + '/reserve/admin/';
 }
 
 function withinCancelDeadline_(start) {
