@@ -42,13 +42,13 @@ var DEFAULT_HOLIDAY_CALENDAR_ID = 'ja.japanese#holiday@group.v.calendar.google.c
  *   slotMin     … カレンダー占有時間（施術＋待機）。空き枠計算とイベント長に使う。新規/常連で不変。
  */
 var MENU = {
-  'double-momi-part-oil-70': { name: '全身もみほぐし＋部位オイルケア', durationMin: 70, slotMin: 120, price: 4300 },
-  'double-momi-full-oil-90': { name: '全身もみほぐし＋全身オイルケア', durationMin: 90, slotMin: 150, price: 5500 },
-  'simple-momi-30': { name: '全身もみほぐし 30分', durationMin: 30, slotMin: 60, price: 3300, firstTime: { durationMin: 40, price: 3300 } },
-  'simple-momi-50': { name: '全身もみほぐし 50分', durationMin: 50, slotMin: 120, price: 4000, firstTime: { durationMin: 60, price: 4000 } },
-  'simple-momi-70': { name: '全身もみほぐし 70分', durationMin: 70, slotMin: 120, price: 4400 },
-  'simple-momi-100': { name: '全身もみほぐし 100分', durationMin: 100, slotMin: 150, price: 5500 },
-  'simple-oil-80': { name: '全身オイルケア', durationMin: 80, slotMin: 150, price: 6600 },
+  'double-momi-part-oil-70': { name: '全身もみほぐし＋部位オイルケア', durationMin: 70, slotMin: 150, price: 4300 },
+  'double-momi-full-oil-90': { name: '全身もみほぐし＋全身オイルケア', durationMin: 90, slotMin: 180, price: 5500 },
+  'simple-momi-30': { name: '全身もみほぐし 30分', durationMin: 30, slotMin: 90, price: 3300, firstTime: { durationMin: 40, price: 3300 } },
+  'simple-momi-50': { name: '全身もみほぐし 50分', durationMin: 50, slotMin: 150, price: 4000, firstTime: { durationMin: 60, price: 4000 } },
+  'simple-momi-70': { name: '全身もみほぐし 70分', durationMin: 70, slotMin: 150, price: 4400 },
+  'simple-momi-100': { name: '全身もみほぐし 100分', durationMin: 100, slotMin: 180, price: 5500 },
+  'simple-oil-80': { name: '全身オイルケア', durationMin: 80, slotMin: 180, price: 6600 },
   'petit-foot-30': { name: 'フットケア', durationMin: 30, slotMin: 60, price: 3300 },
   'petit-hand-30': { name: 'ハンドケア', durationMin: 30, slotMin: 60, price: 3300 },
   'petit-head-30': { name: 'ヘッド&リフトアップ（顎ほぐし）', durationMin: 30, slotMin: 60, price: 3500 },
@@ -124,6 +124,8 @@ function doGet(e) {
     switch (action) {
       case 'availability':
         return json_(getAvailability_(e.parameter));
+      case 'availabilityRaw': // menuId 非依存の「素材」（開始候補＋busy分レンジ）。slotMin 判定はクライアントで行う
+        return json_(availabilityRaw_(e.parameter));
       case 'booking': // 管理ページ（front /reserve/manage）：トークンで予約内容取得
         return json_(getBookingByToken_(e.parameter.token));
       // 承認/辞退・メッセージ送信・管理パネルはすべて front（非 Google ドメイン）へ移行済み。
@@ -267,6 +269,67 @@ function getAvailability_(p) {
     if (times.length) days.push({ date: dateStr, times: times });
   }
   return { ok: true, menuId: p.menuId, durationMin: dur, slotMin: slot, isFirstTime: isFirst, days: days, holidays: holidaySet };
+}
+
+/**
+ * 空き枠計算の「素材」だけを menuId 非依存で返す（slotMin 依存の最終判定はクライアントへ寄せる）。
+ * @param {Object} p { from?, to? }
+ * @returns {{ok:boolean, days:Array<{date:string, candidates:string[], busy:number[][]}>, holidays:Object}}
+ *   - candidates: 'HH:mm' の開始候補（休枠 isClosedSlot_ 除外済み・menuId 非依存）。
+ *   - busy: その日の予約占有を 0:00 起点の「分」レンジ [startMin,endMin] で（TZ 非依存。顧客情報は含めない）。
+ * getAvailability_ と from/to・busy 取得ロジックを共有し、slotMin 当てはめだけを外した版。
+ */
+function availabilityRaw_(p) {
+  var today = startOfDay_(new Date());
+  var from = p && p.from ? parseDate_(p.from) : addDays_(today, RULES.leadTimeDays);
+  var minFrom = addDays_(today, RULES.leadTimeDays);
+  if (from < minFrom) from = minFrom;
+  var to = p && p.to ? parseDate_(p.to) : addDays_(today, RULES.maxAdvanceDays);
+  var maxTo = addDays_(today, RULES.maxAdvanceDays);
+  if (to > maxTo) to = maxTo;
+
+  var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
+  var config = readSlotConfig_();
+  var holidaySet = holidayDateSet_(from, to); // 祝日（自動判定）を一度だけ取得
+  var days = [];
+
+  // 既存予約は範囲全体を一度だけ取得し日付ごとにバケツ分け（getAvailability_ と同じ集約）
+  var busyByDate = {};
+  if (cal) {
+    cal.getEvents(startOfDay_(from), addDays_(startOfDay_(to), 1)).forEach(function (ev) {
+      if (isWasyoMarker_(ev)) return; // 臨時営業/休業マーカーは busy にしない（受付可否の正は SLOT_CONFIG）
+      var dk = fmt_(ev.getStartTime(), 'yyyy-MM-dd');
+      (busyByDate[dk] || (busyByDate[dk] = [])).push({ start: ev.getStartTime().getTime(), end: ev.getEndTime().getTime() });
+    });
+  }
+
+  for (var d = new Date(from); d <= to; d = addDays_(d, 1)) {
+    var dateStr = fmt_(d, 'yyyy-MM-dd');
+    if (!isOpenDay_(d, config, holidaySet)) continue;
+
+    // 開始候補（menuId 非依存）: 休枠 isClosedSlot_ を除外して 'HH:mm' 化
+    var candidates = [];
+    var starts = candidateStarts_(d, config, holidaySet);
+    for (var i = 0; i < starts.length; i++) {
+      var hhmm = fmt_(starts[i], 'HH:mm');
+      if (isClosedSlot_(dateStr, hhmm, config)) continue;
+      candidates.push(hhmm);
+    }
+    if (!candidates.length) continue; // 現行 times.length と同じ扱い（候補ゼロの日は days に入れない）
+
+    // 予約占有を 0:00 起点の分レンジへ換算（epoch → 当日始点からの経過分）。日跨ぎは [0,1440] にクランプ
+    var dayStartMs = startOfDay_(d).getTime();
+    var busy = (busyByDate[dateStr] || []).map(function (b) {
+      var sMin = Math.round((b.start - dayStartMs) / 60000);
+      var eMin = Math.round((b.end - dayStartMs) / 60000);
+      if (sMin < 0) sMin = 0;
+      if (eMin > 1440) eMin = 1440;
+      return [sMin, eMin];
+    });
+
+    days.push({ date: dateStr, candidates: candidates, busy: busy });
+  }
+  return { ok: true, days: days, holidays: holidaySet };
 }
 
 /**
