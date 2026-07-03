@@ -46,25 +46,33 @@ const grouped = groupOrder.map((g) => ({
     </header>
 
     <main class="wrap">
+      <!-- 上部は1行に短縮（受付時間表・当日注意は日時ステップ／ポップアップへ移設してコンパクト化） -->
       <p class="lead">
-        ご希望のメニューと日時をお選びください。お申し込みは「仮予約」です。サロンが内容を確認のうえ、確定のご連絡をいたします。
+        お申し込みは仮予約です。サロン確認後に確定のご連絡をします。
       </p>
-      <p class="note-today">
-        ※ ネット予約は受付時間内の「開始時刻」をお選びいただけます（施術終了が受付時間を過ぎても承ります）。当日のご予約はお電話（<a href={`tel:${tel}`}>{tel}</a>）で承ります。オンラインは翌日以降・2ヶ月先までです。
-      </p>
-      <ul class="hours" aria-label="ネット予約の受付時間">
-        <li><span class="hours-day">月・火・金</span><span class="hours-time">10:00〜15:00 / 17:30〜19:00</span></li>
-        <li><span class="hours-day">水・木</span><span class="hours-time">10:00〜15:00</span></li>
-        <li><span class="hours-day">土（第2・第4のみ）</span><span class="hours-time">10:00〜19:00</span></li>
-        <li class="closed"><span class="hours-day">日・祝</span><span class="hours-time">お休み（緊急対応はお電話にてお問い合わせください）</span></li>
-      </ul>
 
-      <!-- ステップインジケーター（ドット）。全ステップで常に表示、完了時のみ非表示 -->
+      <!-- ステップインジケーター（ドット5つ）。全ステップで常に表示、完了時のみ非表示 -->
       <ol class="steps-indicator" aria-label="ご予約の進み具合">
         <li data-step="1" class="is-active" aria-current="step"><span class="dot"></span><span class="lbl">メニュー</span></li>
         <li data-step="2"><span class="dot"></span><span class="lbl">日時</span></li>
-        <li data-step="3"><span class="dot"></span><span class="lbl">お客様情報</span></li>
+        <li data-step="3"><span class="dot"></span><span class="lbl">情報</span></li>
+        <li data-step="4"><span class="dot"></span><span class="lbl">要望</span></li>
+        <li data-step="5"><span class="dot"></span><span class="lbl">確認</span></li>
       </ol>
+
+      <!-- 営業時間ポップアップ（ネイティブ dialog）。②日時ステップの「営業時間を見る」から開く。中身は旧 ul.hours を流用 -->
+      <dialog id="hoursDialog" class="hours-dialog" aria-label="ネット予約の受付時間">
+        <div class="hours-dialog-head">
+          <strong>ネット予約の受付時間</strong>
+          <button type="button" class="hours-close" id="hoursClose" aria-label="閉じる">×</button>
+        </div>
+        <ul class="hours">
+          <li><span class="hours-day">月・火・金</span><span class="hours-time">10:00〜15:00 / 17:30〜19:00</span></li>
+          <li><span class="hours-day">水・木</span><span class="hours-time">10:00〜15:00</span></li>
+          <li><span class="hours-day">土（第2・第4のみ）</span><span class="hours-time">10:00〜19:00</span></li>
+          <li class="closed"><span class="hours-day">日・祝</span><span class="hours-time">お休み（緊急対応はお電話にてお問い合わせください）</span></li>
+        </ul>
+      </dialog>
 
       <!-- STEP 1: メニュー -->
       <section class="step" id="step-menu">
@@ -81,6 +89,7 @@ const grouped = groupOrder.map((g) => ({
                     value={m.id}
                     data-name={m.name}
                     data-duration={m.durationMin}
+                    data-slot={m.slotMin}
                     data-price={m.price}
                     data-firsttime={m.firstTime ? m.firstTime.label : ''}
                     data-hasfirst={m.firstTime ? '1' : '0'}
@@ -108,6 +117,14 @@ const grouped = groupOrder.map((g) => ({
       <!-- STEP 2: 日時 -->
       <section class="step" id="step-date" hidden>
         <h2 tabindex="-1"><span class="step-no">2</span> 日時を選ぶ</h2>
+        <!-- 営業時間はリンク→ポップアップに（上部から移設してコンパクト化） -->
+        <p class="hours-link-row">
+          <button type="button" class="hours-link" id="hoursOpen">営業時間を見る</button>
+        </p>
+        <!-- 当日注意は日時ステップだけに表示（上部から移設） -->
+        <p class="note-today">
+          ※ ネット予約は受付時間内の「開始時刻」をお選びいただけます（施術終了が受付時間を過ぎても承ります）。当日のご予約はお電話（<a href={`tel:${tel}`}>{tel}</a>）で承ります。オンラインは翌日以降・2ヶ月先までです。
+        </p>
         <div id="slotStatus" class="slot-status">メニューを選ぶと空き状況を表示します。</div>
         <div id="dateList" class="date-list"></div>
         <div id="timeList" class="time-list"></div>
@@ -118,10 +135,12 @@ const grouped = groupOrder.map((g) => ({
         </div>
       </section>
 
-      <!-- STEP 3: お客様情報 -->
+      <!-- STEP 3〜5 は 1 つの form で包む（note/consent が step をまたいでも同一 form 内に置くため）。
+           送信は⑤の submit ボタンでのみ発火し、戻る/次へは type=button で誤送信を防ぐ。 -->
+      <form id="reserveForm" novalidate>
+      <!-- STEP 3: お客様情報（情報のみ。ご要望・同意は④へ移設） -->
       <section class="step" id="step-form" hidden>
         <h2 tabindex="-1"><span class="step-no">3</span> お客様情報</h2>
-        <form id="reserveForm" novalidate>
           <!-- LINE 連携（任意）。設定済み(チャネルID/redirect あり)のときだけ表示 -->
           <div class="line-link" id="lineLink" hidden>
             <!-- 未連携 -->
@@ -206,40 +225,95 @@ const grouped = groupOrder.map((g) => ({
           </div>
           </div><!-- /#fieldsBlock -->
 
-          <div class="field">
-            <label for="f-note">ご要望（任意）</label>
-            <textarea id="f-note" name="note" rows="3"></textarea>
-          </div>
-
-          <div class="field consent">
-            <label class="check">
-              <input type="checkbox" id="f-consent" required />
-              <span>
-                入力内容（お名前・電話番号・メールアドレス・性別・ご要望）、およびLINE連携時はLINEのユーザーID・表示名・メールアドレスを、
-                予約管理・ご予約の確認／確定・リマインド等のご連絡・初回／常連判定の目的で当サロンが取得・利用することに同意します。
-                メールアドレスは上記のご連絡にのみ使用し、目的外には利用しません。情報は当サロンの
-                Google（予約カレンダー・顧客台帳）と通知サービス（LINE）内でのみ管理します。連携情報は次回の入力省略のため
-                ご利用の端末内に保存される場合があり、「連携を解除」でいつでも削除できます。詳しくは<a href={`${base}privacy/`} target="_blank" rel="noopener noreferrer">プライバシーポリシー</a>をご覧ください。
-              </span>
-            </label>
-          </div>
-
           <div id="formError" class="form-error" hidden></div>
 
-          <div class="summary" id="summary" hidden>
-            <div class="summary-row"><span>メニュー</span><strong id="sum-menu"></strong></div>
-            <div class="summary-row"><span>日時</span><strong id="sum-when"></strong></div>
-            <div class="summary-row"><span>目安料金</span><strong id="sum-price"></strong></div>
-            <p class="summary-note" id="sum-firstnote" hidden></p>
-          </div>
-
-          <!-- 下部ナビ：戻る（日時へ）＋ 送信（前進/確定を兼ねる）。戻るは type=button で誤送信を防ぐ -->
+          <!-- 下部ナビ：戻る（日時へ）／次へ（情報系バリデーション後④へ） -->
           <div class="step-nav">
             <button type="button" class="reserve-btn ghost nav-back" id="navFormBack">← 戻る</button>
-            <button type="submit" class="reserve-btn nav-next" id="submitBtn">この内容で仮予約する</button>
+            <button type="button" class="reserve-btn nav-next" id="navFormNext">次へ →</button>
           </div>
-        </form>
       </section>
+
+      <!-- STEP 4: ご要望・同意（③から移設） -->
+      <section class="step" id="step-extra" hidden>
+        <h2 tabindex="-1"><span class="step-no">4</span> ご要望・ご同意</h2>
+
+        <div class="field">
+          <label for="f-note">ご要望（任意）</label>
+          <textarea id="f-note" name="note" rows="3"></textarea>
+        </div>
+
+        <div class="field consent">
+          <label class="check">
+            <input type="checkbox" id="f-consent" required />
+            <span>
+              入力内容（お名前・電話番号・メールアドレス・性別・ご要望）、およびLINE連携時はLINEのユーザーID・表示名・メールアドレスを、
+              予約管理・ご予約の確認／確定・リマインド等のご連絡・初回／常連判定の目的で当サロンが取得・利用することに同意します。
+              メールアドレスは上記のご連絡にのみ使用し、目的外には利用しません。情報は当サロンの
+              Google（予約カレンダー・顧客台帳）と通知サービス（LINE）内でのみ管理します。連携情報は次回の入力省略のため
+              ご利用の端末内に保存される場合があり、「連携を解除」でいつでも削除できます。詳しくは<a href={`${base}privacy/`} target="_blank" rel="noopener noreferrer">プライバシーポリシー</a>をご覧ください。
+            </span>
+          </label>
+        </div>
+
+        <div id="extraError" class="form-error" hidden></div>
+
+        <!-- 下部ナビ：戻る（情報へ）／次へ（同意チェック必須で確認へ） -->
+        <div class="step-nav">
+          <button type="button" class="reserve-btn ghost nav-back" id="navExtraBack">← 戻る</button>
+          <button type="button" class="reserve-btn nav-next" id="navExtraNext">次へ →</button>
+        </div>
+      </section>
+
+      <!-- STEP 5: 確認（送信前の入力確認）。各項目群に修正リンクを置き、送信はここで行う -->
+      <section class="step" id="step-confirm" hidden>
+        <h2 tabindex="-1"><span class="step-no">5</span> ご予約内容の確認</h2>
+        <p class="confirm-lead">内容をご確認のうえ、よろしければお申し込みください。修正は各項目の「修正」からどうぞ。</p>
+
+        <div class="confirm-block">
+          <div class="confirm-head"><span>メニュー</span><button type="button" class="confirm-edit" data-goto="step-menu">修正</button></div>
+          <dl class="confirm-dl">
+            <dt>メニュー</dt><dd id="cf-menu"></dd>
+            <dt>料金</dt><dd id="cf-price"></dd>
+          </dl>
+          <p class="confirm-note" id="cf-firstnote" hidden></p>
+        </div>
+
+        <div class="confirm-block">
+          <div class="confirm-head"><span>日時</span><button type="button" class="confirm-edit" data-goto="step-date">修正</button></div>
+          <dl class="confirm-dl">
+            <dt>日時</dt><dd id="cf-when"></dd>
+          </dl>
+        </div>
+
+        <div class="confirm-block">
+          <div class="confirm-head"><span>お客様情報</span><button type="button" class="confirm-edit" data-goto="step-form">修正</button></div>
+          <dl class="confirm-dl">
+            <dt>お名前</dt><dd id="cf-name"></dd>
+            <dt>電話番号</dt><dd id="cf-phone"></dd>
+            <dt>メール</dt><dd id="cf-email"></dd>
+            <dt>性別</dt><dd id="cf-gender"></dd>
+            <dt>連絡方法</dt><dd id="cf-contact"></dd>
+            <div id="cf-referrer-row" hidden style="display:contents"><dt>ご紹介者</dt><dd id="cf-referrer"></dd></div>
+          </dl>
+        </div>
+
+        <div class="confirm-block">
+          <div class="confirm-head"><span>ご要望</span><button type="button" class="confirm-edit" data-goto="step-extra">修正</button></div>
+          <dl class="confirm-dl">
+            <dt>ご要望</dt><dd id="cf-note"></dd>
+          </dl>
+        </div>
+
+        <div id="confirmError" class="form-error" hidden></div>
+
+        <!-- 下部ナビ：戻る（要望へ）／送信（この form の submit を発火） -->
+        <div class="step-nav">
+          <button type="button" class="reserve-btn ghost nav-back" id="navConfirmBack">← 戻る</button>
+          <button type="submit" class="reserve-btn nav-next" id="submitBtn">この内容で仮予約する</button>
+        </div>
+      </section>
+      </form>
 
       <!-- 完了 -->
       <section class="step done" id="step-done" hidden>
@@ -267,7 +341,10 @@ const grouped = groupOrder.map((g) => ({
 
     <script define:vars={{ RESERVE_API, BOOKING_RULES, LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_REDIRECT, LIFF_ID, tel }}>
       const WD = ['日', '月', '火', '水', '木', '金', '土'];
-      const state = { menu: null, date: null, time: null, days: [], availSet: null, calMin: null, calMax: null, holidays: {}, lineUserId: '', displayName: '', inLiff: false, step: 1, maxReached: 1 };
+      // raw = availabilityRaw の先読みキャッシュ { days:[{date,candidates,busy}], holidays }。null=未取得
+      const state = { menu: null, date: null, time: null, days: [], availSet: null, calMin: null, calMax: null, holidays: {}, raw: null, lineUserId: '', displayName: '', inLiff: false, step: 1, maxReached: 1 };
+      let rawFetching = false;   // availabilityRaw の多重取得防止
+      let onRawReady = null;     // 先読み完了時に一度だけ呼ぶコールバック（メニュー選択が先行したとき用）
       let calMonth = null; // カレンダーで表示中の月 {y, m(0始まり)}
       let restoreTarget = null; // LINE 認可リダイレクト復帰時に選び直す日時 {date, time}
 
@@ -293,10 +370,12 @@ const grouped = groupOrder.map((g) => ({
 
       // ============================================================
       // ウィザード：ステップ遷移の単一窓口
-      // target = 'step-menu' | 'step-date' | 'step-form' | 'done'
+      // target = 'step-menu' | 'step-date' | 'step-form' | 'step-extra' | 'step-confirm' | 'done'
       // ============================================================
-      const WIZARD_FACES = ['step-menu', 'step-date', 'step-form', 'step-done'];
-      const STEP_NUM = { 'step-menu': 1, 'step-date': 2, 'step-form': 3 };
+      const WIZARD_FACES = ['step-menu', 'step-date', 'step-form', 'step-extra', 'step-confirm', 'step-done'];
+      // 数値ステップ（インジケーターのドット）は step-menu..step-confirm の 1..5。done は別扱い。
+      const STEP_NUM = { 'step-menu': 1, 'step-date': 2, 'step-form': 3, 'step-extra': 4, 'step-confirm': 5 };
+      const LAST_STEP_NUM = 5; // done 到達時の maxReached（全ステップ通過）
 
       // インジケーターの状態（active/done/到達可否）を state に合わせて再描画
       function renderIndicator() {
@@ -340,17 +419,20 @@ const grouped = groupOrder.map((g) => ({
         if (menuNext) menuNext.disabled = !state.menu;
         const dateNext = $('#navDateNext');
         if (dateNext) dateNext.disabled = !(state.date && state.time);
+        // ④の「次へ」は同意チェック必須（未チェックは無効化）
+        const extraNext = $('#navExtraNext');
+        if (extraNext) extraNext.disabled = !$('#f-consent').checked;
       }
 
       function showStep(target) {
-        // done は数値ステップとは別扱い（3 相当）
+        // done は数値ステップとは別扱い（最終ステップ相当）
         const isDone = target === 'done';
         const faceId = isDone ? 'step-done' : target;
-        // 4面すべて隠して対象だけ表示
+        // 全ステップ面を隠して対象だけ表示
         WIZARD_FACES.forEach((id) => { const el = document.getElementById(id); if (el) el.hidden = (id !== faceId); });
         // state 更新
         state.step = isDone ? 'done' : STEP_NUM[target];
-        const reachedNum = isDone ? 3 : STEP_NUM[target];
+        const reachedNum = isDone ? LAST_STEP_NUM : STEP_NUM[target];
         state.maxReached = Math.max(state.maxReached, reachedNum);
         // インジケーター・下部ナビを再描画
         renderIndicator();
@@ -366,7 +448,24 @@ const grouped = groupOrder.map((g) => ({
       $('#navMenuNext').addEventListener('click', () => { if (state.menu) showStep('step-date'); });
       $('#navDateBack').addEventListener('click', () => showStep('step-menu'));
       $('#navDateNext').addEventListener('click', () => { if (state.date && state.time) showStep('step-form'); });
+      // ③お客様情報：戻る＝日時／次へ＝情報系バリデーション後④へ
       $('#navFormBack').addEventListener('click', () => showStep('step-date'));
+      $('#navFormNext').addEventListener('click', () => { if (validateInfo()) showStep('step-extra'); });
+      // ④ご要望・同意：戻る＝情報／次へ＝同意必須で⑤へ（確認画面へ流し込み）
+      $('#navExtraBack').addEventListener('click', () => showStep('step-form'));
+      $('#navExtraNext').addEventListener('click', () => {
+        if (!$('#f-consent').checked) { showExtraError('内容のお取り扱いに同意のうえお進みください。'); return; }
+        updateConfirm();
+        showStep('step-confirm');
+      });
+      // ⑤確認：戻る＝要望／送信は form submit で発火
+      $('#navConfirmBack').addEventListener('click', () => showStep('step-extra'));
+      // 確認画面の「修正」リンク：該当ステップへ戻る
+      document.querySelectorAll('.confirm-edit').forEach((b) => {
+        b.addEventListener('click', () => { const t = b.dataset.goto; if (t) showStep(t); });
+      });
+      // 同意チェックの変化で④「次へ」の活性を更新
+      $('#f-consent').addEventListener('change', updateNavButtons);
 
       // ドット（インジケーター）クリック：到達済み（n <= maxReached）のときだけ移動。未到達は無反応
       (function bindIndicator() {
@@ -651,6 +750,7 @@ const grouped = groupOrder.map((g) => ({
             id: el.value,
             name: el.dataset.name,
             durationMin: Number(el.dataset.duration),
+            slotMin: Number(el.dataset.slot), // カレンダー占有時間＝クライアント空き判定に使う
             price: Number(el.dataset.price),
             hasFirst: el.dataset.hasfirst === '1',
             firstLabel: el.dataset.firsttime,
@@ -677,32 +777,79 @@ const grouped = groupOrder.map((g) => ({
         status.textContent = msg;
       }
 
-      async function loadAvailability() {
+      // 空き枠の「素材」をページ表示直後に1回だけ先読み（menuId 非依存）。
+      // 以降のメニュー選択・変更・戻って再選択では追加 fetch せず state.raw から計算する。
+      async function prefetchAvailabilityRaw() {
+        if (rawFetching || state.raw) return;
+        if (!RESERVE_API) return; // 未設定は loadAvailability 側で案内
+        rawFetching = true;
+        try {
+          const res = await fetch(`${RESERVE_API}?action=availabilityRaw`);
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || 'error');
+          state.raw = { days: data.days || [], holidays: data.holidays || {} };
+        } catch (e) {
+          state.raw = null; // 失敗は次回の loadAvailability でリトライ余地を残す
+        } finally {
+          rawFetching = false;
+          const cb = onRawReady; onRawReady = null;
+          if (cb) cb(); // メニュー選択が先行して待っていれば計算を再開
+        }
+      }
+
+      // 先読み素材(state.raw)から slotMin を当てはめて state.days を導出する（fetch なし）。
+      // 各日の candidate 開始 t について [tMin, tMin+slotMin] が busy レンジと重ならなければ空き。
+      function buildDaysForSlot_(slotMin) {
+        const raw = state.raw;
+        if (!raw) { state.days = []; return; }
+        const days = [];
+        for (const d of raw.days) {
+          const times = [];
+          for (const hhmm of d.candidates) {
+            const [hh, mm] = hhmm.split(':').map(Number);
+            const tStart = hh * 60 + mm;
+            const tEnd = tStart + slotMin;
+            // 重なり判定: tStart < bEnd && bStart < tEnd（半開区間）
+            const clash = d.busy.some(([bStart, bEnd]) => tStart < bEnd && bStart < tEnd);
+            if (!clash) times.push(hhmm);
+          }
+          if (times.length) days.push({ date: d.date, times });
+        }
+        state.days = days;
+        state.holidays = raw.holidays || {}; // { 'yyyy-MM-dd': '祝日名' }（カレンダー表示用）
+      }
+
+      // 選択中メニューの slotMin でクライアント計算し日付を描画する（先読み前提・追加 fetch なし）。
+      function loadAvailability() {
         calMonth = null;
         state.date = null;
         state.time = null;
         $('#timeList').innerHTML = '';
-        $('#dateList').innerHTML = '<div class="cal-skeleton" aria-hidden="true"></div>';
-        setStatusLoading('空き状況を確認しています…');
         if (!RESERVE_API) {
           setStatusText('予約システムが未設定です（PUBLIC_RESERVE_API）。', 'slot-empty');
           $('#dateList').innerHTML = '';
           return;
         }
-        // 占有時間(slotMin)は初回/常連で不変。isFirstTime は応答の表示用所要時間にのみ影響する。
-        const isFirst = state.menu.hasFirst ? '1' : '0';
-        const url = `${RESERVE_API}?action=availability&menuId=${encodeURIComponent(state.menu.id)}&isFirstTime=${isFirst}`;
-        try {
-          const res = await fetch(url);
-          const data = await res.json();
-          if (!data.ok) throw new Error(data.error || 'error');
-          state.days = data.days || [];
-          state.holidays = data.holidays || {}; // { 'yyyy-MM-dd': '祝日名' }（カレンダー表示用）
+        // 先読み完了済みなら即計算。未完なら「確認中…」を出し、完了コールバックで再計算する。
+        if (state.raw) {
+          buildDaysForSlot_(state.menu.slotMin);
           renderDates();
-        } catch (e) {
-          setStatusText('空き状況を取得できませんでした。時間をおいて再度お試しください。', 'slot-empty');
-          $('#dateList').innerHTML = '';
+          return;
         }
+        $('#dateList').innerHTML = '<div class="cal-skeleton" aria-hidden="true"></div>';
+        setStatusLoading('空き状況を確認中…');
+        // 先読みが動いていなければ起動（失敗後の再選択でも再試行）
+        prefetchAvailabilityRaw();
+        onRawReady = () => {
+          if (!state.menu) return; // 途中でメニューが外れていたら何もしない
+          if (state.raw) {
+            buildDaysForSlot_(state.menu.slotMin);
+            renderDates();
+          } else {
+            setStatusText('空き状況を取得できませんでした。時間をおいて再度お試しください。', 'slot-empty');
+            $('#dateList').innerHTML = '';
+          }
+        };
       }
 
       function renderDates() {
@@ -840,8 +987,11 @@ const grouped = groupOrder.map((g) => ({
         });
       });
 
+      // 旧・日時ステップの目安 summary。全項目の確認は⑤ updateConfirm が担うため要素は撤去済み。
+      // 既存の呼び出し（メニュー選択・日付/時刻選択）を壊さないよう、要素が無ければ何もしない。
       function updateSummary() {
         const s = $('#summary');
+        if (!s) return;
         if (!state.menu || !state.date || !state.time) { s.hidden = true; return; }
         s.hidden = false;
         $('#sum-menu').textContent = state.menu.name;
@@ -856,19 +1006,78 @@ const grouped = groupOrder.map((g) => ({
         }
       }
 
-      function showError(msg) {
-        const e = $('#formError');
+      // ステップ別エラー表示（③=formError / ④=extraError / ⑤=confirmError）
+      function showErrorIn(sel, msg) {
+        const e = $(sel);
         e.textContent = msg;
         e.hidden = false;
         e.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
+      function showError(msg) { showErrorIn('#formError', msg); }        // ③お客様情報
+      function showExtraError(msg) { showErrorIn('#extraError', msg); }  // ④ご要望・同意
+      function showConfirmError(msg) { showErrorIn('#confirmError', msg); } // ⑤確認（送信）
 
-      // ---- 送信 ----
+      // 情報系バリデーション（③「次へ」で実施）。通れば true。エラーは③に表示。
+      function validateInfo() {
+        $('#formError').hidden = true;
+        const name = $('#f-name').value.trim();
+        const phone = $('#f-phone').value.trim();
+        const email = $('#f-email').value.trim();
+        const gender = document.querySelector('input[name="gender"]:checked')?.value || '';
+        const contactMethod = document.querySelector('input[name="contactMethod"]:checked')?.value || 'email';
+        const referrer = $('#f-referrer').value.trim();
+        if (!name) { showError('お名前をご入力ください。'); return false; }
+        if (!phone) { showError('電話番号をご入力ください。'); return false; }
+        // 未連携のまま「LINEで連絡を受け取る」は不可（宛先 userId が無く実際に送れないため）
+        if (!state.lineUserId && contactMethod === 'line') {
+          showError(LINE_ENABLED
+            ? '「LINEで連絡を受け取る」を選ぶには、上の「LINEで連携」が必要です。連携いただくか、「メールで連絡を受け取る」をお選びください。'
+            : '現在 LINE でのご連絡はご利用いただけません。「メールで連絡を受け取る」をお選びください。');
+          return false;
+        }
+        if (!state.lineUserId && !email) { showError('メールアドレスをご入力ください。'); return false; }
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showError('メールアドレスの形式が正しくありません。ご確認ください。'); return false; }
+        if (!gender) { showError('性別をお選びください。'); return false; }
+        if (gender === 'male' && !referrer) { showError('男性のお客様はご紹介者のお名前が必須です。'); return false; }
+        return true;
+      }
+
+      // ④→⑤遷移時に確認画面へ現在値を流し込む（updateSummary は日時ステップの目安・confirm は全項目）
+      function updateConfirm() {
+        if (!state.menu || !state.date || !state.time) return;
+        $('#cf-menu').textContent = state.menu.name;
+        $('#cf-price').textContent = `${fmtYen(state.menu.price)}（${state.menu.durationMin}分）`;
+        const fn = $('#cf-firstnote');
+        if (state.menu.hasFirst) {
+          fn.hidden = false;
+          fn.textContent = `初回のお客様は「${state.menu.firstLabel}」となります（料金は同額）。判定はサロンで行います。`;
+        } else { fn.hidden = true; }
+        $('#cf-when').textContent = `${fmtDateLabel(state.date)} ${state.time}〜`;
+        $('#cf-name').textContent = $('#f-name').value.trim();
+        $('#cf-phone').textContent = $('#f-phone').value.trim() || '（未入力）';
+        $('#cf-email').textContent = $('#f-email').value.trim() || '（未入力）';
+        const gender = document.querySelector('input[name="gender"]:checked')?.value || '';
+        $('#cf-gender').textContent = GENDER_LABEL[gender] || '（未選択）';
+        const contactMethod = document.querySelector('input[name="contactMethod"]:checked')?.value || 'email';
+        $('#cf-contact').textContent = state.lineUserId ? 'LINE' : (contactMethod === 'line' ? 'LINE' : 'メール');
+        const referrer = $('#f-referrer').value.trim();
+        const male = gender === 'male';
+        $('#cf-referrer-row').hidden = !male;
+        $('#cf-referrer').textContent = referrer;
+        $('#cf-note').textContent = $('#f-note').value.trim() || '（なし）';
+      }
+
+      // ---- 送信（⑤確認ステップの submit）----
+      // 情報系の検証は③「次へ」(validateInfo)で済ませ、ここは最終ガード＋createBooking のみ。
+      // エラー（slot_taken 等）は⑤に留まり confirmError に表示する（step 遷移しない）。
       $('#reserveForm').addEventListener('submit', async (ev) => {
         ev.preventDefault();
-        $('#formError').hidden = true;
+        $('#confirmError').hidden = true;
 
-        if (!state.menu || !state.date || !state.time) { showError('メニューと日時をお選びください。'); return; }
+        // 最終ガード（menu/date/time/同意）。ここまで来ていれば通常は満たすが二重チェック
+        if (!state.menu || !state.date || !state.time) { showConfirmError('メニューと日時をお選びください。'); return; }
+        if (!$('#f-consent').checked) { showConfirmError('内容のお取り扱いに同意のうえお進みください。'); return; }
+
         const name = $('#f-name').value.trim();
         const phone = $('#f-phone').value.trim();
         const email = $('#f-email').value.trim();
@@ -876,21 +1085,6 @@ const grouped = groupOrder.map((g) => ({
         const contactMethod = document.querySelector('input[name="contactMethod"]:checked')?.value || 'email';
         const referrer = $('#f-referrer').value.trim();
         const note = $('#f-note').value.trim();
-
-        if (!name) return showError('お名前をご入力ください。');
-        if (!phone) return showError('電話番号をご入力ください。');
-        // 未連携のまま「LINEで連絡を受け取る」は不可（送る宛先の userId が無く実際にはLINEを送れないため）
-        if (!state.lineUserId && contactMethod === 'line') {
-          return showError(LINE_ENABLED
-            ? '「LINEで連絡を受け取る」を選ぶには、上の「LINEで連携」が必要です。連携いただくか、「メールで連絡を受け取る」をお選びください。'
-            : '現在 LINE でのご連絡はご利用いただけません。「メールで連絡を受け取る」をお選びください。');
-        }
-        if (!state.lineUserId && !email) return showError('メールアドレスをご入力ください。');
-        // 入力があれば形式も検証（連携済みで任意入力の場合も含む。novalidate のため type=email の組込み検証は効かない）
-        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showError('メールアドレスの形式が正しくありません。ご確認ください。');
-        if (!gender) return showError('性別をお選びください。');
-        if (gender === 'male' && !referrer) return showError('男性のお客様はご紹介者のお名前が必須です。');
-        if (!$('#f-consent').checked) return showError('内容のお取り扱いに同意のうえお進みください。');
 
         const btn = $('#submitBtn');
         btn.disabled = true;
@@ -917,7 +1111,7 @@ const grouped = groupOrder.map((g) => ({
           if (!data.ok) {
             btn.disabled = false;
             btn.textContent = orig;
-            return showError(errorMessage(data.error));
+            return showConfirmError(errorMessage(data.error));
           }
           // 連携済みなら、次回の入力省略のため端末にプロフィールを保存（同意は保存しない）
           if (state.lineUserId) {
@@ -928,7 +1122,7 @@ const grouped = groupOrder.map((g) => ({
         } catch (e) {
           btn.disabled = false;
           btn.textContent = orig;
-          showError('送信に失敗しました。通信環境をご確認のうえ、再度お試しください。');
+          showConfirmError('送信に失敗しました。通信環境をご確認のうえ、再度お試しください。');
         }
       });
 
@@ -964,8 +1158,21 @@ const grouped = groupOrder.map((g) => ({
         showStep('done');
       }
 
-      // ---- 初期化：LINE 連携（復帰 or 端末保存からの自動連携）----
+      // ---- 営業時間ポップアップ（ネイティブ dialog）----
+      (function bindHoursDialog() {
+        const dlg = $('#hoursDialog');
+        const openBtn = $('#hoursOpen');
+        const closeBtn = $('#hoursClose');
+        if (!dlg || !openBtn) return;
+        openBtn.addEventListener('click', () => { try { dlg.showModal(); } catch (_) { dlg.setAttribute('open', ''); } });
+        if (closeBtn) closeBtn.addEventListener('click', () => dlg.close());
+        // 背景（::backdrop）クリックで閉じる。Esc は dialog 既定で閉じる。
+        dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+      })();
+
+      // ---- 初期化：LINE 連携（復帰 or 端末保存からの自動連携）＋空き枠の先読み（並行）----
       initLine();
+      prefetchAvailabilityRaw(); // ページ表示直後にバックグラウンドで素材を1回だけ取得
     </script>
 
     <style is:global>
@@ -1035,16 +1242,43 @@ const grouped = groupOrder.map((g) => ({
       .hours-time { flex: 1 1 12em; min-width: 0; color: var(--c-muted); overflow-wrap: anywhere; }
       .hours li.closed .hours-day, .hours li.closed .hours-time { color: #8E2230; }
 
+      /* 営業時間リンク（②日時ステップ上部・小さく配置）＋ポップアップ dialog */
+      .hours-link-row { margin: 0 0 .5rem; }
+      .hours-link {
+        appearance: none; background: none; border: none; padding: 0;
+        font-family: inherit; font-size: .85rem; cursor: pointer; font-weight: 600;
+        color: var(--c-purple-dk); text-decoration: underline; text-underline-offset: 2px;
+      }
+      .hours-dialog {
+        border: 1px solid var(--c-border); border-radius: 12px;
+        padding: 0; max-width: 440px; width: calc(100% - 2rem);
+        color: var(--c-ink); background: var(--c-surface);
+      }
+      .hours-dialog::backdrop { background: rgba(44, 31, 58, .38); }
+      .hours-dialog-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: .8rem 1rem .4rem; font-family: var(--f-serif);
+      }
+      .hours-dialog-head strong { font-size: 1rem; }
+      .hours-close {
+        appearance: none; background: none; border: none; cursor: pointer;
+        font-size: 1.4rem; line-height: 1; color: var(--c-muted); padding: 0;
+        min-width: 40px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px;
+      }
+      .hours-close:hover { background: #FCF6FA; color: var(--c-purple-dk); }
+      /* dialog 内の hours は上部リストと違い下余白を詰める（元の 1.5rem は上部レイアウト用） */
+      .hours-dialog .hours { border: none; margin: 0; padding: .3rem 1rem 1rem; }
+
       .step {
         background: var(--c-surface);
         border: 1px solid var(--c-border);
         border-radius: 12px;
-        padding: 1.1rem 1rem 1.3rem;
+        padding: 1rem 1rem 1.1rem;
         margin-bottom: 1.25rem;
       }
       .step > h2 {
         font-size: 1.1rem; display: flex; align-items: center; gap: .55rem;
-        margin-bottom: 1rem; padding-bottom: .55rem; border-bottom: 1px solid var(--c-border);
+        margin-bottom: .8rem; padding-bottom: .45rem; border-bottom: 1px solid var(--c-border);
       }
       .step-no {
         display: inline-flex; align-items: center; justify-content: center;
@@ -1052,13 +1286,13 @@ const grouped = groupOrder.map((g) => ({
         background: var(--c-purple); color: #fff; font-size: .9rem; flex: none;
       }
 
-      .menu-group { margin-bottom: 1rem; }
+      .menu-group { margin-bottom: .7rem; }
       .menu-group h3 { font-size: .95rem; color: var(--c-purple-dk); margin-bottom: .5rem; }
       .menu-group h3 small { font-weight: normal; color: var(--c-muted); font-size: .8rem; margin-left: .5rem; }
-      .menu-list { display: grid; gap: .5rem; }
+      .menu-list { display: grid; gap: .4rem; }
       .menu-item {
         display: flex; gap: .65rem; align-items: flex-start;
-        border: 1px solid var(--c-border); border-radius: 10px; padding: .7rem .8rem;
+        border: 1px solid var(--c-border); border-radius: 10px; padding: .55rem .75rem;
         cursor: pointer; transition: border-color .15s, background .15s;
       }
       .menu-item:hover { border-color: var(--c-purple-lt); }
@@ -1236,7 +1470,35 @@ const grouped = groupOrder.map((g) => ({
       }
       .summary-row { display: flex; justify-content: space-between; gap: 1rem; font-size: .92rem; padding: .15rem 0; }
       .summary-row span { color: var(--c-muted); }
-      .summary-note { font-size: .8rem; color: var(--c-accent); margin-top: .4rem; }
+      .summary-note { font-size: .8rem; color: #A67C1E; font-weight: 600; margin-top: .4rem; }
+
+      /* ⑤確認画面：項目群ごとにカード＋修正リンク（done-dl の体裁を流用） */
+      .confirm-lead { font-size: .88rem; color: var(--c-muted); margin-bottom: 1rem; }
+      .confirm-block {
+        background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 10px;
+        padding: .7rem .9rem; margin-bottom: .8rem;
+      }
+      .confirm-head {
+        display: flex; align-items: center; justify-content: space-between;
+        font-size: .82rem; font-weight: 600; color: var(--c-purple-dk);
+        border-bottom: 1px dashed var(--c-border); padding-bottom: .35rem; margin-bottom: .45rem;
+      }
+      .confirm-edit {
+        appearance: none; background: none; border: none;
+        font-family: inherit; font-size: .82rem; cursor: pointer;
+        color: var(--c-purple-dk); text-decoration: underline;
+        padding: .5rem .6rem; margin: -.5rem -.6rem;
+        min-height: 44px; display: inline-flex; align-items: center;
+      }
+      .confirm-edit:hover { color: var(--c-purple); }
+      .confirm-dl { display: grid; grid-template-columns: 5.5em 1fr; gap: .18rem .8rem; margin: 0; font-size: .92rem; }
+      .confirm-dl dt { color: var(--c-muted); white-space: nowrap; }
+      .confirm-dl dd { margin: 0; overflow-wrap: anywhere; }
+      .confirm-note { font-size: .8rem; color: #A67C1E; font-weight: 600; margin-top: .4rem; }
+      /* design反映: 確認の送信を主役化＋情報ステップの余白詰め */
+      #step-confirm .step-nav { gap: 1rem; }
+      #step-confirm #submitBtn { font-weight: 600; box-shadow: 0 2px 8px rgba(139, 96, 128, .28); }
+      #step-form .field { margin-bottom: .8rem; }
 
       .reserve-btn {
         display: inline-flex; align-items: center; justify-content: center;
@@ -1270,6 +1532,8 @@ const grouped = groupOrder.map((g) => ({
         .wrap { padding: 1rem .8rem 3rem; }
         /* 狭幅では日付列を全幅にし、時間/案内文をその下へ確実に折り返す */
         .hours-day { min-width: 100%; }
+        /* 確認一覧の dt を少し詰めて縦の整列を保つ */
+        .confirm-dl { grid-template-columns: 5em 1fr; column-gap: .6rem; }
       }
 
       /* ステップインジケーター（ドット）。sticky にはしない（ヘッダーが sticky のため） */
@@ -1342,7 +1606,7 @@ const grouped = groupOrder.map((g) => ({
       .steps-indicator li:not(.is-active):not(.is-done) .dot { border-style: dashed; }
       /* 到達済みで移動可能な項目はポインタ、未到達は不活性 */
       .steps-indicator li[role="button"] { cursor: pointer; }
-      .steps-indicator li[aria-disabled="true"] { cursor: default; opacity: .5; }
+      .steps-indicator li[aria-disabled="true"] { cursor: default; opacity: .7; }
 
       /* 下部ナビ行（戻る／次へを2分割配置） */
       .step-nav {
@@ -1360,9 +1624,11 @@ const grouped = groupOrder.map((g) => ({
       .step-nav .reserve-btn.ghost { margin-top: 0; border-color: var(--c-purple-lt); color: var(--c-purple-dk); }
 
       @media (max-width: 700px) {
-        .steps-indicator { font-size: .72rem; gap: .3rem; }
+        /* ドット5つでもラベルが潰れないよう狭幅ではさらに小さく（ラベルは短縮済み：情報/要望/確認） */
+        .steps-indicator { font-size: .66rem; gap: .2rem; }
         .steps-indicator .dot { width: 22px; height: 22px; }
         .steps-indicator li::before { top: 11px; }
+        .steps-indicator .lbl { word-break: keep-all; }
         /* 送信ラベル（「この内容で仮予約する」）の折り返し回避：狭幅ではナビを縦積み */
         .step-nav { flex-direction: column; align-items: stretch; }
         .step-nav .reserve-btn { width: 100%; flex: none; }
