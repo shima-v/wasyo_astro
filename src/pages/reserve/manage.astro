@@ -1,6 +1,9 @@
 ---
 import { RESERVE_API, ENV_LABEL } from '../../data/config.js';
 import EnvBadge from '../../components/EnvBadge.astro';
+import SubmitOverlay from '../../components/SubmitOverlay.astro';
+import TimeDialog from '../../components/TimeDialog.astro';
+import '../../styles/reserve-calendar.css';
 
 const _base = import.meta.env.BASE_URL;
 const base = _base.endsWith('/') ? _base : _base + '/';
@@ -20,6 +23,10 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
   </head>
   <body>
     <EnvBadge />
+    <!-- 送信中の全面オーバーレイ（日時変更の送信中・二重送信防止）。共有部品 SubmitOverlay -->
+    <SubmitOverlay message="変更を送信しています…" subtext="画面をそのままでお待ちください" />
+    <!-- 開始時刻を選ぶポップアップ。共有部品 TimeDialog -->
+    <TimeDialog />
     <header class="site-header">
       <a class="home-link" href={base}>‹ {salonName}</a>
       <span class="head-title">ご予約の確認</span>
@@ -57,7 +64,6 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
           <h3>新しい日時を選ぶ</h3>
           <div id="slotStatus" class="status">空き状況を確認しています…</div>
           <div id="dateList" class="date-list"></div>
-          <div id="timeList" class="time-list"></div>
           <div id="changeError" class="err-box" hidden></div>
           <button type="button" class="reserve-btn" id="confirmChange" disabled>この日時に変更する（再承認）</button>
           <p class="hint">変更後はサロンの再確認のうえ、確定のご連絡をいたします。</p>
@@ -77,8 +83,18 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
       <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
     </footer>
 
-    <script define:vars={{ RESERVE_API, tel }}>
+    <script type="application/json" id="reserve-config" set:html={JSON.stringify({ RESERVE_API, tel })}></script>
+    <script>
+      // 共有部品（src/lib）を import するため bundled module 化。サーバ値は JSON から読む。
+      import { runExclusive } from '../../lib/submit-overlay.js';
+      import { heatMark } from '../../lib/heatmap.js';
+      import { openTimeDialog as openTimeDlg, renderTimeButtons } from '../../lib/time-dialog.js';
+
+      const { RESERVE_API, tel } = JSON.parse(document.getElementById('reserve-config').textContent);
+
       const WD = ['日', '月', '火', '水', '木', '金', '土'];
+      // 空き枠ヒートマップの閾値（index と揃える）。枠数 >= HEAT_HI_MIN を ◎、未満を ○。
+      const HEAT_HI_MIN = 8;
       const $ = (s) => document.querySelector(s);
       const params = new URLSearchParams(location.search);
       const token = params.get('token') || '';
@@ -186,7 +202,7 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
         calMonth = null;
         state.date = null;
         state.time = null;
-        $('#timeList').innerHTML = '';
+        const tdb = $('#timeDialogBody'); if (tdb) tdb.innerHTML = ''; // 時刻ポップアップの前回内容をクリア
         $('#dateList').innerHTML = '<div class="cal-skeleton" aria-hidden="true"></div>';
         setStatusLoading('空き状況を確認しています…');
         const isFirst = state.booking.isFirstTime ? '1' : '0';
@@ -226,6 +242,8 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
 
       function renderCalendar() {
         const dl = $('#dateList');
+        // 各日の空き枠数マップ（date -> times.length）。ヒートマップの濃淡・記号に使う。
+        const countByDate = new Map(state.days.map((d) => [d.date, d.times.length]));
         const { y, m } = calMonth;
         const firstDow = new Date(y, m, 1).getDay();
         const daysInMonth = new Date(y, m + 1, 0).getDate();
@@ -246,7 +264,11 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
           const dowCls = dow === 0 ? ' sun' : dow === 6 ? ' sat' : '';
           if (state.availSet.has(ymd)) {
             const active = state.date === ymd ? ' active' : '';
-            html += `<button type="button" class="cal-cell cal-day avail${active}${dowCls}" data-date="${ymd}">${day}<span class="dot"></span></button>`;
+            // 空き枠数で濃淡＋記号を出し分け（◎=空き多い / ○=残りわずか）。共有ロジック heatMark。
+            const cnt = countByDate.get(ymd) || 0;
+            const { mark, cls } = heatMark(cnt, { hiMin: HEAT_HI_MIN });
+            const heatCls = ' ' + cls;
+            html += `<button type="button" class="cal-cell cal-day avail${heatCls}${active}${dowCls}" data-date="${ymd}" title="空き ${cnt} 枠">${day}<span class="heat-mark" aria-hidden="true">${mark}</span></button>`;
           } else {
             html += `<span class="cal-cell cal-day disabled${dowCls}">${day}</span>`;
           }
@@ -262,45 +284,47 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
             state.time = null;
             $('#confirmChange').disabled = true;
             renderCalendar();
-            renderTimes();
-            $('#timeList').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            openTimeDialog();
           });
         });
       }
 
+      // 選択中の日付の空き時刻を、共有の renderTimeButtons で時刻ポップアップ本体に描画する。
       function renderTimes() {
-        const tl = $('#timeList');
         const day = state.days.find((d) => d.date === state.date);
-        if (!day) { tl.innerHTML = ''; return; }
-        tl.innerHTML =
-          '<div class="time-label">' + fmtDateLabel(state.date) + ' の開始時刻をお選びください</div>' +
-          day.times.map((t) => `<button type="button" class="time-btn" data-time="${t}">${t}</button>`).join('');
-        tl.querySelectorAll('.time-btn').forEach((bn) => {
-          bn.addEventListener('click', () => {
-            state.time = bn.dataset.time;
-            tl.querySelectorAll('.time-btn').forEach((x) => x.classList.toggle('active', x === bn));
-            $('#confirmChange').disabled = false;
-          });
-        });
+        if (!day) { const body = $('#timeDialogBody'); if (body) body.innerHTML = ''; return; }
+        renderTimeButtons(day.times, (t) => {
+          state.time = t;
+          $('#confirmChange').disabled = false;
+        }, { title: fmtDateLabel(state.date) + ' の開始時刻', selected: state.time });
       }
 
-      $('#confirmChange').addEventListener('click', async () => {
+      // 時刻選択ポップアップを開く（本体を描いてから共有 openTimeDlg で showModal）。
+      function openTimeDialog() {
+        renderTimes();
+        openTimeDlg();
+      }
+
+      $('#confirmChange').addEventListener('click', () => {
         if (!state.date || !state.time) return;
-        const btn = $('#confirmChange');
-        btn.disabled = true;
-        const r = await postAction({ action: 'changeBooking', token, date: state.date, time: state.time });
-        if (r.ok) {
-          showResult(true, '日時を変更しました',
-            `新しい日時：${fmtDateLabel(state.date)} ${state.time}〜。サロンの再確認のうえ、確定のご連絡をいたします。`);
-        } else {
-          btn.disabled = false;
-          const e = $('#changeError');
-          e.hidden = false;
-          e.textContent =
-            r.error === 'slot_taken' ? 'その時間はちょうど埋まってしまいました。別の時間をお選びください。' :
-            r.error === 'too_late' ? '変更期限（前日まで）を過ぎています。' :
-            '変更できませんでした。別の時間をお試しください。';
-        }
+        // 送信中は全面オーバーレイを出し、二重送信を弾く（共有 runExclusive）。
+        runExclusive(async () => {
+          const btn = $('#confirmChange');
+          btn.disabled = true;
+          const r = await postAction({ action: 'changeBooking', token, date: state.date, time: state.time });
+          if (r.ok) {
+            showResult(true, '日時を変更しました',
+              `新しい日時：${fmtDateLabel(state.date)} ${state.time}〜。サロンの再確認のうえ、確定のご連絡をいたします。`);
+          } else {
+            btn.disabled = false;
+            const e = $('#changeError');
+            e.hidden = false;
+            e.textContent =
+              r.error === 'slot_taken' ? 'その時間はちょうど埋まってしまいました。別の時間をお選びください。' :
+              r.error === 'too_late' ? '変更期限（前日まで）を過ぎています。' :
+              '変更できませんでした。別の時間をお試しください。';
+          }
+        }, { message: '変更を送信しています…' });
       });
 
       load();
@@ -351,12 +375,7 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
         border-radius: 50%; animation: spin .8s linear infinite;
       }
       @keyframes spin { to { transform: rotate(360deg); } }
-      .cal-skeleton {
-        height: 280px; border-radius: 10px;
-        background: linear-gradient(100deg, #f3ecf2 30%, #fbf6fa 50%, #f3ecf2 70%);
-        background-size: 200% 100%; animation: shimmer 1.2s linear infinite;
-      }
-      @keyframes shimmer { to { background-position: -200% 0; } }
+      /* カレンダー読み込み中スケルトンは共有 reserve-calendar.css へ移設 */
 
       .card {
         background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 12px;
@@ -394,50 +413,9 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
       .reserve-btn.danger:hover { background: #FBEAEC; }
 
       .change-box { margin-top: 1.2rem; border-top: 1px dashed var(--c-border); padding-top: 1rem; }
-      .date-list { margin-bottom: 1rem; }
-      .time-list { display: flex; flex-wrap: wrap; gap: .45rem; margin-bottom: 1rem; align-items: center; }
-      .time-btn {
-        font-family: inherit; font-size: .9rem; cursor: pointer; border: 1px solid var(--c-border);
-        background: #fff; color: var(--c-ink); border-radius: 8px; padding: .45rem .7rem; min-height: 40px;
-      }
-      .time-btn:hover { border-color: var(--c-purple-lt); }
-      .time-btn.active { background: var(--c-purple); color: #fff; border-color: var(--c-purple); }
-      .time-label { width: 100%; font-size: .85rem; color: var(--c-muted); margin-bottom: .15rem; }
-
-      /* カレンダー（日付選択） */
-      .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .6rem; }
-      .cal-title { font-weight: 600; font-size: 1rem; }
-      .cal-nav {
-        font-family: inherit; font-size: 1.25rem; line-height: 1; color: var(--c-purple-dk);
-        width: 42px; height: 42px; border: 1px solid var(--c-border); background: #fff;
-        border-radius: 10px; cursor: pointer;
-      }
-      .cal-nav:hover:not(:disabled) { border-color: var(--c-purple-lt); }
-      .cal-nav:disabled { opacity: .3; cursor: default; }
-      .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: .3rem; }
-      .cal-wd { text-align: center; font-size: .78rem; color: var(--c-muted); padding: .15rem 0; }
-      .cal-wd.sun { color: #B23A48; }
-      .cal-wd.sat { color: #3F6FB0; }
-      .cal-cell {
-        aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center;
-        font-size: .92rem; font-family: inherit;
-      }
-      .cal-cell.empty { border: 0; }
-      .cal-day { border-radius: 9px; }
-      .cal-day.disabled { color: #CDBFCC; }
-      .cal-day.disabled.sun { color: #e0b3ba; }
-      .cal-day.disabled.sat { color: #b6c4dc; }
-      .cal-day.avail {
-        position: relative; flex-direction: column; gap: 2px;
-        border: 1px solid var(--c-border); background: #fff; color: var(--c-ink); cursor: pointer;
-        transition: border-color .15s, background .15s;
-      }
-      .cal-day.avail.sun { color: #B23A48; }
-      .cal-day.avail.sat { color: #3F6FB0; }
-      .cal-day.avail:hover { border-color: var(--c-purple-lt); background: #FCF6FA; }
-      .cal-day.avail.active { background: var(--c-purple); color: #fff; border-color: var(--c-purple); }
-      .cal-day .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--c-accent); }
-      .cal-day.avail.active .dot { background: #fff; }
+      /* カレンダー（.cal-*）・時刻ボタン（.time-*）・空き枠ヒートマップ（.heat-*）の CSS は
+         共有スタイル src/styles/reserve-calendar.css へ移設（frontmatter で import 済み）。
+         時刻選択ポップアップの器は共有部品 TimeDialog.astro が担う。 */
       .err-box { background: #FBEAEC; border: 1px solid #E3B5BC; color: #8E2230; border-radius: 8px; padding: .6rem .8rem; font-size: .9rem; margin-bottom: 1rem; }
 
       .done { text-align: center; }
