@@ -37,9 +37,28 @@ const grouped = groupOrder.map((g) => ({
     <title>{pageTitle}</title>
     <meta name="description" content="サロン和笑〜Violane〜 のオンライン予約。メニューと日時を選んでお申し込みいただけます。" />
     {LIFF_ID ? <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script> : null}
+    <!-- #3 ちらつき対策: LINE 認可からの復帰中（URL に code&state）は、
+         本文の描画前に body へ data-line-returning を付ける。CSS で①メニュー等の
+         .step を隠し、全面ローディングだけを見せる。handleLineReturn 完了で解除する。 -->
+    <script is:inline>
+      (function () {
+        try {
+          var p = new URLSearchParams(location.search);
+          if (p.get('code') && p.get('state')) {
+            document.documentElement.setAttribute('data-line-returning', '');
+          }
+        } catch (_) {}
+      })();
+    </script>
   </head>
   <body>
     <EnvBadge />
+    <!-- #3 LINE復帰中の全面ローディング（data-line-returning のときだけ表示）。
+         ①メニューを一切見せず、確認中の表示だけを出す。 -->
+    <div id="lineReturnLoading" class="line-return-loading" aria-live="polite">
+      <span class="spinner" aria-hidden="true"></span>
+      <p>LINE連携を確認しています…</p>
+    </div>
     <header class="site-header">
       <a class="home-link" href={base}>‹ {salonName}</a>
       <span class="head-title">オンラインご予約</span>
@@ -81,6 +100,32 @@ const grouped = groupOrder.map((g) => ({
           <button type="button" class="hours-close" id="timeDialogClose" aria-label="閉じる">×</button>
         </div>
         <div id="timeDialogBody" class="time-list time-dialog-body"></div>
+      </dialog>
+
+      <!-- 常連ウェルカムバナー（#4）。常連（LINE連携済み＋前回メニューが現行に存在）のときだけ JS で表示。
+           ①メニューの上に置き、前回と同じメニューでの最短予約導線を提供する。 -->
+      <section class="welcome-banner" id="welcomeBanner" aria-label="常連のお客様向けショートカット" hidden>
+        <p class="welcome-lead" id="welcomeLead"></p>
+        <button type="button" class="welcome-shortcut" id="welcomeShortcut">
+          <span class="welcome-shortcut-label" id="welcomeShortcutLabel"></span>
+          <span class="welcome-shortcut-arrow" aria-hidden="true">→</span>
+        </button>
+      </section>
+
+      <!-- 前回メニューの確認ポップアップ（#4・時刻/営業時間ダイアログの作法を流用） -->
+      <dialog id="lastMenuDialog" class="last-menu-dialog" aria-label="前回のメニューで予約">
+        <div class="last-menu-dialog-head">
+          <strong>前回のメニューで予約</strong>
+          <button type="button" class="hours-close" id="lastMenuClose" aria-label="閉じる">×</button>
+        </div>
+        <div class="last-menu-dialog-body">
+          <dl class="last-menu-dl">
+            <dt>メニュー</dt><dd id="lm-name"></dd>
+            <dt>料金</dt><dd id="lm-price"></dd>
+            <dt>所要</dt><dd id="lm-duration"></dd>
+          </dl>
+          <button type="button" class="reserve-btn" id="lastMenuConfirm">このメニューで日時を選ぶ</button>
+        </div>
       </dialog>
 
       <!-- STEP 1: メニュー -->
@@ -415,13 +460,14 @@ const grouped = groupOrder.map((g) => ({
       }
 
       // 現ステップで「次へ」を押せるか（未選択・未入力・未同意なら false）。
-      // ①menu 選択済 / ②date+time 選択済 / ④同意チェック済 / ③⑤は常に活性（検証は goNext 内）
+      // ①menu 選択済 / ②date+time 選択済 / ③必須充足 / ④同意チェック済 / ⑤は常に活性
       function canProceed() {
         switch (state.step) {
           case 1: return !!state.menu;
           case 2: return !!(state.date && state.time);
+          case 3: return isInfoComplete(); // ③必須が埋まるまで「次へ」を活性化しない
           case 4: return $('#f-consent').checked;
-          default: return true; // 3・5・done は disabled にしない
+          default: return true; // 5・done は disabled にしない
         }
       }
 
@@ -506,15 +552,46 @@ const grouped = groupOrder.map((g) => ({
       });
       // 同意チェックの変化で④「次へ」の活性を更新
       $('#f-consent').addEventListener('change', refreshNavBars);
+      // ③お客様情報の各入力変化で「次へ」(canProceed=isInfoComplete)の活性を更新。
+      // input=テキスト系のキー入力、change=ラジオ（性別・連絡方法）の切替に対応。
+      (function bindInfoInputs() {
+        const form = $('#reserveForm');
+        if (!form) return;
+        const upd = () => { if (state.step === 3) refreshNavBars(); };
+        ['input', 'change'].forEach((ev) => form.addEventListener(ev, upd));
+      })();
 
-      // ドット（インジケーター）クリック：到達済み（n <= maxReached）のときだけ移動。未到達は無反応
+      // 目的ステップ n へ「前進」してよいか（後退は常に許可）。
+      // n に到達するには手前の必須をすべて満たす必要がある：
+      //   ②へ=①メニュー選択済 / ③へ=②日時選択済 / ④⑤へ=③情報充足＋（⑤は④同意も）
+      // maxReached の到達値だけを根拠に飛べる穴（入力を消して戻り→ドットで前進）を塞ぐ。
+      function canEnterStep(n) {
+        if (n <= state.step) return true; // 後退・現在地は無条件で許可（過剰ブロック回避）
+        if (n >= 2 && !state.menu) return false;                 // ①未選択
+        if (n >= 3 && !(state.date && state.time)) return false; // ②未選択
+        if (n >= 4 && !isInfoComplete()) return false;           // ③未充足
+        if (n >= 5 && !$('#f-consent').checked) return false;    // ④未同意
+        return true;
+      }
+      // 前進ガードつきステップ移動：NG のときは最初に満たせていない手前ステップで止める。
+      function goToStepGuarded(n) {
+        if (n === state.step) return;
+        if (canEnterStep(n)) { showStep(WIZARD_FACES[n - 1]); return; }
+        // 前進不可：手前の未充足ステップへ誘導し、該当のエラーを表示
+        if (!state.menu) { showStep('step-menu'); return; }
+        if (!(state.date && state.time)) { showStep('step-date'); return; }
+        if (!isInfoComplete()) { showStep('step-form'); validateInfo(); return; }
+        if (!$('#f-consent').checked) { showStep('step-extra'); showExtraError('内容のお取り扱いに同意のうえお進みください。'); return; }
+      }
+
+      // ドット（インジケーター）クリック：到達済み（n <= maxReached）＋前進ガードを満たすときだけ移動。
       (function bindIndicator() {
         const ind = $('.steps-indicator');
         if (!ind) return;
         const go = (li) => {
           const n = Number(li.dataset.step);
           if (n > state.maxReached || n === state.step) return; // 未到達・現在地は無反応
-          showStep(WIZARD_FACES[n - 1]);
+          goToStepGuarded(n); // maxReached 到達済みでも中間ステップ未充足なら前進させない
         };
         ind.querySelectorAll('li').forEach((li) => {
           li.addEventListener('click', () => go(li));
@@ -613,6 +690,9 @@ const grouped = groupOrder.map((g) => ({
           gender: document.querySelector('input[name="gender"]:checked')?.value || '',
           referrer: $('#f-referrer').value.trim(),
           note: $('#f-note').value.trim(),
+          // 退避漏れだった2項目も退避（連携後に同意・連絡方法を失わないため）
+          consent: !!$('#f-consent').checked,
+          contactMethod: document.querySelector('input[name="contactMethod"]:checked')?.value || '',
         };
         try { localStorage.setItem(OAUTH_KEY, JSON.stringify(draft)); } catch (_) {}
         const url =
@@ -636,6 +716,14 @@ const grouped = groupOrder.map((g) => ({
         }
         $('#f-referrer').value = draft.referrer || '';
         $('#f-note').value = draft.note || '';
+        // 連絡方法（ラジオ）を復元：change を発火して依存挙動（未連携×LINE誘導等）と整合させる
+        if (draft.contactMethod) {
+          const cm = document.querySelector('input[name="contactMethod"][value="' + draft.contactMethod + '"]');
+          if (cm) { cm.checked = true; cm.dispatchEvent(new Event('change', { bubbles: true })); }
+        }
+        // 同意チェックを復元：change を発火して④「次へ」の活性(refreshNavBars)を更新
+        const consentEl = $('#f-consent');
+        if (consentEl) { consentEl.checked = !!draft.consent; consentEl.dispatchEvent(new Event('change', { bubbles: true })); }
         if (draft.menuId) {
           const mr = document.querySelector('input[name="menu"][value="' + draft.menuId + '"]');
           if (mr) {
@@ -644,6 +732,12 @@ const grouped = groupOrder.map((g) => ({
             mr.dispatchEvent(new Event('change', { bubbles: true })); // → loadAvailability（restoreTarget は描画後に適用）
           }
         }
+      }
+
+      // #3 復帰ローディング（data-line-returning）を解除して本文を見せる。
+      // handleLineReturn の全ての「結末」（成功→③／各失敗→③＋エラー）で必ず呼ぶ。
+      function endLineReturnLoading() {
+        document.documentElement.removeAttribute('data-line-returning');
       }
 
       // 認可からの復帰：?code&?state を検知して userId を取得
@@ -658,7 +752,11 @@ const grouped = groupOrder.map((g) => ({
         history.replaceState(null, '', location.pathname);
         try { localStorage.removeItem(OAUTH_KEY); } catch (_) {}
         if (!draft || draft.state !== retState) {
-          // 失敗時も③へ戻して手入力で続行できるようにする
+          // 失敗時も③へ戻して手入力で続行できるようにする。
+          // draft があれば入力を復元してから戻す（CSRF不一致でも本人の入力は失わない）。
+          // draft 自体が無い/壊れている場合は復元できないのでそのまま③へ。
+          if (draft) restoreDraft(draft);
+          endLineReturnLoading();
           showStep('step-form');
           showError('連携の確認に失敗しました（セキュリティ検証）。お手数ですが、もう一度お試しください。');
           return false;
@@ -670,7 +768,8 @@ const grouped = groupOrder.map((g) => ({
             body: JSON.stringify({ action: 'lineLogin', code, redirectUri: LINE_LOGIN_REDIRECT }),
           });
           const data = await res.json();
-          if (!data.ok || !data.lineUserId) { showStep('step-form'); showError('LINE連携に失敗しました。お手数ですが、もう一度お試しください。'); return false; }
+          // API 失敗時も退避した入力を復元してから③へ戻す（入力を失わない）
+          if (!data.ok || !data.lineUserId) { restoreDraft(draft); endLineReturnLoading(); showStep('step-form'); showError('LINE連携に失敗しました。お手数ですが、もう一度お試しください。'); return false; }
           state.lineUserId = data.lineUserId;
           state.displayName = data.displayName || '';
           restoreDraft(draft);
@@ -679,9 +778,13 @@ const grouped = groupOrder.map((g) => ({
           applyLinkState();
           // 復帰成功：menu/date/time が復元されるので③まで到達済みにして③を表示
           state.maxReached = 3;
+          endLineReturnLoading();
           showStep('step-form');
           return true;
         } catch (e) {
+          // 通信例外時も退避した入力を復元してから③へ戻す（入力を失わない）
+          restoreDraft(draft);
+          endLineReturnLoading();
           showStep('step-form');
           showError('LINE連携の通信に失敗しました。通信環境をご確認のうえ、もう一度お試しください。');
           return false;
@@ -1076,6 +1179,26 @@ const grouped = groupOrder.map((g) => ({
       function showExtraError(msg) { showErrorIn('#extraError', msg); }  // ④ご要望・同意
       function showConfirmError(msg) { showErrorIn('#confirmError', msg); } // ⑤確認（送信）
 
+      // ③必須充足の軽量判定（エラー表示なし）。canProceed（③次への活性）や
+      // 全経路の前進ガードで使う。ロジックは validateInfo と揃える（表示のみ省く）。
+      function isInfoComplete() {
+        const name = $('#f-name').value.trim();
+        const phone = $('#f-phone').value.trim();
+        const email = $('#f-email').value.trim();
+        const gender = document.querySelector('input[name="gender"]:checked')?.value || '';
+        const contactMethod = document.querySelector('input[name="contactMethod"]:checked')?.value || 'email';
+        const referrer = $('#f-referrer').value.trim();
+        if (!name || !phone || !gender) return false;
+        // 未連携で「LINEで連絡」は不可（宛先 userId が無い）
+        if (!state.lineUserId && contactMethod === 'line') return false;
+        // 未連携はメール必須＋形式チェック
+        if (!state.lineUserId && !email) return false;
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return false;
+        // 男性は紹介者必須
+        if (gender === 'male' && !referrer) return false;
+        return true;
+      }
+
       // 情報系バリデーション（③「次へ」で実施）。通れば true。エラーは③に表示。
       function validateInfo() {
         $('#formError').hidden = true;
@@ -1266,9 +1389,67 @@ const grouped = groupOrder.map((g) => ({
         }
       }
 
+      // ---- #4 常連ウェルカム＋前回メニューのショートカット ----
+      // 常連判定：LINE連携プロフィールに lineUserId あり ＆ 前回メニュー id が現行 MENU に存在。
+      // 前回メニュー情報は該当 radio の data-* から引く（applyLastMenuHint と同じ DOM 由来・追加データ不要）。
+      function setupWelcomeBanner() {
+        const saved = loadStoredProfile();
+        if (!saved || !saved.lineUserId) return; // 非常連（LINE未連携）は出さない
+        let lastId = '';
+        try { lastId = localStorage.getItem(LAST_MENU_KEY) || ''; } catch (_) { return; }
+        if (!lastId) return;
+        const radio = document.querySelector('input[name="menu"][value="' + lastId + '"]');
+        if (!radio) return; // メニュー改定で消えた id 等は出さない
+        const m = {
+          id: radio.value,
+          name: radio.dataset.name || '',
+          durationMin: Number(radio.dataset.duration),
+          slotMin: Number(radio.dataset.slot),
+          price: Number(radio.dataset.price),
+          hasFirst: radio.dataset.hasfirst === '1',
+          firstLabel: radio.dataset.firsttime || '',
+        };
+        const who = state.displayName || saved.displayName || saved.name || 'お客様';
+
+        $('#welcomeLead').textContent = 'おかえりなさい、' + who + 'さん。いつもありがとうございます。';
+        $('#welcomeShortcutLabel').textContent = '前回と同じ「' + m.name + '」で予約する';
+        $('#welcomeBanner').hidden = false;
+
+        // ショートカット押下 → 確認ポップアップ（前回メニューの名称・料金・所要）
+        $('#lm-name').textContent = m.name;
+        $('#lm-price').textContent = fmtYen(m.price) + '（' + m.durationMin + '分）';
+        $('#lm-duration').textContent = m.durationMin + '分'
+          + (m.hasFirst && m.firstLabel ? '（初回は' + m.firstLabel + '・料金そのまま）' : '');
+
+        const dlg = $('#lastMenuDialog');
+        const openDlg = () => { try { dlg.showModal(); } catch (_) { dlg.setAttribute('open', ''); } };
+        $('#welcomeShortcut').addEventListener('click', openDlg);
+        $('#lastMenuClose').addEventListener('click', () => dlg.close());
+        dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // 背景クリックで閉じる
+
+        // 「このメニューで日時を選ぶ」→ 前回メニューを選択状態にして②へ。
+        // 該当 radio に change を発火すると既存のメニュー選択ハンドラ（state.menu 設定・
+        // loadAvailability・showStep('step-date')）がそのまま走るため、二重実装しない。
+        $('#lastMenuConfirm').addEventListener('click', () => {
+          dlg.close();
+          radio.checked = true;
+          radio.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      }
+
       // ---- 初期化：LINE 連携（復帰 or 端末保存からの自動連携）＋空き枠の先読み（並行）----
       applyLastMenuHint();
-      initLine();
+      // #3 フェイルセーフ：handleLineReturn が呼ばれない経路（LIFF先行成立・未設定・例外）でも
+      // 復帰ローディングが残らないよう、初期化完了で必ず解除する。
+      // #4 常連ウェルカムは initLine 完了後に判定（displayName が state に反映済みになる）。
+      // LINE 復帰直後（③到達）は①上のバナーを出さない＝そのまま③で入力を続けてもらう。
+      initLine()
+        .catch(() => {})
+        .finally(() => {
+          endLineReturnLoading();
+          // ①に居るとき（＝通常来訪）だけ出す。LINE 復帰時は step が③になっているので出ない。
+          if (state.step === 1) setupWelcomeBanner();
+        });
       prefetchAvailabilityRaw(); // ページ表示直後にバックグラウンドで素材を1回だけ取得
 
       // 入力欄フォーカス時、ソフトキーボードで下部ナビが隠れないよう VisualViewport で上へ逃がす
@@ -1289,6 +1470,21 @@ const grouped = groupOrder.map((g) => ({
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
       /* display:flex 等を指定した要素でも hidden 属性が確実に効くようにする */
       [hidden] { display: none !important; }
+
+      /* #3 LINE復帰中の全面ローディング。既定は非表示、data-line-returning のときだけ表示。 */
+      .line-return-loading { display: none; }
+      html[data-line-returning] .line-return-loading {
+        position: fixed; inset: 0; z-index: 100;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;
+        background: var(--c-bg);
+        color: var(--c-purple-dk); font-weight: 600; text-align: center; padding: 1.5rem;
+      }
+      /* 復帰中は本文（ヘッダー・各ステップ・インジケーター・下部ナビ）を一切見せない＝①メニューのちらつき防止 */
+      html[data-line-returning] .site-header,
+      html[data-line-returning] .wrap,
+      html[data-line-returning] .bottom-nav { visibility: hidden; }
+      .line-return-loading .spinner { width: 34px; height: 34px; border-width: 4px; border-color: #E0D0DC; border-top-color: var(--c-purple); }
+      .line-return-loading p { font-size: .98rem; }
       :root {
         --c-bg: #FDF2F5;
         --c-surface: #FFFFFF;
@@ -1373,7 +1569,7 @@ const grouped = groupOrder.map((g) => ({
       .hours-close {
         appearance: none; background: none; border: none; cursor: pointer;
         font-size: 1.4rem; line-height: 1; color: var(--c-muted); padding: 0;
-        min-width: 40px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px;
+        min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px;
       }
       .hours-close:hover { background: #FCF6FA; color: var(--c-purple-dk); }
       /* dialog 内の hours は上部リストと違い下余白を詰める（元の 1.5rem は上部レイアウト用） */
@@ -1449,6 +1645,43 @@ const grouped = groupOrder.map((g) => ({
         font-size: .68rem; font-weight: 600; line-height: 1;
         color: #fff; background: var(--c-purple); border-radius: 10px; padding: .18rem .5rem;
       }
+
+      /* #4 常連ウェルカムバナー（①メニューの上・常連時のみ表示） */
+      .welcome-banner {
+        background: linear-gradient(135deg, #FCF6FA 0%, #F4E6EE 100%);
+        border: 1px solid var(--c-purple-lt); border-radius: 12px;
+        padding: 1rem 1rem 1.1rem; margin-bottom: 1.25rem;
+      }
+      .welcome-lead { font-size: 1rem; color: var(--c-purple-dk); font-weight: 600; margin-bottom: .7rem; }
+      .welcome-shortcut {
+        display: flex; align-items: center; justify-content: space-between; gap: .6rem; width: 100%;
+        font-family: inherit; font-size: .95rem; text-align: left; cursor: pointer;
+        background: var(--c-purple); color: #fff; border: none; border-radius: 24px;
+        padding: .75rem 1.1rem; min-height: 48px;
+        box-shadow: 0 2px 6px rgba(139, 96, 128, .25);
+        transition: background .15s, transform .15s, box-shadow .15s;
+      }
+      .welcome-shortcut:hover { background: var(--c-purple-dk); transform: translateY(-1px); box-shadow: 0 3px 10px rgba(139, 96, 128, .32); }
+      .welcome-shortcut-label { flex: 1 1 auto; line-height: 1.5; }
+      .welcome-shortcut-arrow { flex: none; font-size: 1.1rem; transition: transform .15s; }
+      .welcome-shortcut:hover .welcome-shortcut-arrow { transform: translateX(2px); }
+
+      /* #4 前回メニュー確認ポップアップ（時刻/営業時間ダイアログの枠組みを流用） */
+      .last-menu-dialog {
+        border: 1px solid var(--c-border); border-radius: 12px;
+        padding: 0; margin: auto; max-width: 440px; width: calc(100% - 2rem);
+        color: var(--c-ink); background: var(--c-surface);
+      }
+      .last-menu-dialog::backdrop { background: rgba(44, 31, 58, .38); }
+      .last-menu-dialog-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: .8rem 1rem .4rem; font-family: var(--f-serif);
+      }
+      .last-menu-dialog-head strong { font-size: 1rem; }
+      .last-menu-dialog-body { padding: .3rem 1rem 1.1rem; }
+      .last-menu-dl { display: grid; grid-template-columns: 4em 1fr; gap: .25rem .8rem; margin: 0 0 1rem; font-size: .95rem; }
+      .last-menu-dl dt { color: var(--c-muted); white-space: nowrap; }
+      .last-menu-dl dd { margin: 0; overflow-wrap: anywhere; font-weight: 500; }
 
       .slot-status { font-size: .9rem; color: var(--c-muted); margin-bottom: .75rem; }
       .slot-status.loading {
@@ -1821,6 +2054,8 @@ const grouped = groupOrder.map((g) => ({
           transition-duration: 0.001ms !important;
           scroll-behavior: auto !important;
         }
+        /* スピナーは回転を止め、紫の弧を静的に見せる（前庭障害・動き軽減への配慮） */
+        .spinner { animation: none !important; border-top-color: var(--c-purple); }
       }
     </style>
   </body>
