@@ -42,13 +42,13 @@ var DEFAULT_HOLIDAY_CALENDAR_ID = 'ja.japanese#holiday@group.v.calendar.google.c
  *   slotMin     … カレンダー占有時間（施術＋待機）。空き枠計算とイベント長に使う。新規/常連で不変。
  */
 var MENU = {
-  'double-momi-part-oil-70': { name: '全身もみほぐし＋部位オイルケア', durationMin: 70, slotMin: 120, price: 4300 },
-  'double-momi-full-oil-90': { name: '全身もみほぐし＋全身オイルケア', durationMin: 90, slotMin: 150, price: 5500 },
-  'simple-momi-30': { name: '全身もみほぐし 30分', durationMin: 30, slotMin: 60, price: 3300, firstTime: { durationMin: 40, price: 3300 } },
-  'simple-momi-50': { name: '全身もみほぐし 50分', durationMin: 50, slotMin: 120, price: 4000, firstTime: { durationMin: 60, price: 4000 } },
-  'simple-momi-70': { name: '全身もみほぐし 70分', durationMin: 70, slotMin: 120, price: 4400 },
-  'simple-momi-100': { name: '全身もみほぐし 100分', durationMin: 100, slotMin: 150, price: 5500 },
-  'simple-oil-80': { name: '全身オイルケア', durationMin: 80, slotMin: 150, price: 6600 },
+  'double-momi-part-oil-70': { name: '全身もみほぐし＋部位オイルケア', durationMin: 70, slotMin: 150, price: 4300 },
+  'double-momi-full-oil-90': { name: '全身もみほぐし＋全身オイルケア', durationMin: 90, slotMin: 180, price: 5500 },
+  'simple-momi-30': { name: '全身もみほぐし 30分', durationMin: 30, slotMin: 90, price: 3300, firstTime: { durationMin: 40, price: 3300 } },
+  'simple-momi-50': { name: '全身もみほぐし 50分', durationMin: 50, slotMin: 150, price: 4000, firstTime: { durationMin: 60, price: 4000 } },
+  'simple-momi-70': { name: '全身もみほぐし 70分', durationMin: 70, slotMin: 150, price: 4400 },
+  'simple-momi-100': { name: '全身もみほぐし 100分', durationMin: 100, slotMin: 180, price: 5500 },
+  'simple-oil-80': { name: '全身オイルケア', durationMin: 80, slotMin: 180, price: 6600 },
   'petit-foot-30': { name: 'フットケア', durationMin: 30, slotMin: 60, price: 3300 },
   'petit-hand-30': { name: 'ハンドケア', durationMin: 30, slotMin: 60, price: 3300 },
   'petit-head-30': { name: 'ヘッド&リフトアップ（顎ほぐし）', durationMin: 30, slotMin: 60, price: 3500 },
