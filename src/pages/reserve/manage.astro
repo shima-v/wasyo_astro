@@ -270,10 +270,13 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
             const heatCls = ' ' + cls;
             html += `<button type="button" class="cal-cell cal-day avail${heatCls}${active}${dowCls}" data-date="${ymd}" title="空き ${cnt} 枠">${day}<span class="heat-mark" aria-hidden="true">${mark}</span></button>`;
           } else {
-            html += `<span class="cal-cell cal-day disabled${dowCls}">${day}</span>`;
+            // 非 avail（休業・受付外・満）は index と揃えて ✕ を出す（凡例「✕ お休み」と整合）
+            html += `<span class="cal-cell cal-day disabled${dowCls}">${day}<span class="cal-x" aria-hidden="true">✕</span></span>`;
           }
         }
         html += '</div>';
+        // 凡例（index と同一）: ◎ 空きが多い / ○ 残りわずか / ✕ お休み
+        html += '<p class="cal-legend"><span>◎ 空きが多い</span><span>○ 残りわずか</span><span>✕ お休み</span></p>';
         dl.innerHTML = html;
         const prev = $('#calPrev'), next = $('#calNext');
         if (prev) prev.onclick = () => { calMonth = stepMonth(calMonth, -1); renderCalendar(); };
