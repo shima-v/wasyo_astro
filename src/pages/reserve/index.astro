@@ -77,9 +77,12 @@ const grouped = groupOrder.map((g) => ({
       <!-- STEP 1: メニュー -->
       <section class="step" id="step-menu">
         <h2 tabindex="-1"><span class="step-no">1</span> メニューを選ぶ</h2>
-        {grouped.map((g) => (
-          <div class="menu-group">
-            <h3>{g.group.label}{g.group.desc ? <small>{g.group.desc}</small> : null}</h3>
+        {grouped.map((g, i) => (
+          <details class="menu-group" open={i === 0}>
+            <summary class="menu-group-head">
+              <span class="menu-group-title">{g.group.label}{g.group.desc ? <small>{g.group.desc}</small> : null}</span>
+              <span class="caret" aria-hidden="true">▶</span>
+            </summary>
             <div class="menu-list">
               {g.items.map((m) => (
                 <label class="menu-item">
@@ -105,7 +108,7 @@ const grouped = groupOrder.map((g) => ({
                 </label>
               ))}
             </div>
-          </div>
+          </details>
         ))}
         <!-- 下部ナビ：メニューは最初のステップなので戻るは無し。次へはメニュー未選択時 disabled -->
         <div class="step-nav">
@@ -1251,7 +1254,7 @@ const grouped = groupOrder.map((g) => ({
       }
       .hours-dialog {
         border: 1px solid var(--c-border); border-radius: 12px;
-        padding: 0; max-width: 440px; width: calc(100% - 2rem);
+        padding: 0; margin: auto; max-width: 440px; width: calc(100% - 2rem);
         color: var(--c-ink); background: var(--c-surface);
       }
       .hours-dialog::backdrop { background: rgba(44, 31, 58, .38); }
@@ -1286,9 +1289,20 @@ const grouped = groupOrder.map((g) => ({
         background: var(--c-purple); color: #fff; font-size: .9rem; flex: none;
       }
 
-      .menu-group { margin-bottom: .7rem; }
-      .menu-group h3 { font-size: .95rem; color: var(--c-purple-dk); margin-bottom: .5rem; }
-      .menu-group h3 small { font-weight: normal; color: var(--c-muted); font-size: .8rem; margin-left: .5rem; }
+      /* コース別アコーディオン（<details>）: 初期は先頭コースのみ open */
+      .menu-group { margin-bottom: .5rem; border: 1px solid var(--c-border); border-radius: 10px; overflow: hidden; background: var(--c-surface); }
+      .menu-group-head {
+        display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+        min-height: 44px; padding: .5rem .8rem; cursor: pointer; list-style: none;
+        font-size: .95rem; color: var(--c-purple-dk); font-weight: 600;
+      }
+      .menu-group-head::-webkit-details-marker { display: none; }
+      .menu-group-head:hover { background: #FCF6FA; }
+      .menu-group-title small { font-weight: normal; color: var(--c-muted); font-size: .8rem; margin-left: .5rem; }
+      .menu-group[open] .menu-group-head { border-bottom: 1px solid var(--c-border); }
+      .menu-group .caret { flex: none; color: var(--c-purple-lt); font-size: .8rem; transition: transform .15s; }
+      .menu-group[open] .caret { transform: rotate(90deg); }
+      .menu-group .menu-list { padding: .55rem .7rem .7rem; }
       .menu-list { display: grid; gap: .4rem; }
       .menu-item {
         display: flex; gap: .65rem; align-items: flex-start;
