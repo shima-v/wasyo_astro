@@ -11,6 +11,9 @@ import {
   LIFF_ID,
 } from '../../data/config.js';
 import EnvBadge from '../../components/EnvBadge.astro';
+import SubmitOverlay from '../../components/SubmitOverlay.astro';
+import TimeDialog from '../../components/TimeDialog.astro';
+import '../../styles/reserve-calendar.css';
 
 const _base = import.meta.env.BASE_URL;
 const base = _base.endsWith('/') ? _base : _base + '/';
@@ -59,14 +62,8 @@ const grouped = groupOrder.map((g) => ({
       <span class="spinner" aria-hidden="true"></span>
       <p>LINE連携を確認しています…</p>
     </div>
-    <!-- 予約送信中の全面オーバーレイ（⑤で送信ボタン押下〜応答まで）。二重送信防止＋送信中の強調。 -->
-    <div id="submitOverlay" class="submit-overlay" role="alert" aria-live="assertive" hidden>
-      <div class="submit-overlay-card">
-        <span class="spinner" aria-hidden="true"></span>
-        <p>ご予約を送信しています…</p>
-        <small>画面をそのままでお待ちください</small>
-      </div>
-    </div>
+    <!-- 予約送信中の全面オーバーレイ（⑤で送信ボタン押下〜応答まで）。二重送信防止＋送信中の強調。共有部品 SubmitOverlay -->
+    <SubmitOverlay />
     <header class="site-header">
       <a class="home-link" href={base}>‹ {salonName}</a>
       <span class="head-title">オンラインご予約</span>
@@ -101,14 +98,8 @@ const grouped = groupOrder.map((g) => ({
         </ul>
       </dialog>
 
-      <!-- 時刻選択ポップアップ（ネイティブ dialog）。②で日付をタップすると開く。 -->
-      <dialog id="timeDialog" class="time-dialog" aria-label="開始時刻を選ぶ">
-        <div class="time-dialog-head">
-          <strong id="timeDialogTitle">開始時刻</strong>
-          <button type="button" class="hours-close" id="timeDialogClose" aria-label="閉じる">×</button>
-        </div>
-        <div id="timeDialogBody" class="time-list time-dialog-body"></div>
-      </dialog>
+      <!-- 時刻選択ポップアップ（ネイティブ dialog）。②で日付をタップすると開く。共有部品 TimeDialog -->
+      <TimeDialog />
 
       <!-- 前回メニューの確認ポップアップ（#4・時刻/営業時間ダイアログの作法を流用） -->
       <dialog id="lastMenuDialog" class="last-menu-dialog" aria-label="前回のメニューで予約">
@@ -387,7 +378,16 @@ const grouped = groupOrder.map((g) => ({
       <p class="small"><a href={`${base}privacy/`}>プライバシーポリシー</a></p>
     </footer>
 
-    <script define:vars={{ RESERVE_API, BOOKING_RULES, LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_REDIRECT, LIFF_ID, tel }}>
+    <script type="application/json" id="reserve-config" set:html={JSON.stringify({ RESERVE_API, BOOKING_RULES, LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_REDIRECT, LIFF_ID, tel })}></script>
+    <script>
+      // 共有部品（src/lib）を import するため bundled module 化。サーバ値は上の JSON から読む。
+      // define:vars は import 不可（inline classic 化する）ため使わない。
+      import { showSubmitOverlay, hideSubmitOverlay } from '../../lib/submit-overlay.js';
+      import { heatMark } from '../../lib/heatmap.js';
+      import { openTimeDialog as openTimeDlg, renderTimeButtons } from '../../lib/time-dialog.js';
+
+      const { RESERVE_API, BOOKING_RULES, LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_REDIRECT, LIFF_ID, tel } = JSON.parse(document.getElementById('reserve-config').textContent);
+
       const WD = ['日', '月', '火', '水', '木', '金', '土'];
       // 項目3: カレンダーの空き枠ヒートマップ閾値。枠数 >= HEAT_HI_MIN を「空き多い（◎）」、
       // 1〜(HEAT_HI_MIN-1) を「残りわずか（○）」、0（非 avail）は現行のグレー（✕相当）。
@@ -1066,9 +1066,9 @@ const grouped = groupOrder.map((g) => ({
             const active = state.date === ymd ? ' active' : '';
             // 空き枠数で濃淡＋記号を出し分け（◎=空き多い / ○=残りわずか）
             const cnt = countByDate.get(ymd) || 0;
-            const hi = cnt >= HEAT_HI_MIN;
-            const heatCls = hi ? ' heat-hi' : ' heat-mid';
-            const mark = hi ? '◎' : '○';
+            // 共有ロジック heatMark で ◎/○ と heat-hi/heat-mid を得る（HEAT_HI_MIN は引数で渡す）
+            const { mark, cls } = heatMark(cnt, { hiMin: HEAT_HI_MIN });
+            const heatCls = ' ' + cls;
             html += `<button type="button" class="cal-cell cal-day avail${heatCls}${active}${dowCls}" data-date="${ymd}" title="空き ${cnt} 枠">${day}<span class="heat-mark" aria-hidden="true">${mark}</span></button>`;
           } else {
             const hol = state.holidays[ymd];
@@ -1099,39 +1099,22 @@ const grouped = groupOrder.map((g) => ({
         });
       }
 
-      // 選択中の日付の空き時刻を、時刻選択ポップアップ（dialog）の本体に描画する。
+      // 選択中の日付の空き時刻を、共有の renderTimeButtons でポップアップ本体に描画する。
       function renderTimes() {
-        const body = $('#timeDialogBody');
-        const title = $('#timeDialogTitle');
-        if (!body) return;
         const day = state.days.find((d) => d.date === state.date);
-        if (!day) { body.innerHTML = ''; return; }
-        if (title) title.textContent = fmtDateLabel(state.date) + ' の開始時刻';
-        body.innerHTML = day.times
-          .map((t) => `<button type="button" class="time-btn${state.time === t ? ' active' : ''}" data-time="${t}">${t}</button>`)
-          .join('');
-        body.querySelectorAll('.time-btn').forEach((b) => {
-          b.addEventListener('click', () => {
-            state.time = b.dataset.time;
-            body.querySelectorAll('.time-btn').forEach((x) => x.classList.toggle('active', x === b));
-            closeTimeDialog();
-            // 時刻選択で自動前進（③へ）。maxReached=3 は showStep が更新
-            updateSummary();
-            showStep('step-form');
-          });
-        });
+        if (!day) { const body = $('#timeDialogBody'); if (body) body.innerHTML = ''; return; }
+        renderTimeButtons(day.times, (t) => {
+          state.time = t;
+          // 時刻選択で自動前進（③へ）。maxReached=3 は showStep が更新
+          updateSummary();
+          showStep('step-form');
+        }, { title: fmtDateLabel(state.date) + ' の開始時刻', selected: state.time });
       }
 
-      // 時刻選択ポップアップを開く（本体を描いてから showModal）。
+      // 時刻選択ポップアップを開く（本体を描いてから共有 openTimeDlg で showModal）。
       function openTimeDialog() {
         renderTimes();
-        const dlg = $('#timeDialog');
-        if (!dlg) return;
-        try { dlg.showModal(); } catch (_) { dlg.setAttribute('open', ''); }
-      }
-      function closeTimeDialog() {
-        const dlg = $('#timeDialog');
-        if (dlg && dlg.open) dlg.close();
+        openTimeDlg();
       }
 
       // ---- フォーム挙動 ----
@@ -1280,7 +1263,7 @@ const grouped = groupOrder.map((g) => ({
         const nextBtns = Array.from(document.querySelectorAll('[data-nav="next"]'));
         const setNext = (label, disabled) => nextBtns.forEach((b) => { b.textContent = label; b.disabled = disabled; });
         setNext('送信中…', true);
-        $('#submitOverlay').hidden = false; // 送信中の全面オーバーレイを表示（強調＋二重送信防止）
+        showSubmitOverlay(); // 送信中の全面オーバーレイを表示（強調＋二重送信防止）
 
         const payload = {
           action: 'createBooking',
@@ -1300,7 +1283,7 @@ const grouped = groupOrder.map((g) => ({
           });
           const data = await res.json();
           if (!data.ok) {
-            $('#submitOverlay').hidden = true;
+            hideSubmitOverlay();
             setNext('この内容で仮予約する', false);
             return showConfirmError(errorMessage(data.error));
           }
@@ -1311,11 +1294,11 @@ const grouped = groupOrder.map((g) => ({
           // 前回選んだメニューを端末に保存（LINE 連携有無を問わず全員・LS_KEY とは別キー）。
           // 次回の来訪時に「前回選択」バッジ＋そのコース展開の目印として使う（自動選択はしない）。
           try { localStorage.setItem(LAST_MENU_KEY, state.menu.id); } catch (_) {}
-          $('#submitOverlay').hidden = true; // 完了画面へ遷移する前にオーバーレイを閉じる
+          hideSubmitOverlay(); // 完了画面へ遷移する前にオーバーレイを閉じる
           renderDone(data);
           liffAfterBooking(data); // LIFF時のみ：トーク送信／友だち追加案内／シェア
         } catch (e) {
-          $('#submitOverlay').hidden = true;
+          hideSubmitOverlay();
           setNext('この内容で仮予約する', false);
           showConfirmError('送信に失敗しました。通信環境をご確認のうえ、再度お試しください。');
         }
@@ -1365,15 +1348,7 @@ const grouped = groupOrder.map((g) => ({
         dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
       })();
 
-      // ---- 時刻選択ポップアップの閉じる配線（開くのは日付タップ時の openTimeDialog）----
-      (function bindTimeDialog() {
-        const dlg = $('#timeDialog');
-        const closeBtn = $('#timeDialogClose');
-        if (!dlg) return;
-        if (closeBtn) closeBtn.addEventListener('click', () => dlg.close());
-        // 背景クリックで閉じる（時刻未選択なら②に留まる）。Esc は dialog 既定。
-        dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
-      })();
+      // 時刻選択ポップアップの閉じる配線（×ボタン・背景クリック）は TimeDialog コンポーネントが self-wire する。
 
       // ---- 前回選んだメニューの目印（LocalStorage・全員）----
       // 端末に保存された前回メニュー id を読み、該当ラベルに「前回選択」バッジを付け、
@@ -1496,20 +1471,7 @@ const grouped = groupOrder.map((g) => ({
       html[data-line-returning] .bottom-nav { visibility: hidden; }
       .line-return-loading .spinner { width: 34px; height: 34px; border-width: 4px; border-color: #E0D0DC; border-top-color: var(--c-purple); }
 
-      /* 予約送信中の全面オーバーレイ（暗幕＋中央カード）。hidden 属性で消える（[hidden] が !important）。 */
-      .submit-overlay {
-        position: fixed; inset: 0; z-index: 120;
-        display: flex; align-items: center; justify-content: center; padding: 1.5rem;
-        background: rgba(44, 31, 58, .45);
-      }
-      .submit-overlay-card {
-        background: var(--c-surface); border-radius: 14px; padding: 1.6rem 1.8rem;
-        display: flex; flex-direction: column; align-items: center; gap: .85rem; text-align: center;
-        color: var(--c-purple-dk); box-shadow: 0 10px 34px rgba(44, 31, 58, .28); max-width: 320px;
-      }
-      .submit-overlay-card p { font-size: 1.02rem; font-weight: 700; }
-      .submit-overlay-card small { font-size: .82rem; color: var(--c-muted); font-weight: 400; }
-      .submit-overlay-card .spinner { width: 38px; height: 38px; border-width: 4px; border-color: #E0D0DC; border-top-color: var(--c-purple); }
+      /* 予約送信中の全面オーバーレイの CSS は共有部品 SubmitOverlay.astro へ移設 */
       .line-return-loading p { font-size: .98rem; }
       :root {
         --c-bg: #FDF2F5;
@@ -1592,28 +1554,11 @@ const grouped = groupOrder.map((g) => ({
         padding: .8rem 1rem .4rem; font-family: var(--f-serif);
       }
       .hours-dialog-head strong { font-size: 1rem; }
-      .hours-close {
-        appearance: none; background: none; border: none; cursor: pointer;
-        font-size: 1.4rem; line-height: 1; color: var(--c-muted); padding: 0;
-        min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px;
-      }
-      .hours-close:hover { background: #FCF6FA; color: var(--c-purple-dk); }
+      /* .hours-close（ダイアログ右上の閉じる）の CSS は共有部品 TimeDialog.astro へ移設 */
       /* dialog 内の hours は上部リストと違い下余白を詰める（元の 1.5rem は上部レイアウト用） */
       .hours-dialog .hours { border: none; margin: 0; padding: .3rem 1rem 1rem; }
 
-      /* 時刻選択ポップアップ（日付タップで開く）。営業時間 dialog と同じ枠組み */
-      .time-dialog {
-        border: 1px solid var(--c-border); border-radius: 12px;
-        padding: 0; margin: auto; max-width: 440px; width: calc(100% - 2rem);
-        color: var(--c-ink); background: var(--c-surface);
-      }
-      .time-dialog::backdrop { background: rgba(44, 31, 58, .38); }
-      .time-dialog-head {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: .8rem 1rem .4rem; font-family: var(--f-serif);
-      }
-      .time-dialog-head strong { font-size: 1rem; }
-      .time-dialog-body { padding: .3rem 1rem 1rem; max-height: 60vh; overflow-y: auto; }
+      /* 時刻選択ポップアップ（.time-dialog*）の CSS は共有部品 TimeDialog.astro へ移設 */
 
       .step {
         background: var(--c-surface);
@@ -1723,77 +1668,8 @@ const grouped = groupOrder.map((g) => ({
         border-radius: 50%; animation: spin .8s linear infinite;
       }
       @keyframes spin { to { transform: rotate(360deg); } }
-      .cal-skeleton {
-        height: 280px; border-radius: 10px;
-        background: linear-gradient(100deg, #f3ecf2 30%, #fbf6fa 50%, #f3ecf2 70%);
-        background-size: 200% 100%; animation: shimmer 1.2s linear infinite;
-      }
-      @keyframes shimmer { to { background-position: -200% 0; } }
-
-      /* カレンダー（日付選択） */
-      .date-list { margin-bottom: 1rem; }
-      .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .6rem; }
-      .cal-title { font-weight: 600; font-size: 1rem; }
-      .cal-nav {
-        font-family: inherit; font-size: 1.25rem; line-height: 1; color: var(--c-purple-dk);
-        width: 42px; height: 42px; border: 1px solid var(--c-border); background: #fff;
-        border-radius: 10px; cursor: pointer;
-      }
-      .cal-nav:hover:not(:disabled) { border-color: var(--c-purple-lt); }
-      .cal-nav:disabled { opacity: .3; cursor: default; }
-      .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: .3rem; }
-      .cal-wd { text-align: center; font-size: .78rem; color: var(--c-muted); padding: .15rem 0; }
-      .cal-wd.sun { color: #B23A48; }
-      .cal-wd.sat { color: #3F6FB0; }
-      .cal-cell {
-        aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center;
-        font-size: .92rem; font-family: inherit;
-      }
-      .cal-cell.empty { border: 0; }
-      .cal-day { border-radius: 9px; }
-      .cal-day.disabled { color: #CDBFCC; }
-      .cal-day.disabled.sun { color: #e0b3ba; }
-      .cal-day.disabled.sat { color: #b6c4dc; }
-      /* 祝日（休業）: 日付の下に祝日名を小さく表示。色は日曜と同系の赤で休業を示す */
-      .cal-day.disabled.holiday {
-        flex-direction: column; gap: 0; line-height: 1.05;
-        color: #B23A48; overflow: hidden;
-      }
-      .cal-day.disabled.holiday .hol-name {
-        display: block; max-width: 100%;
-        font-size: .5rem; color: #B23A48;
-        white-space: normal; word-break: break-all; text-align: center;
-      }
-      .cal-day.avail {
-        position: relative; flex-direction: column; gap: 2px;
-        border: 1px solid var(--c-border); background: #fff; color: var(--c-ink); cursor: pointer;
-        transition: border-color .15s, background .15s;
-      }
-      .cal-day.avail.sun { color: #B23A48; }
-      .cal-day.avail.sat { color: #3F6FB0; }
-      .cal-day.avail:hover { border-color: var(--c-purple-lt); background: #FCF6FA; }
-      .cal-day.avail.active { background: var(--c-purple); color: #fff; border-color: var(--c-purple); }
-      .cal-day .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--c-accent); }
-      .cal-day.avail.active .dot { background: #fff; }
-      /* 項目3: 空き枠ヒートマップ（◎空き多い＝濃い / ○残りわずか＝薄い / ✕お休み） */
-      .cal-day.avail.heat-hi { background: #F3DEEC; }
-      .cal-day.avail.heat-mid { background: #FDF7FB; }
-      .heat-mark { font-size: .62rem; line-height: 1; color: var(--c-purple-lt); }
-      .cal-day.avail.heat-hi .heat-mark { color: var(--c-purple); }
-      .cal-day.avail.active { background: var(--c-purple); color: #fff; border-color: var(--c-purple); }
-      .cal-day.avail.active .heat-mark { color: #fff; }
-      .cal-x { font-size: .6rem; line-height: 1; color: #CDBFCC; }
-      .cal-legend { margin: .5rem 0 0; font-size: .72rem; color: var(--c-muted); display: flex; gap: .9rem; justify-content: center; flex-wrap: wrap; }
-
-      .time-btn {
-        font-family: inherit; font-size: .9rem; cursor: pointer;
-        border: 1px solid var(--c-border); background: #fff; color: var(--c-ink);
-        border-radius: 8px; padding: .45rem .7rem; min-height: 40px;
-      }
-      .time-btn:hover { border-color: var(--c-purple-lt); }
-      .time-btn.active { background: var(--c-purple); color: #fff; border-color: var(--c-purple); }
-      .time-list { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; }
-      .time-label { width: 100%; font-size: .85rem; color: var(--c-muted); margin-bottom: .15rem; }
+      /* カレンダー・時刻ボタン・空き枠ヒートマップ・スケルトンの CSS は
+         共有スタイル src/styles/reserve-calendar.css へ移設（frontmatter で import 済み）。 */
 
       .field { margin-bottom: 1rem; }
       .field > label, .field-label { display: block; font-size: .9rem; margin-bottom: .35rem; font-weight: 600; }

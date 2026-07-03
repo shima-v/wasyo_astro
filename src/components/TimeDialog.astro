@@ -1,0 +1,49 @@
+---
+// 開始時刻を選ぶポップアップ（ネイティブ <dialog>）の器コンポーネント。
+// 中身の描画・開閉ロジックは src/lib/time-dialog.js
+// （openTimeDialog / closeTimeDialog / renderTimeButtons）。
+// index（メニュー→日時）と manage（日時変更）で共有する。
+// 閉じる配線（×ボタン・背景クリック）は本コンポーネントが self-wire する（Esc は dialog 既定）。
+---
+<dialog id="timeDialog" class="time-dialog" aria-label="開始時刻を選ぶ">
+  <div class="time-dialog-head">
+    <strong id="timeDialogTitle">開始時刻</strong>
+    <button type="button" class="hours-close" id="timeDialogClose" aria-label="閉じる">×</button>
+  </div>
+  <div id="timeDialogBody" class="time-list time-dialog-body"></div>
+</dialog>
+
+<script>
+  import { closeTimeDialog } from '../lib/time-dialog.js';
+  const dlg = document.getElementById('timeDialog');
+  const closeBtn = document.getElementById('timeDialogClose');
+  if (dlg) {
+    if (closeBtn) closeBtn.addEventListener('click', () => closeTimeDialog());
+    // 背景（::backdrop）クリックで閉じる。Esc は dialog 既定で閉じる。
+    dlg.addEventListener('click', (e) => { if (e.target === dlg) closeTimeDialog(); });
+  }
+</script>
+
+<style is:global>
+  /* 時刻選択ポップアップ（日付タップで開く）。営業時間 dialog と同じ枠組み */
+  .time-dialog {
+    border: 1px solid var(--c-border); border-radius: 12px;
+    padding: 0; margin: auto; max-width: 440px; width: calc(100% - 2rem);
+    color: var(--c-ink); background: var(--c-surface);
+  }
+  .time-dialog::backdrop { background: rgba(44, 31, 58, .38); }
+  .time-dialog-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: .8rem 1rem .4rem; font-family: var(--f-serif);
+  }
+  .time-dialog-head strong { font-size: 1rem; }
+  .time-dialog-body { padding: .3rem 1rem 1rem; max-height: 60vh; overflow-y: auto; }
+
+  /* ダイアログ右上の閉じるボタン（営業時間ダイアログと共用のクラス） */
+  .hours-close {
+    appearance: none; background: none; border: none; cursor: pointer;
+    font-size: 1.4rem; line-height: 1; color: var(--c-muted); padding: 0;
+    min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px;
+  }
+  .hours-close:hover { background: #FCF6FA; color: var(--c-purple-dk); }
+</style>
