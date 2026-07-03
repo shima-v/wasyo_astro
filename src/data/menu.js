@@ -60,7 +60,7 @@ export const MENU = [
     durationMin: 30,
     slotMin: 90,
     price: 3300,
-    firstTime: { durationMin: 40, price: 3300, label: '初回40分' },
+    firstTime: { durationMin: 40, price: 3300, label: '40分' },
   },
   {
     id: 'simple-momi-50',
@@ -69,7 +69,7 @@ export const MENU = [
     durationMin: 50,
     slotMin: 150,
     price: 4000,
-    firstTime: { durationMin: 60, price: 4000, label: '初回60分' },
+    firstTime: { durationMin: 60, price: 4000, label: '60分' },
   },
   {
     id: 'simple-momi-70',

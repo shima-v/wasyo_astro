@@ -864,7 +864,6 @@ const grouped = groupOrder.map((g) => ({
         calMonth = null;
         state.date = null;
         state.time = null;
-        $('#timeList').innerHTML = '';
         if (!RESERVE_API) {
           setStatusText('予約システムが未設定です（PUBLIC_RESERVE_API）。', 'slot-empty');
           $('#dateList').innerHTML = '';
@@ -897,7 +896,6 @@ const grouped = groupOrder.map((g) => ({
         if (!state.days.length) {
           setStatusText('ご希望の期間にネット予約の空きがありません。受付時間外・定休日（日・祝など）はネット予約は受け付けておりません。お電話（' + tel + '）にて対応いたします。', 'slot-empty');
           dl.innerHTML = '';
-          $('#timeList').innerHTML = '';
           return;
         }
         setStatusText('ご希望の日付を選んでください（● 印が空きありの日）。');
