@@ -1,6 +1,7 @@
 ---
 import { RESERVE_API, ENV_LABEL } from '../../data/config.js';
 import EnvBadge from '../../components/EnvBadge.astro';
+import SubmitOverlay from '../../components/SubmitOverlay.astro';
 
 const _base = import.meta.env.BASE_URL;
 const base = _base.endsWith('/') ? _base : _base + '/';
@@ -20,6 +21,8 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
   </head>
   <body>
     <EnvBadge />
+    <!-- 送信中の全面オーバーレイ（管理操作の送信中・二重送信防止）。共有部品 SubmitOverlay -->
+    <SubmitOverlay message="送信しています…" subtext="画面をそのままでお待ちください" />
     <header class="site-header">
       <a class="home-link" href={base}>‹ {salonName}</a>
       <span class="head-title">予約管理</span>
@@ -173,7 +176,13 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
 
     <div id="toast"></div>
 
-    <script define:vars={{ RESERVE_API }}>
+    <script type="application/json" id="reserve-config" set:html={JSON.stringify({ RESERVE_API })}></script>
+    <script>
+      // 共有部品（送信オーバーレイ）を import するため bundled module 化。サーバ値は JSON から読む。
+      import { runExclusive } from '../../lib/submit-overlay.js';
+
+      const { RESERVE_API } = JSON.parse(document.getElementById('reserve-config').textContent);
+
       const $ = (s) => document.querySelector(s);
       const el = (id) => document.getElementById(id);
       const TOKEN_KEY = 'wasyoAdminToken';
@@ -196,14 +205,21 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       }
 
       // 管理 API は全て POST（text/plain で CORS プリフライト回避）。adminToken を毎回添付。
-      async function apiPost(action, extra) {
-        const payload = Object.assign({ action, adminToken: getToken() }, extra || {});
-        const res = await fetch(RESERVE_API, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify(payload),
-        });
-        return res.json();
+      // 既定では送信中の全面オーバーレイ＋二重送信ガード（共有 runExclusive）を通す。
+      // 一覧・設定の自動読み込み（listPending / getQuota / getSlotConfig）は opts.silent で素通し。
+      // ＝この1関数への組み込みで、7つの送信操作すべてに一律で効く。
+      async function apiPost(action, extra, opts = {}) {
+        const send = async () => {
+          const payload = Object.assign({ action, adminToken: getToken() }, extra || {});
+          const res = await fetch(RESERVE_API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload),
+          });
+          return res.json();
+        };
+        if (opts.silent) return send();
+        return runExclusive(send, { message: '送信しています…' });
       }
 
       // ---- 認証ゲートの出し入れ ----
@@ -262,7 +278,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
           '<div class="status loading"><span class="spinner" aria-hidden="true"></span><span>読み込んでいます…</span></div>';
         let res;
         try {
-          res = await apiPost('listPending');
+          res = await apiPost('listPending', null, { silent: true });
         } catch (_) {
           el('pendingArea').innerHTML = '<div class="empty">通信に失敗しました。時間をおいて再度お試しください。</div>';
           return;
@@ -342,7 +358,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
           '<div class="status loading"><span class="spinner" aria-hidden="true"></span><span>読み込んでいます…</span></div>';
         let res;
         try {
-          res = await apiPost('getQuota');
+          res = await apiPost('getQuota', null, { silent: true });
         } catch (_) {
           el('quotaArea').innerHTML = '<div class="empty">取得に失敗しました。時間をおいて再度お試しください。</div>';
           return;
@@ -526,7 +542,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       async function loadConfig() {
         let res;
         try {
-          res = await apiPost('getSlotConfig');
+          res = await apiPost('getSlotConfig', null, { silent: true });
         } catch (_) { renderConfig(); return; }
         if (res && res.error === 'forbidden') { handleForbidden(); return; }
         if (res && res.ok && res.config) {
