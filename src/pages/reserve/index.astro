@@ -59,6 +59,14 @@ const grouped = groupOrder.map((g) => ({
       <span class="spinner" aria-hidden="true"></span>
       <p>LINE連携を確認しています…</p>
     </div>
+    <!-- 予約送信中の全面オーバーレイ（⑤で送信ボタン押下〜応答まで）。二重送信防止＋送信中の強調。 -->
+    <div id="submitOverlay" class="submit-overlay" role="alert" aria-live="assertive" hidden>
+      <div class="submit-overlay-card">
+        <span class="spinner" aria-hidden="true"></span>
+        <p>ご予約を送信しています…</p>
+        <small>画面をそのままでお待ちください</small>
+      </div>
+    </div>
     <header class="site-header">
       <a class="home-link" href={base}>‹ {salonName}</a>
       <span class="head-title">オンラインご予約</span>
@@ -1272,6 +1280,7 @@ const grouped = groupOrder.map((g) => ({
         const nextBtns = Array.from(document.querySelectorAll('[data-nav="next"]'));
         const setNext = (label, disabled) => nextBtns.forEach((b) => { b.textContent = label; b.disabled = disabled; });
         setNext('送信中…', true);
+        $('#submitOverlay').hidden = false; // 送信中の全面オーバーレイを表示（強調＋二重送信防止）
 
         const payload = {
           action: 'createBooking',
@@ -1291,6 +1300,7 @@ const grouped = groupOrder.map((g) => ({
           });
           const data = await res.json();
           if (!data.ok) {
+            $('#submitOverlay').hidden = true;
             setNext('この内容で仮予約する', false);
             return showConfirmError(errorMessage(data.error));
           }
@@ -1301,9 +1311,11 @@ const grouped = groupOrder.map((g) => ({
           // 前回選んだメニューを端末に保存（LINE 連携有無を問わず全員・LS_KEY とは別キー）。
           // 次回の来訪時に「前回選択」バッジ＋そのコース展開の目印として使う（自動選択はしない）。
           try { localStorage.setItem(LAST_MENU_KEY, state.menu.id); } catch (_) {}
+          $('#submitOverlay').hidden = true; // 完了画面へ遷移する前にオーバーレイを閉じる
           renderDone(data);
           liffAfterBooking(data); // LIFF時のみ：トーク送信／友だち追加案内／シェア
         } catch (e) {
+          $('#submitOverlay').hidden = true;
           setNext('この内容で仮予約する', false);
           showConfirmError('送信に失敗しました。通信環境をご確認のうえ、再度お試しください。');
         }
@@ -1483,6 +1495,21 @@ const grouped = groupOrder.map((g) => ({
       html[data-line-returning] .wrap,
       html[data-line-returning] .bottom-nav { visibility: hidden; }
       .line-return-loading .spinner { width: 34px; height: 34px; border-width: 4px; border-color: #E0D0DC; border-top-color: var(--c-purple); }
+
+      /* 予約送信中の全面オーバーレイ（暗幕＋中央カード）。hidden 属性で消える（[hidden] が !important）。 */
+      .submit-overlay {
+        position: fixed; inset: 0; z-index: 120;
+        display: flex; align-items: center; justify-content: center; padding: 1.5rem;
+        background: rgba(44, 31, 58, .45);
+      }
+      .submit-overlay-card {
+        background: var(--c-surface); border-radius: 14px; padding: 1.6rem 1.8rem;
+        display: flex; flex-direction: column; align-items: center; gap: .85rem; text-align: center;
+        color: var(--c-purple-dk); box-shadow: 0 10px 34px rgba(44, 31, 58, .28); max-width: 320px;
+      }
+      .submit-overlay-card p { font-size: 1.02rem; font-weight: 700; }
+      .submit-overlay-card small { font-size: .82rem; color: var(--c-muted); font-weight: 400; }
+      .submit-overlay-card .spinner { width: 38px; height: 38px; border-width: 4px; border-color: #E0D0DC; border-top-color: var(--c-purple); }
       .line-return-loading p { font-size: .98rem; }
       :root {
         --c-bg: #FDF2F5;
