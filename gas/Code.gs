@@ -183,6 +183,8 @@ function doPost(e) {
       case 'broadcastTest': return json_(requireAdminToken_(body, function () { return adminBroadcastTest_(body); }));
       case 'setTempSchedule': return json_(requireAdminToken_(body, function () { return adminSetTempSchedule_(body); }));
       case 'ownerChannelTest': return json_(requireAdminToken_(body, adminOwnerChannelTest_));
+      // デプロイ通知（deploy.yml / gas/deploy.sh から叩く）。DEPLOY_NOTIFY_TOKEN で保護（管理トークンとは別系統）。
+      case 'deployNotify': return json_(requireDeployToken_(body, function () { return notifyDeploy_(body); }));
       default: return json_({ ok: false, error: 'unknown_action' });
     }
   } catch (err) {
@@ -1015,6 +1017,123 @@ function retryOwnerDiscordQueue_() {
 /** Discord 失敗で LINE へフォールバックした通知の先頭に付ける注記（二重通知の可能性を明示）。 */
 function ownerLineFallbackNote_() {
   return '⚠️Discord通知に失敗したためLINEで送信しています（復旧後にDiscordにも届く場合があります）';
+}
+
+// ==== デプロイ通知（deploy.yml / gas/deploy.sh から叩く・DEPLOY_NOTIFY_TOKEN で保護）====
+
+/**
+ * デプロイ通知エンドポイントの認可。requireAdminToken_ と同じ書き味。
+ * Script Property `DEPLOY_NOTIFY_TOKEN` と body.deployToken を照合。
+ * 未設定 or 不一致なら forbidden、一致で fn() を実行する。
+ */
+function requireDeployToken_(body, fn) {
+  var expected = prop_('DEPLOY_NOTIFY_TOKEN');
+  var given = (body && body.deployToken) || '';
+  if (!expected || given !== expected) return { ok: false, error: 'forbidden' };
+  return fn();
+}
+
+/** env（技術名）を店主向けの平易な日本語ラベルに変換する。未知の env はそのまま返す。 */
+function deployEnvLabel_(env) {
+  var map = {
+    'front-prod': '予約サイト（本番・wwwasyo.com）',
+    'gas-prod': '予約システム（本番）',
+    'gas-dev': '予約システム（テスト環境）',
+  };
+  return map[env] || env || '';
+}
+
+/**
+ * commit 件名を店主向けの平易な要約に変換する。
+ * 先頭の短縮/フルSHA（`^[0-9a-f]{7,40}\s+`）と Conventional Commits の
+ * type接頭辞（`^feat: ` `^fix(scope)!: ` 等・大文字小文字無視）を除去した要約部のみを返す。
+ */
+function plainCommitSummary_(subject) {
+  var s = String(subject || '');
+  s = s.replace(/^[0-9a-f]{7,40}\s+/i, '');       // 先頭SHA
+  s = s.replace(/^[a-z]+(\([^)]*\))?!?:\s*/i, ''); // type(scope)!: 接頭辞
+  return s.trim();
+}
+
+/**
+ * デプロイ通知本文を組み立てて送る。payload = { env, status, commits, detail }。
+ * commits は改行区切り文字列でも配列でも受けて正規化する。
+ * 本文は【概要】（店主向け・平易日本語）＋【詳細（開発者向け）】（技術情報そのまま）の2部構成。
+ * 送信は Discord（DEPLOY_DISCORD_WEBHOOK_URL・最大3回リトライ・後追いキューなし）を優先し、
+ * 全滅 or 未設定なら sendMail_ でメール（DEPLOY_MAIL_TO・既定は GAS 所有者）へフォールバックする。
+ * return { ok:true, discordSent:<bool> }。
+ */
+function notifyDeploy_(payload) {
+  payload = payload || {};
+  var env = payload.env || '';
+  var status = (payload.status === 'success') ? 'success' : 'failure';
+  var success = status === 'success';
+  var label = deployEnvLabel_(env);
+
+  // commits を「短縮SHA 件名フル」の配列に正規化（文字列は改行区切りで分割）
+  var commits = payload.commits;
+  if (typeof commits === 'string') commits = commits.split('\n');
+  if (!Array.isArray(commits)) commits = [];
+  commits = commits.map(function (c) { return String(c).trim(); }).filter(String);
+
+  var detail = String(payload.detail || '').trim();
+  var now = fmt_(new Date(), 'yyyy-MM-dd HH:mm');
+
+  // ---- 【概要】（店主向け・平易日本語）----
+  var summary;
+  if (success) {
+    summary = '✅ ' + label + 'を更新しました\n' +
+      '更新は正常に反映されています。予約の受付・通知はこれまでどおりご利用いただけます。';
+    if (commits.length) {
+      summary += '\n\n【今回の変更点】';
+      commits.forEach(function (c) {
+        var plain = plainCommitSummary_(c);
+        if (plain) summary += '\n・' + plain;
+      });
+    }
+  } else {
+    summary = '❌ ' + label + 'の更新に失敗しました\n' +
+      '直前の状態のまま動いているので、予約の受付・通知は止まっていません。\n' +
+      'お手数ですが開発担当にご確認ください。';
+  }
+
+  // ---- 【詳細（開発者向け）】（技術情報そのまま）----
+  var detailLines = [
+    'env: ' + env,
+    'status: ' + status,
+  ];
+  if (commits.length) {
+    detailLines.push('変更コミット:');
+    commits.forEach(function (c) { detailLines.push('・' + c); });
+  }
+  if (detail) detailLines.push(detail);
+  detailLines.push('時刻: ' + now + ' JST');
+  var detailBlock = detailLines.join('\n');
+
+  var text = '【概要】\n' + summary +
+    '\n\n――――――――――\n' +
+    '【詳細（開発者向け）】\n' + detailBlock;
+
+  // Discord を最大3回リトライ（notifyOwnerDiscord_ のループを踏襲・後追いキューは付けない＝即時のみ）
+  var url = prop_('DEPLOY_DISCORD_WEBHOOK_URL');
+  var discordSent = false;
+  if (url) {
+    for (var i = 0; i < 3; i++) {
+      var r = postDiscord_(url, text);
+      if (r.ok) { discordSent = true; break; }
+      if (!r.retryable) break;         // 4xx(429以外)は再試行しても無駄（URL不正など）
+      Utilities.sleep(600 * (i + 1));  // 短いバックオフ
+    }
+  }
+
+  // Discord 全滅（or 未設定）ならメールへフォールバック
+  if (!discordSent) {
+    var to = prop_('DEPLOY_MAIL_TO') || Session.getEffectiveUser().getEmail();
+    var subject = '【デプロイ通知】' + label + (success ? ' 完了' : ' 失敗');
+    sendMail_(to, subject, text);
+  }
+
+  return { ok: true, discordSent: discordSent };
 }
 
 function notifyCustomer_(b, text) {
