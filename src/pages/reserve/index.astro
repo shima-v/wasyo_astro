@@ -102,16 +102,6 @@ const grouped = groupOrder.map((g) => ({
         <div id="timeDialogBody" class="time-list time-dialog-body"></div>
       </dialog>
 
-      <!-- 常連ウェルカムバナー（#4）。常連（LINE連携済み＋前回メニューが現行に存在）のときだけ JS で表示。
-           ①メニューの上に置き、前回と同じメニューでの最短予約導線を提供する。 -->
-      <section class="welcome-banner" id="welcomeBanner" aria-label="常連のお客様向けショートカット" hidden>
-        <p class="welcome-lead" id="welcomeLead"></p>
-        <button type="button" class="welcome-shortcut" id="welcomeShortcut">
-          <span class="welcome-shortcut-label" id="welcomeShortcutLabel"></span>
-          <span class="welcome-shortcut-arrow" aria-hidden="true">→</span>
-        </button>
-      </section>
-
       <!-- 前回メニューの確認ポップアップ（#4・時刻/営業時間ダイアログの作法を流用） -->
       <dialog id="lastMenuDialog" class="last-menu-dialog" aria-label="前回のメニューで予約">
         <div class="last-menu-dialog-head">
@@ -131,6 +121,15 @@ const grouped = groupOrder.map((g) => ({
       <!-- STEP 1: メニュー -->
       <section class="step" id="step-menu">
         <h2 tabindex="-1"><span class="step-no">1</span> メニューを選ぶ</h2>
+        <!-- 常連ウェルカムバナー（#4）。①メニューステップの中に置くので、②以降へ進むと step ごと隠れる。
+             常連（LINE連携済み＋前回メニューが現行に存在）のときだけ JS で表示。 -->
+        <section class="welcome-banner" id="welcomeBanner" aria-label="常連のお客様向けショートカット" hidden>
+          <p class="welcome-lead" id="welcomeLead"></p>
+          <button type="button" class="welcome-shortcut" id="welcomeShortcut">
+            <span class="welcome-shortcut-label" id="welcomeShortcutLabel"></span>
+            <span class="welcome-shortcut-arrow" aria-hidden="true">→</span>
+          </button>
+        </section>
         {grouped.map((g, i) => (
           <details class="menu-group" open={i === 0} name="menu-course">
             <summary class="menu-group-head">
