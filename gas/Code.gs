@@ -167,12 +167,18 @@ function doPost(e) {
       // 承認/辞退（front /reserve/decision 経由・POST限定）。token+sig の capability で保護するため requireAdmin_ は付けない。
       // GET プリフェッチでの誤確定を防ぐ既存方針に沿い POST 限定。
       case 'decide': return json_(decideBySig(body.token, body.sig, !!body.approve, body.message));
-      // 管理（Googleログイン必須）
-      case 'getSlotConfig': return json_(requireAdmin_(adminGetSlotConfig_));
-      case 'setSlotConfig': return json_(requireAdmin_(function () { return adminSetSlotConfig_(body); }));
-      case 'listPending': return json_(requireAdmin_(adminListPending_));
-      case 'getQuota': return json_(requireAdmin_(adminGetQuota_));
-      case 'adminDecision': return json_(requireAdmin_(function () { return adminDecision_(body); }));
+      // 管理（front /reserve/admin 経由）。bearer トークン ADMIN_TOKENS で保護＝Googleログイン不要。
+      // これにより管理操作も公開デプロイ①（executeAs=オーナー）で完結し、管理デプロイ②を不要にする布石。
+      case 'getSlotConfig': return json_(requireAdminToken_(body, adminGetSlotConfig_));
+      case 'setSlotConfig': return json_(requireAdminToken_(body, function () { return adminSetSlotConfig_(body); }));
+      case 'listPending': return json_(requireAdminToken_(body, adminListPending_));
+      case 'getQuota': return json_(requireAdminToken_(body, adminGetQuota_));
+      case 'adminDecision': return json_(requireAdminToken_(body, function () { return adminDecision_(body); }));
+      case 'broadcastPreview': return json_(requireAdminToken_(body, function () { return adminBroadcastPreview_(body); }));
+      case 'broadcast': return json_(requireAdminToken_(body, function () { return adminBroadcast_(body); }));
+      case 'broadcastTest': return json_(requireAdminToken_(body, function () { return adminBroadcastTest_(body); }));
+      case 'setTempSchedule': return json_(requireAdminToken_(body, function () { return adminSetTempSchedule_(body); }));
+      case 'ownerChannelTest': return json_(requireAdminToken_(body, adminOwnerChannelTest_));
       default: return json_({ ok: false, error: 'unknown_action' });
     }
   } catch (err) {
@@ -676,6 +682,21 @@ function requireAdmin_(fn) {
   return fn();
 }
 
+/**
+ * bearer トークン認証（Googleログイン非依存）。front /reserve/admin から POST body の
+ * adminToken を受け取り、Script Property `ADMIN_TOKENS`（カンマ区切りの強ランダム）に
+ * 含まれるかを照合する。複数管理者に個別トークンを配れば個別失効も可能。
+ * ①公開デプロイ（executeAs=オーナー・匿名到達可）上でも管理操作を安全側で保護でき、
+ * 管理デプロイ②（executeAs=アクセスユーザー・要Googleログイン）を不要にする。
+ * ※秘密は Script Properties のみ。リポ/フロントには置かない。
+ */
+function requireAdminToken_(body, fn) {
+  var tokens = (prop_('ADMIN_TOKENS') || '').split(',').map(function (s) { return s.trim(); }).filter(String);
+  var given = (body && body.adminToken) || '';
+  if (!given || tokens.indexOf(given) < 0) return { ok: false, error: 'forbidden' };
+  return fn();
+}
+
 // ---- 管理パネル（admin.html）用の公開ラッパ ----
 // 末尾アンダースコアの関数は google.script.run から呼べないため、公開名で薄くラップする。
 // 管理デプロイ（executeAs=アクセスユーザー）下では Session.getActiveUser() が
@@ -695,12 +716,26 @@ function adminApiBroadcastTest(message) { return requireAdmin_(function () { ret
 function adminApiSetTempSchedule(payload) { return requireAdmin_(function () { return adminSetTempSchedule_(payload); }); }
 // オーナー通知（新規予約・枠警告）の接続テスト。実際の notifyOwner_ 経路で1通送る。
 // OWNER_DISCORD_WEBHOOK_URL 設定時は Discord、未設定なら LINE に届く。届いたチャネルを via で返す。
-function adminApiOwnerChannelTest() {
-  return requireAdmin_(function () {
-    notifyOwner_('【接続テスト】オーナー通知の接続確認です。この通知が届けば設定は正常です。');
-    return { ok: true, via: prop_('OWNER_DISCORD_WEBHOOK_URL') ? 'discord' : 'line' };
-  });
+function adminOwnerChannelTest_() {
+  var url = prop_('OWNER_DISCORD_WEBHOOK_URL');
+  var out = { ok: true, discordConfigured: !!url, discordOk: false, discordCode: 0, discordError: '' };
+  if (url) {
+    // 実際に Discord へ1回送って結果（HTTPコード・エラー本文）を返す＝失敗の切り分けに使う
+    var r = postDiscord_(url, '【接続テスト】オーナー通知（Discord）の接続確認です。届けば設定は正常です。');
+    out.discordOk = r.ok;
+    out.discordCode = r.code;
+    out.discordError = r.ok ? '' : String(r.body || '').slice(0, 300);
+  }
+  // Discord 未設定/失敗時は実際の到達先である LINE にもテスト送信する
+  if (url && out.discordOk) {
+    out.via = 'discord';
+  } else {
+    linePush_(prop_('LINE_OWNER_USER_ID'), withEnvLabel_('【接続テスト】オーナー通知（LINE）です。'), 'owner');
+    out.via = 'line';
+  }
+  return out;
 }
+function adminApiOwnerChannelTest() { return requireAdmin_(adminOwnerChannelTest_); }
 
 function adminGetSlotConfig_() { return { ok: true, config: readSlotConfig_() }; }
 
@@ -815,6 +850,7 @@ function notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst) {
     // Discord 送信が成功したら終了。失敗（非2xx/例外で false）なら下の LINE 経路へフォールバックし、
     // オーナー通知を取りこぼさない（通知が静かに消えないようにする恒久ハードニング）。
     if (notifyOwnerDiscord_(detail + '\n\n✅ 承認: ' + approve + '\n❌ 辞退: ' + decline)) return;
+    detail = ownerLineFallbackNote_() + '\n' + detail; // Discord失敗→LINE。二重通知の可能性を明記
   }
   // LINE 経路（Discord 未設定 or 送信失敗時のフォールバック）。詳細はテキスト、承認/辞退は confirm テンプレのボタンで送る（長いURLを直接見せない）
   linePushMessages_(prop_('LINE_OWNER_USER_ID'), [
@@ -839,18 +875,18 @@ function notifyOwner_(text) {
   var label = prop_('ENV_LABEL');
   var body = (label ? label + '\n' : '') + text;
   // Discord 優先。送信成功なら終了、失敗（false）なら LINE へフォールバック。未設定時も LINE。
-  if (prop_('OWNER_DISCORD_WEBHOOK_URL') && notifyOwnerDiscord_(body)) return;
+  if (prop_('OWNER_DISCORD_WEBHOOK_URL')) {
+    if (notifyOwnerDiscord_(body)) return;
+    body = ownerLineFallbackNote_() + '\n' + body; // Discord失敗→LINE。二重通知の可能性を明記
+  }
   linePush_(prop_('LINE_OWNER_USER_ID'), body, 'owner');
 }
 
 /**
- * オーナー通知を Discord Webhook へ送る。
- * OWNER_DISCORD_WEBHOOK_URL 未設定なら false（呼び出し側で LINE にフォールバック）。
- * Discord はメッセージ受理時に 200/204 を返す。成否を返す。
+ * Discord Webhook へ1回 POST し、詳細（成否・HTTPコード・本文・一時的失敗か）を返す。
+ * Discord は受理で 200/204。429（レート制限）と 5xx は一時的失敗＝retryable。
  */
-function notifyOwnerDiscord_(text) {
-  var url = prop_('OWNER_DISCORD_WEBHOOK_URL');
-  if (!url) return false;
+function postDiscord_(url, text) {
   try {
     var res = UrlFetchApp.fetch(url, {
       method: 'post',
@@ -860,12 +896,88 @@ function notifyOwnerDiscord_(text) {
     });
     var code = res.getResponseCode();
     var ok = code === 200 || code === 204;
-    if (!ok) console.error('notifyOwnerDiscord_ http ' + code + ': ' + res.getContentText());
-    return ok;
+    var retryable = code === 429 || (code >= 500 && code < 600);
+    var body = ok ? '' : res.getContentText();
+    if (!ok) console.error('postDiscord_ http ' + code + ': ' + body);
+    return { ok: ok, code: code, retryable: retryable, body: body };
   } catch (err) {
-    console.error('notifyOwnerDiscord_ failed: ' + err);
-    return false;
+    console.error('postDiscord_ failed: ' + err);
+    return { ok: false, code: 0, retryable: true, body: String(err) };
   }
+}
+
+/**
+ * オーナー通知を Discord Webhook へ送る（即時リトライ付き）。
+ * OWNER_DISCORD_WEBHOOK_URL 未設定なら false（呼び出し側で LINE にフォールバック）。
+ * 即時リトライで送れず、かつ一時的失敗（429/5xx/例外）なら再送キューへ積み、
+ * 時間トリガ（retryOwnerDiscordQueue_）が数十分かけて追送する。成否を返す。
+ */
+function notifyOwnerDiscord_(text) {
+  var url = prop_('OWNER_DISCORD_WEBHOOK_URL');
+  if (!url) return false;
+  var r;
+  for (var i = 0; i < 3; i++) {
+    r = postDiscord_(url, text);
+    if (r.ok) return true;
+    if (!r.retryable) break;        // 4xx(429以外)は再試行しても無駄（URL不正など）
+    Utilities.sleep(600 * (i + 1)); // 短いバックオフ
+  }
+  if (r && r.retryable) enqueueOwnerDiscord_(text); // 一時的失敗のみ後追いキューへ
+  return false;
+}
+
+/** Discord 再送キューに1件積み、時間トリガを確保する（暴走防止に上限50件）。 */
+function enqueueOwnerDiscord_(text) {
+  var props = PropertiesService.getScriptProperties();
+  var q = [];
+  try { q = JSON.parse(props.getProperty('OWNER_DISCORD_RETRY_QUEUE') || '[]'); } catch (_) {}
+  q.push({ text: text, ts: Date.now(), tries: 0 });
+  if (q.length > 50) q = q.slice(q.length - 50);
+  props.setProperty('OWNER_DISCORD_RETRY_QUEUE', JSON.stringify(q));
+  try { ensureDiscordRetryTrigger_(); } catch (err) { console.error('ensureDiscordRetryTrigger_ failed: ' + err); }
+}
+
+/** retryOwnerDiscordQueue_ の時間トリガ（10分毎）が無ければ作る。 */
+function ensureDiscordRetryTrigger_() {
+  var exists = ScriptApp.getProjectTriggers().some(function (t) {
+    return t.getHandlerFunction() === 'retryOwnerDiscordQueue_';
+  });
+  if (!exists) ScriptApp.newTrigger('retryOwnerDiscordQueue_').timeBased().everyMinutes(10).create();
+}
+
+/** retryOwnerDiscordQueue_ の時間トリガを全て削除する（キューが空になったら呼ぶ）。 */
+function removeDiscordRetryTrigger_() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'retryOwnerDiscordQueue_') ScriptApp.deleteTrigger(t);
+  });
+}
+
+/**
+ * 時間トリガの実体（10分毎）。Discord 未達分をまとめて追送する。
+ * 送信成功・期限切れ（3時間）・試行上限（30回）でキューから除去。空になればトリガを撤去。
+ */
+function retryOwnerDiscordQueue_() {
+  var props = PropertiesService.getScriptProperties();
+  var url = prop_('OWNER_DISCORD_WEBHOOK_URL');
+  var q;
+  try { q = JSON.parse(props.getProperty('OWNER_DISCORD_RETRY_QUEUE') || '[]'); } catch (_) { q = []; }
+  if (!url || !q.length) { removeDiscordRetryTrigger_(); return; }
+  var MAX_AGE = 3 * 60 * 60 * 1000; // 3時間で諦める
+  var remain = [];
+  q.forEach(function (item) {
+    if (Date.now() - (item.ts || 0) > MAX_AGE) return;      // 期限切れは破棄
+    var r = postDiscord_(url, item.text);
+    if (r.ok) return;                                        // 成功→除去
+    item.tries = (item.tries || 0) + 1;
+    if (r.retryable && item.tries < 30) remain.push(item);   // 一時的失敗のみ残す
+  });
+  props.setProperty('OWNER_DISCORD_RETRY_QUEUE', JSON.stringify(remain));
+  if (!remain.length) removeDiscordRetryTrigger_();
+}
+
+/** Discord 失敗で LINE へフォールバックした通知の先頭に付ける注記（二重通知の可能性を明示）。 */
+function ownerLineFallbackNote_() {
+  return '⚠️Discord通知に失敗したためLINEで送信しています（復旧後にDiscordにも届く場合があります）';
 }
 
 function notifyCustomer_(b, text) {
