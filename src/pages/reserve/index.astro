@@ -78,10 +78,14 @@ const grouped = groupOrder.map((g) => ({
       <section class="step" id="step-menu">
         <h2 tabindex="-1"><span class="step-no">1</span> メニューを選ぶ</h2>
         {grouped.map((g, i) => (
-          <details class="menu-group" open={i === 0}>
+          <details class="menu-group" open={i === 0} name="menu-course">
             <summary class="menu-group-head">
               <span class="menu-group-title">{g.group.label}{g.group.desc ? <small>{g.group.desc}</small> : null}</span>
-              <span class="caret" aria-hidden="true">▶</span>
+              <span class="menu-group-aside">
+                <span class="menu-group-count">{g.items.length}件</span>
+                <span class="tap-hint">タップで表示</span>
+                <span class="caret" aria-hidden="true">▼</span>
+              </span>
             </summary>
             <div class="menu-list">
               {g.items.map((m) => (
@@ -1295,13 +1299,18 @@ const grouped = groupOrder.map((g) => ({
         display: flex; align-items: center; justify-content: space-between; gap: .5rem;
         min-height: 44px; padding: .5rem .8rem; cursor: pointer; list-style: none;
         font-size: .95rem; color: var(--c-purple-dk); font-weight: 600;
+        background: #FCF6FA; /* 押すと開く「帯」に見せる薄背景 */
       }
       .menu-group-head::-webkit-details-marker { display: none; }
-      .menu-group-head:hover { background: #FCF6FA; }
+      .menu-group-head:hover { background: #F4E6EE; }
+      .menu-group[open] .menu-group-head { background: var(--c-surface); border-bottom: 1px solid var(--c-border); }
       .menu-group-title small { font-weight: normal; color: var(--c-muted); font-size: .8rem; margin-left: .5rem; }
-      .menu-group[open] .menu-group-head { border-bottom: 1px solid var(--c-border); }
-      .menu-group .caret { flex: none; color: var(--c-purple-lt); font-size: .8rem; transition: transform .15s; }
-      .menu-group[open] .caret { transform: rotate(90deg); }
+      .menu-group-aside { display: inline-flex; align-items: center; gap: .5rem; flex: none; }
+      .menu-group-count { font-size: .75rem; color: var(--c-muted); font-weight: normal; white-space: nowrap; }
+      .tap-hint { font-size: .72rem; color: var(--c-purple); font-weight: normal; white-space: nowrap; }
+      .menu-group[open] .tap-hint { display: none; }
+      .menu-group .caret { flex: none; color: var(--c-purple); font-size: .7rem; transition: transform .15s; }
+      .menu-group[open] .caret { transform: rotate(180deg); }
       .menu-group .menu-list { padding: .55rem .7rem .7rem; }
       .menu-list { display: grid; gap: .4rem; }
       .menu-item {
