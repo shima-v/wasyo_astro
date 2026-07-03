@@ -94,8 +94,6 @@ function diag() {
   Logger.log('HMAC_SECRET: ' + (prop_('HMAC_SECRET') ? 'set' : '未設定'));
   Logger.log('FRONT_BASE_URL: ' + prop_('FRONT_BASE_URL'));
   Logger.log('ENV_LABEL: "' + prop_('ENV_LABEL') + '"');
-  Logger.log('ADMIN_EMAILS: ' + prop_('ADMIN_EMAILS'));
-  Logger.log('activeUser: ' + Session.getActiveUser().getEmail());
   Logger.log('webapp url (getService): ' + ScriptApp.getService().getUrl());
   Logger.log('PUBLIC_EXEC_URL prop: ' + (prop_('PUBLIC_EXEC_URL') || '(未設定→getServiceにフォールバック)'));
   Logger.log('承認リンクbase(実際に使う値): ' + publicExecUrl_());
@@ -126,22 +124,13 @@ function doGet(e) {
     switch (action) {
       case 'availability':
         return json_(getAvailability_(e.parameter));
-      case 'booking': // 管理ページ：トークンで予約内容取得
+      case 'booking': // 管理ページ（front /reserve/manage）：トークンで予約内容取得
         return json_(getBookingByToken_(e.parameter.token));
-      case 'approve': // LINE通知の署名リンク（GETは読み取り専用の確認ページ）
-        return renderDecisionPage_(e.parameter, true);
-      case 'decline':
-        return renderDecisionPage_(e.parameter, false);
-      case 'message': // 予約客への任意メッセージ送信（管理デプロイ：要Googleログイン。GETは入力ページのみ）
-        return renderMessagePage_(e.parameter);
-      case 'admin': { // 管理パネル（別デプロイ：executeAs=アクセスユーザー / アクセス=自分のみ）
-        var envLabel = prop_('ENV_LABEL') || ''; // dev のみ '【開発】'。dev インジケータの出し分けに使う
-        var t = HtmlService.createTemplateFromFile('admin');
-        t.envLabel = envLabel;
-        return t.evaluate()
-          .setTitle(envLabel + '予約管理 — サロン和笑〜Violane〜')
-          .addMetaTag('viewport', 'width=device-width, initial-scale=1');
-      }
+      // 承認/辞退・メッセージ送信・管理パネルはすべて front（非 Google ドメイン）へ移行済み。
+      //  - 承認/辞退: /reserve/decision + doPost 'decide'（token+sig capability）
+      //  - メッセージ: /reserve/message + doPost 'messageInfo'/'messageSend'（'message:' sig）
+      //  - 管理: /reserve/admin + doPost 各 admin アクション（bearer ADMIN_TOKENS）
+      // これらの GET レンダリングは要 Google ログイン（管理デプロイ②）に依存していたため撤去した。
       default:
         return json_({ ok: false, error: 'unknown_action' });
     }
@@ -445,54 +434,10 @@ function createBooking_(b) {
 // ============================================================
 
 /**
- * LINE署名リンク経由（GET）。**状態変更はしない**確認ページを返す。
- * 重要: GET は読み取り専用にする。承認/辞退リンクを LINE/メール等のクローラが
- * プリフェッチ（プレビュー生成）すると、GET で確定/辞退が誤発火し予約が
- * 勝手に削除される事故が起きるため、実処理はボタン押下→google.script.run に分離する。
+ * front /reserve/decision の「確定/辞退」ボタンから doPost 'decide' 経由で呼ばれる。
+ * 署名検証のうえ確定/辞退を実行する（'decision:' 署名 capability で保護）。
+ * ※旧 GET 確認ページ（renderDecisionPage_・?action=approve/decline）は front 化により撤去済み。
  */
-function renderDecisionPage_(p, approve) {
-  var act = approve ? '確定' : '辞退';
-  if (!verifySig_('decision:' + p.token, p.sig)) return html_('署名が無効です。');
-  var b = getBookingByToken_(p.token);
-  if (!b.ok) {
-    return html_('<h2 style="font-size:1.1rem">この予約は見つかりませんでした</h2>' +
-      '<p>すでに処理済み、または取消済みの可能性があります。</p>');
-  }
-  var color = approve ? '#2e7d32' : '#b00020';
-  var statusNote = b.status === STATUS.CONFIRMED ? '<p style="color:#2e7d32">※この予約はすでに「確定」済みです。</p>' : '';
-  var summary = esc_(b.name) + ' 様' + (b.isFirstTime ? '（新規）' : '（常連）') + '<br>' +
-    esc_(b.menuName) + '<br>' + b.date + ' ' + b.time + '〜（' + b.durationMin + '分） ¥' + b.price +
-    (b.note ? '<br><br><b>ご要望</b><br><span style="white-space:pre-wrap">' + esc_(b.note) + '</span>' : '');
-  // 承認・辞退どちらでもお客様へメッセージを添えられる。辞退は既定文をプリセット、承認は任意で空。
-  var msgLabel = approve ? 'お客様へのひとことメッセージ（任意）' : 'お客様へのメッセージ（このまま送信／編集可）';
-  var msgDefault = approve ? '' : DECLINE_DEFAULT_MSG;
-  var msgBox =
-    '<label for="custMsg" style="display:block;text-align:left;font-size:.9rem;margin:.2rem 0 .35rem">' + msgLabel + '</label>' +
-    '<textarea id="custMsg" rows="4" style="width:100%;font-family:inherit;font-size:1rem;padding:.6rem .7rem;border:1px solid #E2D0D8;border-radius:8px;box-sizing:border-box">' +
-    esc_(msgDefault) + '</textarea>';
-  var page = '' +
-    '<h2 style="font-size:1.1rem;margin:0 0 .5rem">予約を' + act + 'しますか？</h2>' +
-    statusNote +
-    '<div style="background:#f6f3f6;border-radius:10px;padding:1rem;margin:1rem 0;text-align:left">' + summary + '</div>' +
-    msgBox +
-    '<button id="go" style="width:100%;min-height:48px;margin-top:1rem;border:0;border-radius:24px;color:#fff;background:' + color + ';font-size:1rem;cursor:pointer">' + act + 'する</button>' +
-    '<p id="msg" style="color:#666;margin-top:1rem;min-height:1.2em"></p>' +
-    '<script>' +
-    'var T=' + JSON.stringify(p.token) + ',S=' + JSON.stringify(p.sig) + ',A=' + (approve ? 'true' : 'false') + ';' +
-    'document.getElementById("go").onclick=function(){' +
-    'var box=document.getElementById("custMsg");var MSG=box?box.value:"";' +
-    'this.disabled=true;this.style.opacity=.5;this.textContent="処理中…";' +
-    'google.script.run.withSuccessHandler(function(r){' +
-    'var m=document.getElementById("msg");' +
-    'if(r&&r.ok){m.innerHTML="<b>' + act + 'しました。</b>お客様へ通知済みです。";document.getElementById("go").style.display="none";if(box)box.disabled=true;}' +
-    'else{m.textContent="エラー: "+((r&&r.error)||"unknown");}' +
-    '}).withFailureHandler(function(e){document.getElementById("msg").textContent="通信エラー: "+e;}).decideBySig(T,S,A,MSG);' +
-    '};' +
-    '</script>';
-  return html_(page);
-}
-
-/** 確認ページのボタン（google.script.run）から呼ばれる。署名検証のうえ確定/辞退を実行。 */
 function decideBySig(token, sig, approve, message) {
   if (!verifySig_('decision:' + token, sig)) return { ok: false, error: 'bad_signature' };
   return decide_(token, !!approve, message);
@@ -528,83 +473,11 @@ function decide_(token, approve, message) {
 }
 
 // ============================================================
-// 予約客への任意メッセージ送信（管理者・要Googleログイン）
+// 予約客への任意メッセージ送信（front /reserve/message・'message:' sig 保護）
 // ============================================================
-
-/**
- * 予約客へのメッセージ送信ページ（GET・`?action=message`）。**状態変更はしない**確認/入力ページを返す。
- * `renderDecisionPage_` を手本にした「GET は読み取り専用 → ボタン押下で google.script.run 実行」パターン。
- *
- * 重要（デプロイ形態）: 送信本体 `sendCustomerMessageBySig` は `requireAdmin_`（Googleログイン照合）を
- * 使うため、このページは **管理デプロイ（executeAs=アクセスユーザー・要ログイン）** で開く必要がある。
- * リンクの基底URLは公開API（①）ではなく管理デプロイ（②）の /exec を指すこと（createBooking_ 参照）。
- *
- * プライバシー: 表示は「名前・日時・メニュー」のみ。連絡先（電話・メール・lineUserId）はマスク（出さない）。
- * 署名は承認系（'decision:'）と分離するため 'message:' プレフィックスで検証する。
- */
-function renderMessagePage_(p) {
-  if (!verifySig_('message:' + p.token, p.sig)) return html_('署名が無効です。');
-  var b = getBookingByToken_(p.token);
-  if (!b.ok) {
-    return html_('<h2 style="font-size:1.1rem">この予約は見つかりませんでした</h2>' +
-      '<p>すでに処理済み、または取消済みの可能性があります。</p>');
-  }
-  // 連絡先はマスク（電話/メール/lineUserId は表示しない）。名前・日時・メニューのみ。
-  // 連絡先はマスク（電話/メール/lineUserId は表示しない）。名前・日時・メニューのみ。
-  var summary = esc_(b.name) + ' 様' + (b.isFirstTime ? '（新規）' : '（常連）') + '<br>' +
-    esc_(b.menuName) + '<br>' + b.date + ' ' + b.time + '〜（' + b.durationMin + '分）' +
-    (b.note ? '<br><br><b>ご要望</b><br><span style="white-space:pre-wrap">' + esc_(b.note) + '</span>' : '');
-  var statusNote = b.status === STATUS.CONFIRMED
-    ? '<p style="color:#2e7d32;font-size:1.15rem;margin:.4rem 0">この予約は「確定」済みです。</p>'
-    : '<p style="color:#b26a00;font-size:1.15rem;margin:.4rem 0">この予約は「仮予約」の状態です。</p>';
-  // スマホで読みやすいよう本文・入力・ボタンを大きめに。入力16px以上で iOS の自動ズームも防ぐ（html_() が addMetaTag で viewport を付与）。
-  var msgBox =
-    '<label for="custMsg" style="display:block;text-align:left;font-size:1.1rem;margin:.3rem 0 .45rem">お客様へのメッセージ</label>' +
-    '<textarea id="custMsg" rows="6" placeholder="お客様へお送りするメッセージを入力してください" ' +
-    'style="width:100%;font-family:inherit;font-size:1.25rem;line-height:1.6;padding:.9rem .95rem;border:1px solid #E2D0D8;border-radius:10px;box-sizing:border-box"></textarea>';
-  var page = '' +
-    '<h2 style="font-size:1.65rem;margin:0 0 .7rem">お客様へメッセージを送る</h2>' +
-    statusNote +
-    '<div style="background:#f6f3f6;border-radius:12px;padding:1.25rem 1.2rem;margin:1.1rem 0;text-align:left;font-size:1.2rem;line-height:1.75">' + summary + '</div>' +
-    msgBox +
-    '<button id="go" style="width:100%;min-height:60px;margin-top:1.2rem;border:0;border-radius:30px;color:#fff;background:#8B6080;font-size:1.4rem;cursor:pointer">送信する</button>' +
-    '<p id="msg" style="color:#666;font-size:1.05rem;margin-top:1rem;min-height:1.2em"></p>' +
-    '<script>' +
-    'var T=' + JSON.stringify(p.token) + ',S=' + JSON.stringify(p.sig) + ';' +
-    'document.getElementById("go").onclick=function(){' +
-    'var box=document.getElementById("custMsg");var MSG=box?box.value:"";' +
-    'if(!MSG||!MSG.trim()){document.getElementById("msg").textContent="メッセージを入力してください。";return;}' +
-    'this.disabled=true;this.style.opacity=.5;this.textContent="送信中…";' +
-    'google.script.run.withSuccessHandler(function(r){' +
-    'var m=document.getElementById("msg");' +
-    'if(r&&r.ok){m.innerHTML="<b>送信しました。</b>お客様へ通知済みです。";document.getElementById("go").style.display="none";if(box)box.disabled=true;}' +
-    'else{m.textContent="エラー: "+errText_(r);var g=document.getElementById("go");g.disabled=false;g.style.opacity=1;g.textContent="送信する";}' +
-    '}).withFailureHandler(function(e){var m=document.getElementById("msg");m.textContent="通信エラー: "+e;var g=document.getElementById("go");g.disabled=false;g.style.opacity=1;g.textContent="送信する";}).sendCustomerMessageBySig(T,S,MSG);' +
-    '};' +
-    'function errText_(r){var e=(r&&r.error)||"unknown";' +
-    'return {bad_signature:"署名が無効です",forbidden:"管理権限がありません（要Googleログイン）",empty_message:"メッセージが空です",no_channel:"送信先（LINE/メール）が登録されていません",not_found:"予約が見つかりません"}[e]||e;}' +
-    '</script>';
-  return html_(page);
-}
-
-/**
- * メッセージ送信ページのボタン（google.script.run）から呼ばれる。
- * 二重チェック: ①HMAC 署名（'message:' プレフィックス）②requireAdmin_（Googleログイン照合）。
- * どちらも通れば notifyCustomerProps_ で LINE/メール自動フォールバック送信する。
- */
-function sendCustomerMessageBySig(token, sig, message) {
-  if (!verifySig_('message:' + token, sig)) return { ok: false, error: 'bad_signature' };
-  return requireAdmin_(function () {
-    if (!message || !String(message).trim()) return { ok: false, error: 'empty_message' };
-    var found = findEventByToken_(token);
-    if (!found) return { ok: false, error: 'not_found' };
-    var props = found.props;
-    if (!props.lineUserId && !props.email) return { ok: false, error: 'no_channel' };
-    // お店からの自由文メッセージ。承認/辞退の定型文とは独立（テンプレなし・毎回自由記述）。
-    notifyCustomerProps_(props, '【サロン和笑〜Violane〜より】\n' + String(message).trim(), 'message');
-    return { ok: true };
-  });
-}
+// 旧 GET 入力ページ（renderMessagePage_・?action=message）と requireAdmin_ 版
+// sendCustomerMessageBySig は、管理デプロイ②（要 Google ログイン）依存のため撤去済み。
+// 現在は front（/reserve/message）→ doPost 'messageInfo'/'messageSend' の2関数で完結する。
 
 /**
  * メッセージ送信ページ（front /reserve/message）の初期読み込み用。**状態変更しない**読み取り専用。
@@ -618,9 +491,9 @@ function messageInfoBySig_(token, sig) {
 
 /**
  * メッセージ送信ページ（front /reserve/message）の送信本体。
- * `sendCustomerMessageBySig` から `requireAdmin_`（Googleログイン照合）ラップを外した版。
  * 保護は 'message:' sig capability のみ（front 経由・POST限定）で、公開デプロイ①上で完結する
- * （＝管理デプロイ② 不要。撤去は別工程⑥）。挙動（空/未存在/no_channel/送信）は旧関数と同一。
+ * （＝管理デプロイ② 不要。旧 requireAdmin_ 版 sendCustomerMessageBySig は工程⑥で撤去済み）。
+ * 挙動: 空 → empty_message / 未存在 → not_found / 連絡先なし → no_channel / それ以外は送信。
  */
 function messageSendBySig_(token, sig, message) {
   if (!verifySig_('message:' + token, sig)) return { ok: false, error: 'bad_signature' };
@@ -709,15 +582,8 @@ function getBookingByToken_(token) {
 }
 
 // ============================================================
-// 管理（Googleログイン必須）
+// 管理（front /reserve/admin・bearer ADMIN_TOKENS で保護）
 // ============================================================
-
-function requireAdmin_(fn) {
-  var email = Session.getActiveUser().getEmail();
-  var allow = prop_('ADMIN_EMAILS').split(',').map(function (s) { return s.trim(); });
-  if (!email || allow.indexOf(email) < 0) return { ok: false, error: 'forbidden' };
-  return fn();
-}
 
 /**
  * bearer トークン認証（Googleログイン非依存）。front /reserve/admin から POST body の
@@ -734,23 +600,6 @@ function requireAdminToken_(body, fn) {
   return fn();
 }
 
-// ---- 管理パネル（admin.html）用の公開ラッパ ----
-// 末尾アンダースコアの関数は google.script.run から呼べないため、公開名で薄くラップする。
-// 管理デプロイ（executeAs=アクセスユーザー）下では Session.getActiveUser() が
-// アクセス中の管理者本人になるため requireAdmin_ が機能する。
-function adminApiGetConfig() { return requireAdmin_(adminGetSlotConfig_); }
-function adminApiSetConfig(config) {
-  return requireAdmin_(function () { return adminSetSlotConfig_({ config: config }); });
-}
-function adminApiListPending() { return requireAdmin_(adminListPending_); }
-function adminApiDecision(token, approve, message) {
-  return requireAdmin_(function () { return adminDecision_({ token: token, approve: !!approve, message: message }); });
-}
-function adminApiGetQuota() { return requireAdmin_(adminGetQuota_); }
-function adminApiBroadcastPreview(scope) { return requireAdmin_(function () { return adminBroadcastPreview_({ scope: scope }); }); }
-function adminApiBroadcast(scope, message) { return requireAdmin_(function () { return adminBroadcast_({ scope: scope, message: message }); }); }
-function adminApiBroadcastTest(message) { return requireAdmin_(function () { return adminBroadcastTest_({ message: message }); }); }
-function adminApiSetTempSchedule(payload) { return requireAdmin_(function () { return adminSetTempSchedule_(payload); }); }
 // オーナー通知（新規予約・枠警告）の接続テスト。実際の notifyOwner_ 経路で1通送る。
 // OWNER_DISCORD_WEBHOOK_URL 設定時は Discord、未設定なら LINE に届く。届いたチャネルを via で返す。
 function adminOwnerChannelTest_() {
@@ -772,7 +621,6 @@ function adminOwnerChannelTest_() {
   }
   return out;
 }
-function adminApiOwnerChannelTest() { return requireAdmin_(adminOwnerChannelTest_); }
 
 function adminGetSlotConfig_() { return { ok: true, config: readSlotConfig_() }; }
 
@@ -1763,18 +1611,6 @@ function publicExecUrl_() {
  */
 function decisionBaseUrl_() {
   return prop_('FRONT_BASE_URL').replace(/\/$/, '') + '/reserve/decision/';
-}
-
-/**
- * 管理デプロイ（②・executeAs=アクセスユーザー・要ログイン）の /exec 基底URL。
- * 予約客へのメッセージ送信リンク（?action=message）はここを指す必要がある
- * （公開API① だと requireAdmin_ の getActiveUser() が空になり必ず弾かれるため）。
- * Script Property `ADMIN_EXEC_URL` に管理デプロイの /exec を登録する（SETUP.md F 参照）。
- * 未設定時は publicExecUrl_() にフォールバックするが、その場合メッセージ送信は
- * requireAdmin_ で forbidden になる（＝安全側。誤送信は起きない）。
- */
-function adminExecUrl_() {
-  return prop_('ADMIN_EXEC_URL') || publicExecUrl_();
 }
 
 // HMAC 署名（base64url）
