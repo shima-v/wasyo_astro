@@ -167,6 +167,10 @@ function doPost(e) {
       // 承認/辞退（front /reserve/decision 経由・POST限定）。token+sig の capability で保護するため requireAdmin_ は付けない。
       // GET プリフェッチでの誤確定を防ぐ既存方針に沿い POST 限定。
       case 'decide': return json_(decideBySig(body.token, body.sig, !!body.approve, body.message));
+      // 予約客への任意メッセージ送信（front /reserve/message 経由）。'message:' sig capability で保護するため requireAdmin_ 不要。
+      // messageInfo=概要プリフェッチ（読み取り専用・連絡先なし） / messageSend=実送信。
+      case 'messageInfo': return json_(messageInfoBySig_(body.token, body.sig));
+      case 'messageSend': return json_(messageSendBySig_(body.token, body.sig, body.message));
       // 管理（front /reserve/admin 経由）。bearer トークン ADMIN_TOKENS で保護＝Googleログイン不要。
       // これにより管理操作も公開デプロイ①（executeAs=オーナー）で完結し、管理デプロイ②を不要にする布石。
       case 'getSlotConfig': return json_(requireAdminToken_(body, adminGetSlotConfig_));
@@ -600,6 +604,34 @@ function sendCustomerMessageBySig(token, sig, message) {
   });
 }
 
+/**
+ * メッセージ送信ページ（front /reserve/message）の初期読み込み用。**状態変更しない**読み取り専用。
+ * 'message:' 署名を検証し、OK なら getBookingByToken_ の概要（連絡先を含まない）をそのまま返す。
+ * 連絡先（電話・メール・lineUserId）は getBookingByToken_ が返さないため、PII は露出しない。
+ */
+function messageInfoBySig_(token, sig) {
+  if (!verifySig_('message:' + token, sig)) return { ok: false, error: 'bad_signature' };
+  return getBookingByToken_(token);
+}
+
+/**
+ * メッセージ送信ページ（front /reserve/message）の送信本体。
+ * `sendCustomerMessageBySig` から `requireAdmin_`（Googleログイン照合）ラップを外した版。
+ * 保護は 'message:' sig capability のみ（front 経由・POST限定）で、公開デプロイ①上で完結する
+ * （＝管理デプロイ② 不要。撤去は別工程⑥）。挙動（空/未存在/no_channel/送信）は旧関数と同一。
+ */
+function messageSendBySig_(token, sig, message) {
+  if (!verifySig_('message:' + token, sig)) return { ok: false, error: 'bad_signature' };
+  if (!message || !String(message).trim()) return { ok: false, error: 'empty_message' };
+  var found = findEventByToken_(token);
+  if (!found) return { ok: false, error: 'not_found' };
+  var props = found.props;
+  if (!props.lineUserId && !props.email) return { ok: false, error: 'no_channel' };
+  // お店からの自由文メッセージ。承認/辞退の定型文とは独立（テンプレなし・毎回自由記述）。
+  notifyCustomerProps_(props, '【サロン和笑〜Violane〜より】\n' + String(message).trim(), 'message');
+  return { ok: true };
+}
+
 // ============================================================
 // キャンセル・変更（お客様・トークン）
 // ============================================================
@@ -823,13 +855,15 @@ function ledgerUpsert_(props, visitDate) {
  * オーナーはカレンダー（名前/メニューで検索可）で予約を開き、説明欄のリンクから
  * お客様へメッセージを送れる。PII（連絡先）は載せない。載せるのは署名付きリンクのみ。
  * 承認/辞退は管理画面(admin)・LINE通知の導線で行うため、説明欄には置かない。
- *  - メッセージ: 管理デプロイ②（executeAs=アクセスユーザー・要ログイン）基底。'message:' 署名。
+ *  - メッセージ: front /reserve/message（非 Google ドメイン）基底。'message:' 署名で保護（要Googleログイン不要）。
+ *    従来は管理デプロイ②（executeAs=アクセスユーザー・要ログイン）の /exec 基底だったが、
+ *    承認/辞退と同じ front 経由モデルへ張替（②依存を外す。②撤去は別工程⑥）。
  */
 function adminEventDescription_(token) {
-  var admin = adminExecUrl_();
+  var base = prop_('FRONT_BASE_URL').replace(/\/$/, '');
   var msgSig = encodeURIComponent(sign_('message:' + token));
   return '【管理者用】\n' +
-    '✉️ お客様へメッセージを送る:\n' + admin + '?action=message&token=' + token + '&sig=' + msgSig;
+    '✉️ お客様へメッセージを送る:\n' + base + '/reserve/message/?token=' + token + '&sig=' + msgSig;
 }
 
 function notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst) {
