@@ -26,7 +26,7 @@
 /** コース区分の表示ラベル */
 export const MENU_GROUPS = {
   recommend: { label: 'おすすめコース', desc: '当店人気の4メニュー' },
-  simple: { label: 'シンプルコース', desc: '' },
+  simple: { label: 'シンプルコース', desc: '初めての方向け' },
   petit: { label: 'プチコース', desc: '1部位重点ケア' },
 };
 

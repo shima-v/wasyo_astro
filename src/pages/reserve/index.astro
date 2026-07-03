@@ -74,6 +74,15 @@ const grouped = groupOrder.map((g) => ({
         </ul>
       </dialog>
 
+      <!-- 時刻選択ポップアップ（ネイティブ dialog）。②で日付をタップすると開く。 -->
+      <dialog id="timeDialog" class="time-dialog" aria-label="開始時刻を選ぶ">
+        <div class="time-dialog-head">
+          <strong id="timeDialogTitle">開始時刻</strong>
+          <button type="button" class="hours-close" id="timeDialogClose" aria-label="閉じる">×</button>
+        </div>
+        <div id="timeDialogBody" class="time-list time-dialog-body"></div>
+      </dialog>
+
       <!-- STEP 1: メニュー -->
       <section class="step" id="step-menu">
         <h2 tabindex="-1"><span class="step-no">1</span> メニューを選ぶ</h2>
@@ -129,7 +138,6 @@ const grouped = groupOrder.map((g) => ({
         </p>
         <div id="slotStatus" class="slot-status">メニューを選ぶと空き状況を表示します。</div>
         <div id="dateList" class="date-list"></div>
-        <div id="timeList" class="time-list"></div>
       </section>
 
       <!-- STEP 3〜5 は 1 つの form で包む（note/consent が step をまたいでも同一 form 内に置くため）。
@@ -902,12 +910,9 @@ const grouped = groupOrder.map((g) => ({
           calMonth = { y: ry, m: rm - 1 };
           state.date = restoreTarget.date;
           renderCalendar();
-          renderTimes();
           const day = state.days.find((d) => d.date === restoreTarget.date);
           if (restoreTarget.time && day && day.times.includes(restoreTarget.time)) {
             state.time = restoreTarget.time;
-            const tb = $('#timeList').querySelector('.time-btn[data-time="' + restoreTarget.time + '"]');
-            if (tb) tb.classList.add('active');
             // menu/date/time が揃って復元される分岐：③まで到達済みにして③を表示
             state.maxReached = 3;
             showStep('step-form');
@@ -979,30 +984,46 @@ const grouped = groupOrder.map((g) => ({
             // 時刻を選び直すまで③へは進めない（②に留め、次へを無効化）
             state.maxReached = 2;
             renderCalendar();
-            renderTimes();
             updateSummary();
             refreshNavBars();
-            $('#timeList').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            openTimeDialog();
           });
         });
       }
 
+      // 選択中の日付の空き時刻を、時刻選択ポップアップ（dialog）の本体に描画する。
       function renderTimes() {
-        const tl = $('#timeList');
+        const body = $('#timeDialogBody');
+        const title = $('#timeDialogTitle');
+        if (!body) return;
         const day = state.days.find((d) => d.date === state.date);
-        if (!day) { tl.innerHTML = ''; return; }
-        tl.innerHTML =
-          '<div class="time-label">' + fmtDateLabel(state.date) + ' の開始時刻をお選びください</div>' +
-          day.times.map((t) => `<button type="button" class="time-btn" data-time="${t}">${t}</button>`).join('');
-        tl.querySelectorAll('.time-btn').forEach((b) => {
+        if (!day) { body.innerHTML = ''; return; }
+        if (title) title.textContent = fmtDateLabel(state.date) + ' の開始時刻';
+        body.innerHTML = day.times
+          .map((t) => `<button type="button" class="time-btn${state.time === t ? ' active' : ''}" data-time="${t}">${t}</button>`)
+          .join('');
+        body.querySelectorAll('.time-btn').forEach((b) => {
           b.addEventListener('click', () => {
             state.time = b.dataset.time;
-            tl.querySelectorAll('.time-btn').forEach((x) => x.classList.toggle('active', x === b));
+            body.querySelectorAll('.time-btn').forEach((x) => x.classList.toggle('active', x === b));
+            closeTimeDialog();
             // 時刻選択で自動前進（③へ）。maxReached=3 は showStep が更新
             updateSummary();
             showStep('step-form');
           });
         });
+      }
+
+      // 時刻選択ポップアップを開く（本体を描いてから showModal）。
+      function openTimeDialog() {
+        renderTimes();
+        const dlg = $('#timeDialog');
+        if (!dlg) return;
+        try { dlg.showModal(); } catch (_) { dlg.setAttribute('open', ''); }
+      }
+      function closeTimeDialog() {
+        const dlg = $('#timeDialog');
+        if (dlg && dlg.open) dlg.close();
       }
 
       // ---- フォーム挙動 ----
@@ -1212,6 +1233,16 @@ const grouped = groupOrder.map((g) => ({
         dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
       })();
 
+      // ---- 時刻選択ポップアップの閉じる配線（開くのは日付タップ時の openTimeDialog）----
+      (function bindTimeDialog() {
+        const dlg = $('#timeDialog');
+        const closeBtn = $('#timeDialogClose');
+        if (!dlg) return;
+        if (closeBtn) closeBtn.addEventListener('click', () => dlg.close());
+        // 背景クリックで閉じる（時刻未選択なら②に留まる）。Esc は dialog 既定。
+        dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+      })();
+
       // ---- 前回選んだメニューの目印（LocalStorage・全員）----
       // 端末に保存された前回メニュー id を読み、該当ラベルに「前回選択」バッジを付け、
       // そのコース <details> を open にする（初期の先頭 open を上書き）。自動選択（checked）はしない。
@@ -1349,6 +1380,20 @@ const grouped = groupOrder.map((g) => ({
       .hours-close:hover { background: #FCF6FA; color: var(--c-purple-dk); }
       /* dialog 内の hours は上部リストと違い下余白を詰める（元の 1.5rem は上部レイアウト用） */
       .hours-dialog .hours { border: none; margin: 0; padding: .3rem 1rem 1rem; }
+
+      /* 時刻選択ポップアップ（日付タップで開く）。営業時間 dialog と同じ枠組み */
+      .time-dialog {
+        border: 1px solid var(--c-border); border-radius: 12px;
+        padding: 0; margin: auto; max-width: 440px; width: calc(100% - 2rem);
+        color: var(--c-ink); background: var(--c-surface);
+      }
+      .time-dialog::backdrop { background: rgba(44, 31, 58, .38); }
+      .time-dialog-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: .8rem 1rem .4rem; font-family: var(--f-serif);
+      }
+      .time-dialog-head strong { font-size: 1rem; }
+      .time-dialog-body { padding: .3rem 1rem 1rem; max-height: 60vh; overflow-y: auto; }
 
       .step {
         background: var(--c-surface);
