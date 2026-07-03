@@ -245,7 +245,7 @@ function getAvailability_(p) {
   var busyByDate = {};
   if (cal) {
     cal.getEvents(startOfDay_(from), addDays_(startOfDay_(to), 1)).forEach(function (ev) {
-      if (ev.getTag('wasyoBlock')) return; // 臨時営業/休業マーカーは busy にしない（受付可否の正は SLOT_CONFIG）
+      if (isWasyoMarker_(ev)) return; // 臨時営業/休業マーカーは busy にしない（受付可否の正は SLOT_CONFIG）
       var dk = fmt_(ev.getStartTime(), 'yyyy-MM-dd');
       (busyByDate[dk] || (busyByDate[dk] = [])).push({ start: ev.getStartTime().getTime(), end: ev.getEndTime().getTime() });
     });
@@ -349,6 +349,23 @@ function overlapsBusy_(s, e, busy) {
   return false;
 }
 
+/** 臨時営業/休業の目印イベント(wasyoBlockタグ)か。受付可否の正はSLOT_CONFIGのためbusy計算から除外する。 */
+function isWasyoMarker_(ev) { return !!ev.getTag('wasyoBlock'); }
+
+/**
+ * 指定日の予約占有(busy)区間を返す。臨時営業/休業の目印(wasyoBlock)は除外する。
+ * excludeEventId を渡すと当該イベント(日時変更中の自分)も除外する。
+ * getAvailability_/createBooking_/changeBooking_ が同じ busy 判定を共有するための集約点。
+ * @return {Array<{start:number,end:number}>}
+ */
+function busySpansForDay_(cal, day, excludeEventId) {
+  return cal.getEvents(startOfDay_(day), addDays_(startOfDay_(day), 1)).filter(function (e) {
+    if (isWasyoMarker_(e)) return false;
+    if (excludeEventId && e.getId() === excludeEventId) return false;
+    return true;
+  }).map(function (e) { return { start: e.getStartTime().getTime(), end: e.getEndTime().getTime() }; });
+}
+
 function isClosedSlot_(dateStr, hhmm, config) {
   return !!(config.closedSlots && config.closedSlots[dateStr] && config.closedSlots[dateStr].indexOf(hhmm) >= 0);
 }
@@ -394,9 +411,7 @@ function createBooking_(b) {
         isClosedSlot_(b.date, b.time, config)) {
       return { ok: false, error: 'slot_closed' };
     }
-    var busy = cal.getEvents(startOfDay_(start), addDays_(startOfDay_(start), 1)).map(function (e) {
-      return { start: e.getStartTime().getTime(), end: e.getEndTime().getTime() };
-    });
+    var busy = busySpansForDay_(cal, start, null);
     if (overlapsBusy_(start, end, busy)) return { ok: false, error: 'slot_taken' };
 
     token = Utilities.getUuid();
@@ -550,9 +565,7 @@ function changeBooking_(b) {
         isClosedSlot_(b.date, b.time, config)) {
       return { ok: false, error: 'slot_closed' };
     }
-    var busy = cal.getEvents(startOfDay_(start), addDays_(startOfDay_(start), 1)).filter(function (e) {
-      return e.getId() !== found.event.getId();
-    }).map(function (e) { return { start: e.getStartTime().getTime(), end: e.getEndTime().getTime() }; });
+    var busy = busySpansForDay_(cal, start, found.event.getId());
     if (overlapsBusy_(start, end, busy)) return { ok: false, error: 'slot_taken' };
     found.event.setTime(start, end);
     // 変更後は再承認のため仮に戻す（占有変更に備え durationMin/slotMin タグも整える）
