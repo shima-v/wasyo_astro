@@ -58,7 +58,65 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     needs: build
     runs-on: ubuntu-latest
+    # notify job から公開URLを参照するため job output として公開する
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  # デプロイの成否を GAS(deployNotify) 経由で通知する（Discord→失敗ならメール）。
+  # 成否に関わらず必ず走らせる（if: always()）。失敗時も「更新に失敗」を店主へ伝えるため。
+  notify:
+    needs: [build, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify deploy result via GAS
+        env:
+          # secret は repo secret 参照のみ（値はここに書かない）。
+          GAS_ENDPOINT: ${{ secrets.GAS_DEPLOY_ENDPOINT }}
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_NOTIFY_TOKEN }}
+          # deploy job の結果（success / failure / cancelled / skipped）
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          PAGE_URL: ${{ needs.deploy.outputs.page_url }}
+          # commit 群（件名を含む）は event ペイロードから取る（checkout 不要）
+          COMMITS_JSON: ${{ toJSON(github.event.commits) }}
+        run: |
+          set -euo pipefail
+          # エンドポイント未設定（secret 未登録）なら通知はスキップ（デプロイ自体は成功扱いのまま）
+          if [ -z "${GAS_ENDPOINT:-}" ] || [ -z "${DEPLOY_TOKEN:-}" ]; then
+            echo "GAS_DEPLOY_ENDPOINT / DEPLOY_NOTIFY_TOKEN 未設定のため通知をスキップします"
+            exit 0
+          fi
+
+          # deploy.result を success/failure に正規化（success 以外はすべて failure 扱い）
+          if [ "${DEPLOY_RESULT}" = "success" ]; then STATUS=success; else STATUS=failure; fi
+
+          SHORT_SHA=$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)
+
+          # commits を「<短縮7桁SHA> <件名(1行目)>」の配列に整形（本文2行目以降は落とす）
+          COMMITS=$(printf '%s' "${COMMITS_JSON}" | jq -c '
+            [ (. // [])[] | (.id[0:7]) + " " + ((.message // "") | split("\n")[0]) ]
+          ')
+
+          # detail は実際の改行を入れて組み立てる
+          DETAIL=$(printf 'branch: %s @%s\nPages: %s\n実行ログ: %s/%s/actions/runs/%s' \
+            "${GITHUB_REF_NAME}" "${SHORT_SHA}" \
+            "${PAGE_URL:-（なし）}" \
+            "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}")
+
+          # payload を jq でエスケープして組む（deployToken/detail/commits を安全に埋め込む）
+          PAYLOAD=$(jq -nc \
+            --arg deployToken "${DEPLOY_TOKEN}" \
+            --arg env "front-prod" \
+            --arg status "${STATUS}" \
+            --argjson commits "${COMMITS}" \
+            --arg detail "${DETAIL}" \
+            '{action:"deployNotify", deployToken:$deployToken, env:$env, status:$status, commits:$commits, detail:$detail}')
+
+          # GAS の /exec は 302 で実体へリダイレクトするため -L で追従（-X POST は付けない：リダイレクト後 GET 化を避ける）
+          curl -sS -L "${GAS_ENDPOINT}" \
+            -H "Content-Type: text/plain;charset=utf-8" \
+            --data "${PAYLOAD}"

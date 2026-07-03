@@ -167,6 +167,10 @@ function doPost(e) {
       // 承認/辞退（front /reserve/decision 経由・POST限定）。token+sig の capability で保護するため requireAdmin_ は付けない。
       // GET プリフェッチでの誤確定を防ぐ既存方針に沿い POST 限定。
       case 'decide': return json_(decideBySig(body.token, body.sig, !!body.approve, body.message));
+      // 予約客への任意メッセージ送信（front /reserve/message 経由）。'message:' sig capability で保護するため requireAdmin_ 不要。
+      // messageInfo=概要プリフェッチ（読み取り専用・連絡先なし） / messageSend=実送信。
+      case 'messageInfo': return json_(messageInfoBySig_(body.token, body.sig));
+      case 'messageSend': return json_(messageSendBySig_(body.token, body.sig, body.message));
       // 管理（front /reserve/admin 経由）。bearer トークン ADMIN_TOKENS で保護＝Googleログイン不要。
       // これにより管理操作も公開デプロイ①（executeAs=オーナー）で完結し、管理デプロイ②を不要にする布石。
       case 'getSlotConfig': return json_(requireAdminToken_(body, adminGetSlotConfig_));
@@ -179,6 +183,8 @@ function doPost(e) {
       case 'broadcastTest': return json_(requireAdminToken_(body, function () { return adminBroadcastTest_(body); }));
       case 'setTempSchedule': return json_(requireAdminToken_(body, function () { return adminSetTempSchedule_(body); }));
       case 'ownerChannelTest': return json_(requireAdminToken_(body, adminOwnerChannelTest_));
+      // デプロイ通知（deploy.yml / gas/deploy.sh から叩く）。DEPLOY_NOTIFY_TOKEN で保護（管理トークンとは別系統）。
+      case 'deployNotify': return json_(requireDeployToken_(body, function () { return notifyDeploy_(body); }));
       default: return json_({ ok: false, error: 'unknown_action' });
     }
   } catch (err) {
@@ -511,7 +517,8 @@ function decide_(token, approve, message) {
     var extra = (message && String(message).trim()) ? '\n\n― サロンより ―\n' + String(message).trim() : '';
     notifyCustomerProps_(props, '【ご予約が確定しました】\n' +
       bookingSummary_(menu, ev.getStartTime(), { durationMin: displayDurationMin_(props, ev), price: Number(props.price || 0) }, props.isFirstTime === 'true') +
-      '\nご来店をお待ちしております。' + extra);
+      '\nご来店をお待ちしております。' + extra +
+      '\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(token));
   } else {
     var msg = (message && String(message).trim()) ? String(message).trim() : DECLINE_DEFAULT_MSG;
     notifyCustomerProps_(props, '【ご予約について】\n' + msg);
@@ -599,6 +606,34 @@ function sendCustomerMessageBySig(token, sig, message) {
   });
 }
 
+/**
+ * メッセージ送信ページ（front /reserve/message）の初期読み込み用。**状態変更しない**読み取り専用。
+ * 'message:' 署名を検証し、OK なら getBookingByToken_ の概要（連絡先を含まない）をそのまま返す。
+ * 連絡先（電話・メール・lineUserId）は getBookingByToken_ が返さないため、PII は露出しない。
+ */
+function messageInfoBySig_(token, sig) {
+  if (!verifySig_('message:' + token, sig)) return { ok: false, error: 'bad_signature' };
+  return getBookingByToken_(token);
+}
+
+/**
+ * メッセージ送信ページ（front /reserve/message）の送信本体。
+ * `sendCustomerMessageBySig` から `requireAdmin_`（Googleログイン照合）ラップを外した版。
+ * 保護は 'message:' sig capability のみ（front 経由・POST限定）で、公開デプロイ①上で完結する
+ * （＝管理デプロイ② 不要。撤去は別工程⑥）。挙動（空/未存在/no_channel/送信）は旧関数と同一。
+ */
+function messageSendBySig_(token, sig, message) {
+  if (!verifySig_('message:' + token, sig)) return { ok: false, error: 'bad_signature' };
+  if (!message || !String(message).trim()) return { ok: false, error: 'empty_message' };
+  var found = findEventByToken_(token);
+  if (!found) return { ok: false, error: 'not_found' };
+  var props = found.props;
+  if (!props.lineUserId && !props.email) return { ok: false, error: 'no_channel' };
+  // お店からの自由文メッセージ。承認/辞退の定型文とは独立（テンプレなし・毎回自由記述）。
+  notifyCustomerProps_(props, '【サロン和笑〜Violane〜より】\n' + String(message).trim(), 'message');
+  return { ok: true };
+}
+
 // ============================================================
 // キャンセル・変更（お客様・トークン）
 // ============================================================
@@ -609,8 +644,10 @@ function cancelBooking_(b) {
   if (!withinCancelDeadline_(found.event.getStartTime())) return { ok: false, error: 'too_late' };
   var props = found.props;
   var menu = MENU[props.menuId] || { name: props.menuId };
+  var start = found.event.getStartTime(); // 通知に載せる日時は deleteEvent の前に退避する
   found.event.deleteEvent();
-  notifyOwner_('【お客様がキャンセルしました】\n' + props.name + ' 様 / ' + menu.name);
+  notifyOwner_('【お客様がキャンセルしました】\n' + props.name + ' 様 / ' + menu.name +
+    '\n日時: ' + fmt_(start, 'M/d(E) HH:mm') + '（' + (props.status === STATUS.CONFIRMED ? '確定' : '仮予約') + '）');
   notifyCustomerProps_(props, '【ご予約をキャンセルしました】\nまたのご利用をお待ちしております。');
   return { ok: true };
 }
@@ -820,13 +857,15 @@ function ledgerUpsert_(props, visitDate) {
  * オーナーはカレンダー（名前/メニューで検索可）で予約を開き、説明欄のリンクから
  * お客様へメッセージを送れる。PII（連絡先）は載せない。載せるのは署名付きリンクのみ。
  * 承認/辞退は管理画面(admin)・LINE通知の導線で行うため、説明欄には置かない。
- *  - メッセージ: 管理デプロイ②（executeAs=アクセスユーザー・要ログイン）基底。'message:' 署名。
+ *  - メッセージ: front /reserve/message（非 Google ドメイン）基底。'message:' 署名で保護（要Googleログイン不要）。
+ *    従来は管理デプロイ②（executeAs=アクセスユーザー・要ログイン）の /exec 基底だったが、
+ *    承認/辞退と同じ front 経由モデルへ張替（②依存を外す。②撤去は別工程⑥）。
  */
 function adminEventDescription_(token) {
-  var admin = adminExecUrl_();
+  var base = prop_('FRONT_BASE_URL').replace(/\/$/, '');
   var msgSig = encodeURIComponent(sign_('message:' + token));
   return '【管理者用】\n' +
-    '✉️ お客様へメッセージを送る:\n' + admin + '?action=message&token=' + token + '&sig=' + msgSig;
+    '✉️ お客様へメッセージを送る:\n' + base + '/reserve/message/?token=' + token + '&sig=' + msgSig;
 }
 
 function notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst) {
@@ -978,6 +1017,123 @@ function retryOwnerDiscordQueue_() {
 /** Discord 失敗で LINE へフォールバックした通知の先頭に付ける注記（二重通知の可能性を明示）。 */
 function ownerLineFallbackNote_() {
   return '⚠️Discord通知に失敗したためLINEで送信しています（復旧後にDiscordにも届く場合があります）';
+}
+
+// ==== デプロイ通知（deploy.yml / gas/deploy.sh から叩く・DEPLOY_NOTIFY_TOKEN で保護）====
+
+/**
+ * デプロイ通知エンドポイントの認可。requireAdminToken_ と同じ書き味。
+ * Script Property `DEPLOY_NOTIFY_TOKEN` と body.deployToken を照合。
+ * 未設定 or 不一致なら forbidden、一致で fn() を実行する。
+ */
+function requireDeployToken_(body, fn) {
+  var expected = prop_('DEPLOY_NOTIFY_TOKEN');
+  var given = (body && body.deployToken) || '';
+  if (!expected || given !== expected) return { ok: false, error: 'forbidden' };
+  return fn();
+}
+
+/** env（技術名）を店主向けの平易な日本語ラベルに変換する。未知の env はそのまま返す。 */
+function deployEnvLabel_(env) {
+  var map = {
+    'front-prod': '予約サイト（本番・wwwasyo.com）',
+    'gas-prod': '予約システム（本番）',
+    'gas-dev': '予約システム（テスト環境）',
+  };
+  return map[env] || env || '';
+}
+
+/**
+ * commit 件名を店主向けの平易な要約に変換する。
+ * 先頭の短縮/フルSHA（`^[0-9a-f]{7,40}\s+`）と Conventional Commits の
+ * type接頭辞（`^feat: ` `^fix(scope)!: ` 等・大文字小文字無視）を除去した要約部のみを返す。
+ */
+function plainCommitSummary_(subject) {
+  var s = String(subject || '');
+  s = s.replace(/^[0-9a-f]{7,40}\s+/i, '');       // 先頭SHA
+  s = s.replace(/^[a-z]+(\([^)]*\))?!?:\s*/i, ''); // type(scope)!: 接頭辞
+  return s.trim();
+}
+
+/**
+ * デプロイ通知本文を組み立てて送る。payload = { env, status, commits, detail }。
+ * commits は改行区切り文字列でも配列でも受けて正規化する。
+ * 本文は【概要】（店主向け・平易日本語）＋【詳細（開発者向け）】（技術情報そのまま）の2部構成。
+ * 送信は Discord（DEPLOY_DISCORD_WEBHOOK_URL・最大3回リトライ・後追いキューなし）を優先し、
+ * 全滅 or 未設定なら sendMail_ でメール（DEPLOY_MAIL_TO・既定は GAS 所有者）へフォールバックする。
+ * return { ok:true, discordSent:<bool> }。
+ */
+function notifyDeploy_(payload) {
+  payload = payload || {};
+  var env = payload.env || '';
+  var status = (payload.status === 'success') ? 'success' : 'failure';
+  var success = status === 'success';
+  var label = deployEnvLabel_(env);
+
+  // commits を「短縮SHA 件名フル」の配列に正規化（文字列は改行区切りで分割）
+  var commits = payload.commits;
+  if (typeof commits === 'string') commits = commits.split('\n');
+  if (!Array.isArray(commits)) commits = [];
+  commits = commits.map(function (c) { return String(c).trim(); }).filter(String);
+
+  var detail = String(payload.detail || '').trim();
+  var now = fmt_(new Date(), 'yyyy-MM-dd HH:mm');
+
+  // ---- 【概要】（店主向け・平易日本語）----
+  var summary;
+  if (success) {
+    summary = '✅ ' + label + 'を更新しました\n' +
+      '更新は正常に反映されています。予約の受付・通知はこれまでどおりご利用いただけます。';
+    if (commits.length) {
+      summary += '\n\n【今回の変更点】';
+      commits.forEach(function (c) {
+        var plain = plainCommitSummary_(c);
+        if (plain) summary += '\n・' + plain;
+      });
+    }
+  } else {
+    summary = '❌ ' + label + 'の更新に失敗しました\n' +
+      '直前の状態のまま動いているので、予約の受付・通知は止まっていません。\n' +
+      'お手数ですが開発担当にご確認ください。';
+  }
+
+  // ---- 【詳細（開発者向け）】（技術情報そのまま）----
+  var detailLines = [
+    'env: ' + env,
+    'status: ' + status,
+  ];
+  if (commits.length) {
+    detailLines.push('変更コミット:');
+    commits.forEach(function (c) { detailLines.push('・' + c); });
+  }
+  if (detail) detailLines.push(detail);
+  detailLines.push('時刻: ' + now + ' JST');
+  var detailBlock = detailLines.join('\n');
+
+  var text = '【概要】\n' + summary +
+    '\n\n――――――――――\n' +
+    '【詳細（開発者向け）】\n' + detailBlock;
+
+  // Discord を最大3回リトライ（notifyOwnerDiscord_ のループを踏襲・後追いキューは付けない＝即時のみ）
+  var url = prop_('DEPLOY_DISCORD_WEBHOOK_URL');
+  var discordSent = false;
+  if (url) {
+    for (var i = 0; i < 3; i++) {
+      var r = postDiscord_(url, text);
+      if (r.ok) { discordSent = true; break; }
+      if (!r.retryable) break;         // 4xx(429以外)は再試行しても無駄（URL不正など）
+      Utilities.sleep(600 * (i + 1));  // 短いバックオフ
+    }
+  }
+
+  // Discord 全滅（or 未設定）ならメールへフォールバック
+  if (!discordSent) {
+    var to = prop_('DEPLOY_MAIL_TO') || Session.getEffectiveUser().getEmail();
+    var subject = '【デプロイ通知】' + label + (success ? ' 完了' : ' 失敗');
+    sendMail_(to, subject, text);
+  }
+
+  return { ok: true, discordSent: discordSent };
 }
 
 function notifyCustomer_(b, text) {
@@ -1233,6 +1389,40 @@ function sendFollowUps() {
       'followup');
     ev.setTag('followedUp', 'true');
   });
+}
+
+/**
+ * オーナー向け日次ダイジェスト。当日の【確定】予約一覧と、未確定の【仮予約】一覧をまとめて通知する。
+ * notifyOwner_ 経由のため Discord 優先（失敗時 LINE ＋ 未達はリトライキューで追送）。
+ * PII 方針: 名前・日時・メニューのみ（電話/メールは載せない＝既存オーナー通知と同一）。
+ * トリガー: GAS UI で日次（毎朝）実行を登録する（手順は docs/SETUP.md）。
+ */
+function sendOwnerDailyDigest() {
+  var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
+  if (!cal) return;
+  var dayStart = startOfDay_(new Date());
+  var dayEnd = addDays_(dayStart, 1);
+  // 当日の確定予約（時刻順）
+  var today = cal.getEvents(dayStart, dayEnd).filter(function (ev) {
+    return getEventProp_(ev, 'status') === STATUS.CONFIRMED;
+  }).sort(function (a, b) { return a.getStartTime() - b.getStartTime(); }).map(function (ev) {
+    var p = getEventProps_(ev);
+    var menu = MENU[p.menuId] || { name: p.menuId };
+    return '・' + fmt_(ev.getStartTime(), 'HH:mm') + ' ' + p.name + ' 様 / ' + menu.name;
+  });
+  // 未確定の仮予約（承認待ち一覧を再利用。now〜maxAdvanceDays の pending）
+  var pending = adminListPending_().pending.map(function (p) {
+    return '・' + fmt_(parseDate_(p.date), 'M/d(E)') + ' ' + p.time + ' ' + p.name + ' 様 / ' + p.menuName;
+  });
+  var lines = ['【本日のご予約と未確定の仮予約】 ' + fmt_(dayStart, 'M/d(E)'), ''];
+  lines.push('■ 本日のご予約（確定 ' + today.length + '件）');
+  lines.push(today.length ? today.join('\n') : '・本日のご予約はありません');
+  lines.push('');
+  lines.push('■ 未確定の仮予約（' + pending.length + '件）');
+  lines.push(pending.length ? pending.join('\n') : '・未確定の仮予約はありません');
+  // 未確定があるときだけ、承認/辞退に進める予約管理画面へ誘導する
+  if (pending.length) lines.push('\n▼ 承認/辞退はこちら（予約管理画面）\n' + adminUrl_());
+  notifyOwner_(lines.join('\n'));
 }
 
 // ---- 無料枠（Messaging API push）の監視 ----
@@ -1533,6 +1723,11 @@ function readSlotConfig_() {
 function manageUrl_(token) {
   var base = prop_('FRONT_BASE_URL').replace(/\/$/, '');
   return base + '/reserve/manage/?token=' + token;
+}
+
+/** オーナー向け予約管理画面（bearer トークンで開く）の URL。日次ダイジェスト等の導線に使う。 */
+function adminUrl_() {
+  return prop_('FRONT_BASE_URL').replace(/\/$/, '') + '/reserve/admin/';
 }
 
 function withinCancelDeadline_(start) {
