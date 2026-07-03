@@ -59,9 +59,16 @@ const grouped = groupOrder.map((g) => ({
         <li class="closed"><span class="hours-day">日・祝</span><span class="hours-time">お休み（緊急対応はお電話にてお問い合わせください）</span></li>
       </ul>
 
+      <!-- ステップインジケーター（ドット）。全ステップで常に表示、完了時のみ非表示 -->
+      <ol class="steps-indicator" aria-label="ご予約の進み具合">
+        <li data-step="1" class="is-active" aria-current="step"><span class="dot"></span><span class="lbl">メニュー</span></li>
+        <li data-step="2"><span class="dot"></span><span class="lbl">日時</span></li>
+        <li data-step="3"><span class="dot"></span><span class="lbl">お客様情報</span></li>
+      </ol>
+
       <!-- STEP 1: メニュー -->
-      <section class="step">
-        <h2><span class="step-no">1</span> メニューを選ぶ</h2>
+      <section class="step" id="step-menu">
+        <h2 tabindex="-1"><span class="step-no">1</span> メニューを選ぶ</h2>
         {grouped.map((g) => (
           <div class="menu-group">
             <h3>{g.group.label}{g.group.desc ? <small>{g.group.desc}</small> : null}</h3>
@@ -91,19 +98,29 @@ const grouped = groupOrder.map((g) => ({
             </div>
           </div>
         ))}
+        <!-- 下部ナビ：メニューは最初のステップなので戻るは無し。次へはメニュー未選択時 disabled -->
+        <div class="step-nav">
+          <span></span>
+          <button type="button" class="reserve-btn nav-next" id="navMenuNext" disabled>次へ →</button>
+        </div>
       </section>
 
       <!-- STEP 2: 日時 -->
       <section class="step" id="step-date" hidden>
-        <h2><span class="step-no">2</span> 日時を選ぶ</h2>
+        <h2 tabindex="-1"><span class="step-no">2</span> 日時を選ぶ</h2>
         <div id="slotStatus" class="slot-status">メニューを選ぶと空き状況を表示します。</div>
         <div id="dateList" class="date-list"></div>
         <div id="timeList" class="time-list"></div>
+        <!-- 下部ナビ：戻る／次へ（日付と時刻が揃うまで次へは無効） -->
+        <div class="step-nav">
+          <button type="button" class="reserve-btn ghost nav-back" id="navDateBack">← 戻る</button>
+          <button type="button" class="reserve-btn nav-next" id="navDateNext" disabled>次へ →</button>
+        </div>
       </section>
 
       <!-- STEP 3: お客様情報 -->
       <section class="step" id="step-form" hidden>
-        <h2><span class="step-no">3</span> お客様情報</h2>
+        <h2 tabindex="-1"><span class="step-no">3</span> お客様情報</h2>
         <form id="reserveForm" novalidate>
           <!-- LINE 連携（任意）。設定済み(チャネルID/redirect あり)のときだけ表示 -->
           <div class="line-link" id="lineLink" hidden>
@@ -216,7 +233,11 @@ const grouped = groupOrder.map((g) => ({
             <p class="summary-note" id="sum-firstnote" hidden></p>
           </div>
 
-          <button type="submit" class="reserve-btn" id="submitBtn">この内容で仮予約する</button>
+          <!-- 下部ナビ：戻る（日時へ）＋ 送信（前進/確定を兼ねる）。戻るは type=button で誤送信を防ぐ -->
+          <div class="step-nav">
+            <button type="button" class="reserve-btn ghost nav-back" id="navFormBack">← 戻る</button>
+            <button type="submit" class="reserve-btn nav-next" id="submitBtn">この内容で仮予約する</button>
+          </div>
         </form>
       </section>
 
@@ -246,7 +267,7 @@ const grouped = groupOrder.map((g) => ({
 
     <script define:vars={{ RESERVE_API, BOOKING_RULES, LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_REDIRECT, LIFF_ID, tel }}>
       const WD = ['日', '月', '火', '水', '木', '金', '土'];
-      const state = { menu: null, date: null, time: null, days: [], availSet: null, calMin: null, calMax: null, holidays: {}, lineUserId: '', displayName: '', inLiff: false };
+      const state = { menu: null, date: null, time: null, days: [], availSet: null, calMin: null, calMax: null, holidays: {}, lineUserId: '', displayName: '', inLiff: false, step: 1, maxReached: 1 };
       let calMonth = null; // カレンダーで表示中の月 {y, m(0始まり)}
       let restoreTarget = null; // LINE 認可リダイレクト復帰時に選び直す日時 {date, time}
 
@@ -269,6 +290,100 @@ const grouped = groupOrder.map((g) => ({
         const dt = new Date(y, m - 1, d);
         return `${m}/${d}(${WD[dt.getDay()]})`;
       };
+
+      // ============================================================
+      // ウィザード：ステップ遷移の単一窓口
+      // target = 'step-menu' | 'step-date' | 'step-form' | 'done'
+      // ============================================================
+      const WIZARD_FACES = ['step-menu', 'step-date', 'step-form', 'step-done'];
+      const STEP_NUM = { 'step-menu': 1, 'step-date': 2, 'step-form': 3 };
+
+      // インジケーターの状態（active/done/到達可否）を state に合わせて再描画
+      function renderIndicator() {
+        const ind = $('.steps-indicator');
+        if (!ind) return;
+        // 完了面ではインジケーター自体を隠す
+        ind.hidden = state.step === 'done';
+        if (ind.hidden) return;
+        ind.querySelectorAll('li').forEach((li) => {
+          const n = Number(li.dataset.step);
+          const isActive = n === state.step;
+          // 到達済み（maxReached まで）で現在地以外は「通過済み」表示にする
+          const reachable = n <= state.maxReached;
+          li.classList.toggle('is-active', isActive);
+          li.classList.toggle('is-done', !isActive && reachable);
+          if (isActive) {
+            li.setAttribute('aria-current', 'step');
+          } else {
+            li.removeAttribute('aria-current');
+          }
+          if (reachable && !isActive) {
+            li.setAttribute('role', 'button');
+            li.setAttribute('tabindex', '0');
+            li.removeAttribute('aria-disabled');
+          } else if (isActive) {
+            // 現在地はボタンにしない（移動先が自分自身のため）
+            li.removeAttribute('role');
+            li.removeAttribute('tabindex');
+            li.removeAttribute('aria-disabled');
+          } else {
+            li.removeAttribute('role');
+            li.removeAttribute('tabindex');
+            li.setAttribute('aria-disabled', 'true');
+          }
+        });
+      }
+
+      // 下部ナビ（次へ）の有効/無効を state に合わせて更新
+      function updateNavButtons() {
+        const menuNext = $('#navMenuNext');
+        if (menuNext) menuNext.disabled = !state.menu;
+        const dateNext = $('#navDateNext');
+        if (dateNext) dateNext.disabled = !(state.date && state.time);
+      }
+
+      function showStep(target) {
+        // done は数値ステップとは別扱い（3 相当）
+        const isDone = target === 'done';
+        const faceId = isDone ? 'step-done' : target;
+        // 4面すべて隠して対象だけ表示
+        WIZARD_FACES.forEach((id) => { const el = document.getElementById(id); if (el) el.hidden = (id !== faceId); });
+        // state 更新
+        state.step = isDone ? 'done' : STEP_NUM[target];
+        const reachedNum = isDone ? 3 : STEP_NUM[target];
+        state.maxReached = Math.max(state.maxReached, reachedNum);
+        // インジケーター・下部ナビを再描画
+        renderIndicator();
+        updateNavButtons();
+        // スクロールとフォーカス：ヘッダーが sticky なので先頭(0)へ。見出しへフォーカス
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        const face = document.getElementById(faceId);
+        const h2 = face && face.querySelector('h2');
+        if (h2) { try { h2.focus({ preventScroll: true }); } catch (_) { h2.focus(); } }
+      }
+
+      // 下部ナビ（戻る／次へ）の配線
+      $('#navMenuNext').addEventListener('click', () => { if (state.menu) showStep('step-date'); });
+      $('#navDateBack').addEventListener('click', () => showStep('step-menu'));
+      $('#navDateNext').addEventListener('click', () => { if (state.date && state.time) showStep('step-form'); });
+      $('#navFormBack').addEventListener('click', () => showStep('step-date'));
+
+      // ドット（インジケーター）クリック：到達済み（n <= maxReached）のときだけ移動。未到達は無反応
+      (function bindIndicator() {
+        const ind = $('.steps-indicator');
+        if (!ind) return;
+        const go = (li) => {
+          const n = Number(li.dataset.step);
+          if (n > state.maxReached || n === state.step) return; // 未到達・現在地は無反応
+          showStep(WIZARD_FACES[n - 1]);
+        };
+        ind.querySelectorAll('li').forEach((li) => {
+          li.addEventListener('click', () => go(li));
+          li.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(li); }
+          });
+        });
+      })();
 
       // ============================================================
       // LINE 連携（任意）：userId・表示名の取得＋同端末での自動連携
@@ -404,7 +519,8 @@ const grouped = groupOrder.map((g) => ({
         history.replaceState(null, '', location.pathname);
         try { localStorage.removeItem(OAUTH_KEY); } catch (_) {}
         if (!draft || draft.state !== retState) {
-          $('#step-form').hidden = false;
+          // 失敗時も③へ戻して手入力で続行できるようにする
+          showStep('step-form');
           showError('連携の確認に失敗しました（セキュリティ検証）。お手数ですが、もう一度お試しください。');
           return false;
         }
@@ -415,18 +531,19 @@ const grouped = groupOrder.map((g) => ({
             body: JSON.stringify({ action: 'lineLogin', code, redirectUri: LINE_LOGIN_REDIRECT }),
           });
           const data = await res.json();
-          if (!data.ok || !data.lineUserId) { $('#step-form').hidden = false; showError('LINE連携に失敗しました。お手数ですが、もう一度お試しください。'); return false; }
+          if (!data.ok || !data.lineUserId) { showStep('step-form'); showError('LINE連携に失敗しました。お手数ですが、もう一度お試しください。'); return false; }
           state.lineUserId = data.lineUserId;
           state.displayName = data.displayName || '';
           restoreDraft(draft);
           // 名前未入力なら LINE 表示名で自動補完
           if (!$('#f-name').value.trim() && state.displayName) $('#f-name').value = state.displayName;
           applyLinkState();
-          $('#step-form').hidden = false;
-          $('#step-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+          // 復帰成功：menu/date/time が復元されるので③まで到達済みにして③を表示
+          state.maxReached = 3;
+          showStep('step-form');
           return true;
         } catch (e) {
-          $('#step-form').hidden = false;
+          showStep('step-form');
           showError('LINE連携の通信に失敗しました。通信環境をご確認のうえ、もう一度お試しください。');
           return false;
         }
@@ -538,10 +655,11 @@ const grouped = groupOrder.map((g) => ({
             hasFirst: el.dataset.hasfirst === '1',
             firstLabel: el.dataset.firsttime,
           };
+          // メニュー変更＝下流（日時）を無効化して②へ。到達上限も②に戻す
           state.date = null;
           state.time = null;
-          $('#step-date').hidden = false;
-          $('#step-date').scrollIntoView({ behavior: 'smooth', block: 'start' });
+          state.maxReached = 2;
+          showStep('step-date');
           loadAvailability();
           updateSummary();
         });
@@ -611,7 +729,9 @@ const grouped = groupOrder.map((g) => ({
             state.time = restoreTarget.time;
             const tb = $('#timeList').querySelector('.time-btn[data-time="' + restoreTarget.time + '"]');
             if (tb) tb.classList.add('active');
-            $('#step-form').hidden = false;
+            // menu/date/time が揃って復元される分岐：③まで到達済みにして③を表示
+            state.maxReached = 3;
+            showStep('step-form');
           }
           updateSummary();
           restoreTarget = null;
@@ -669,9 +789,12 @@ const grouped = groupOrder.map((g) => ({
           b.addEventListener('click', () => {
             state.date = b.dataset.date;
             state.time = null;
+            // 時刻を選び直すまで③へは進めない（②に留め、次へを無効化）
+            state.maxReached = 2;
             renderCalendar();
             renderTimes();
             updateSummary();
+            updateNavButtons();
             $('#timeList').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           });
         });
@@ -688,9 +811,9 @@ const grouped = groupOrder.map((g) => ({
           b.addEventListener('click', () => {
             state.time = b.dataset.time;
             tl.querySelectorAll('.time-btn').forEach((x) => x.classList.toggle('active', x === b));
-            $('#step-form').hidden = false;
-            $('#step-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            // 時刻選択で自動前進（③へ）。maxReached=3 は showStep が更新
             updateSummary();
+            showStep('step-form');
           });
         });
       }
@@ -825,8 +948,6 @@ const grouped = groupOrder.map((g) => ({
       }
 
       function renderDone(data) {
-        ['step-date', 'step-form'].forEach((id) => (document.getElementById(id).hidden = true));
-        document.querySelectorAll('.step h2 .step-no').forEach(() => {});
         const first = data.isFirstTime;
         const html =
           `<p>下記内容で承りました。サロンの確認後、<strong>確定のご連絡</strong>をいたします。</p>` +
@@ -839,9 +960,8 @@ const grouped = groupOrder.map((g) => ({
             ? `<p class="manage"><a class="reserve-btn manage-btn" href="${esc(data.manageUrl)}">予約内容を確認・変更する</a><small class="manage-hint">※ご予約の確認・変更・キャンセルができます。同じリンクを確認メールにも記載しています。</small></p>`
             : '');
         $('#doneBody').innerHTML = html;
-        const done = $('#step-done');
-        done.hidden = false;
-        done.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // 完了面へ集約（4面の隠し・インジケーター非表示・スクロール/フォーカスは showStep が担う）
+        showStep('done');
       }
 
       // ---- 初期化：LINE 連携（復帰 or 端末保存からの自動連携）----
@@ -1150,6 +1270,103 @@ const grouped = groupOrder.map((g) => ({
         .wrap { padding: 1rem .8rem 3rem; }
         /* 狭幅では日付列を全幅にし、時間/案内文をその下へ確実に折り返す */
         .hours-day { min-width: 100%; }
+      }
+
+      /* ステップインジケーター（ドット）。sticky にはしない（ヘッダーが sticky のため） */
+      .steps-indicator {
+        list-style: none;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: .5rem;
+        margin: 0 0 1.4rem;
+        padding: 0;
+      }
+      .steps-indicator li {
+        position: relative;
+        flex: 1 1 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: .35rem;
+        text-align: center;
+        color: var(--c-muted);
+        font-size: .78rem;
+      }
+      /* ドット間のコネクタ線（各項目の左半分に伸ばし、先頭は描かない） */
+      .steps-indicator li::before {
+        content: '';
+        position: absolute;
+        top: 13px; /* ドット中心に合わせる（26px の半分） */
+        right: 50%;
+        width: 100%;
+        height: 2px;
+        background: var(--c-border);
+        z-index: 0;
+      }
+      .steps-indicator li:first-child::before { display: none; }
+      /* 到達済み（通過）まではコネクタもアクセント色に */
+      .steps-indicator li.is-active::before,
+      .steps-indicator li.is-done::before { background: var(--c-purple); }
+      .steps-indicator .dot {
+        position: relative;
+        z-index: 1;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--c-surface);
+        border: 2px solid var(--c-border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .steps-indicator .lbl { line-height: 1.4; }
+      /* 現在地：紫の塗り */
+      .steps-indicator li.is-active { color: var(--c-purple-dk); font-weight: 600; }
+      /* 現在地：紫の塗り＋外側リングで「いまここ」を最も強調 */
+      .steps-indicator li.is-active .dot {
+        background: var(--c-purple);
+        border-color: var(--c-purple);
+        box-shadow: 0 0 0 4px rgba(139, 96, 128, .22);
+      }
+      /* 通過済み：紫の塗り＋白いチェックで「完了」を明示（ゴールドはアクセント専用に温存） */
+      .steps-indicator li.is-done { color: var(--c-purple-dk); }
+      .steps-indicator li.is-done .dot {
+        background: var(--c-purple);
+        border-color: var(--c-purple);
+      }
+      .steps-indicator li.is-done .dot::after {
+        content: '✓'; color: #fff; font-size: .82rem; line-height: 1; font-weight: 700;
+      }
+      /* 未到達：グレーの破線＋減光で「まだ」を明示 */
+      .steps-indicator li:not(.is-active):not(.is-done) .dot { border-style: dashed; }
+      /* 到達済みで移動可能な項目はポインタ、未到達は不活性 */
+      .steps-indicator li[role="button"] { cursor: pointer; }
+      .steps-indicator li[aria-disabled="true"] { cursor: default; opacity: .5; }
+
+      /* 下部ナビ行（戻る／次へを2分割配置） */
+      .step-nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: .8rem;
+        margin-top: 1.2rem;
+      }
+      /* ナビ内のボタンは全幅ではなく内容幅寄りに（横並びのため） */
+      .step-nav .reserve-btn { width: auto; flex: 1 1 0; }
+      /* 空のプレースホルダ（戻る無しの側）も同じ比率で場所を確保 */
+      .step-nav > span { flex: 1 1 0; }
+      /* ghost（戻る）は枠色を少し濃くして「押せる」ことを明示（次へとの活性差を確保） */
+      .step-nav .reserve-btn.ghost { margin-top: 0; border-color: var(--c-purple-lt); color: var(--c-purple-dk); }
+
+      @media (max-width: 700px) {
+        .steps-indicator { font-size: .72rem; gap: .3rem; }
+        .steps-indicator .dot { width: 22px; height: 22px; }
+        .steps-indicator li::before { top: 11px; }
+        /* 送信ラベル（「この内容で仮予約する」）の折り返し回避：狭幅ではナビを縦積み */
+        .step-nav { flex-direction: column; align-items: stretch; }
+        .step-nav .reserve-btn { width: 100%; flex: none; }
+        .step-nav > span { display: none; }
       }
 
       /* C5: 動きを抑える設定の利用者にはアニメ・自動スクロールを無効化 */
