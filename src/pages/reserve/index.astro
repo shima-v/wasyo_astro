@@ -20,7 +20,7 @@ const tel = '090-9095-6034';
 const pageTitle = `${ENV_LABEL}ご予約 | ${salonName}`;
 
 // コース区分ごとにメニューをまとめる
-const groupOrder = ['double', 'simple', 'petit'];
+const groupOrder = ['recommend', 'simple', 'petit'];
 const grouped = groupOrder.map((g) => ({
   key: g,
   group: MENU_GROUPS[g],
@@ -32,7 +32,7 @@ const grouped = groupOrder.map((g) => ({
   <head>
     <meta charset="utf-8" />
     <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
     <meta name="robots" content="noindex" />
     <title>{pageTitle}</title>
     <meta name="description" content="サロン和笑〜Violane〜 のオンライン予約。メニューと日時を選んでお申し込みいただけます。" />
@@ -77,11 +77,6 @@ const grouped = groupOrder.map((g) => ({
       <!-- STEP 1: メニュー -->
       <section class="step" id="step-menu">
         <h2 tabindex="-1"><span class="step-no">1</span> メニューを選ぶ</h2>
-        <!-- 上部ナビ（見出し直後・横並び）。goBack/goNext を呼ぶ。step1 は戻る非活性 -->
-        <div class="step-nav top-nav">
-          <button type="button" class="reserve-btn ghost nav-back" data-nav="back" disabled>← 戻る</button>
-          <button type="button" class="reserve-btn nav-next" data-nav="next" disabled>次へ →</button>
-        </div>
         {grouped.map((g, i) => (
           <details class="menu-group" open={i === 0} name="menu-course">
             <summary class="menu-group-head">
@@ -124,10 +119,6 @@ const grouped = groupOrder.map((g) => ({
       <!-- STEP 2: 日時 -->
       <section class="step" id="step-date" hidden>
         <h2 tabindex="-1"><span class="step-no">2</span> 日時を選ぶ</h2>
-        <div class="step-nav top-nav">
-          <button type="button" class="reserve-btn ghost nav-back" data-nav="back">← 戻る</button>
-          <button type="button" class="reserve-btn nav-next" data-nav="next" disabled>次へ →</button>
-        </div>
         <!-- 営業時間はリンク→ポップアップに（上部から移設してコンパクト化） -->
         <p class="hours-link-row">
           <button type="button" class="hours-link" id="hoursOpen">営業時間を見る</button>
@@ -147,10 +138,6 @@ const grouped = groupOrder.map((g) => ({
       <!-- STEP 3: お客様情報（情報のみ。ご要望・同意は④へ移設） -->
       <section class="step" id="step-form" hidden>
         <h2 tabindex="-1"><span class="step-no">3</span> お客様情報</h2>
-          <div class="step-nav top-nav">
-            <button type="button" class="reserve-btn ghost nav-back" data-nav="back">← 戻る</button>
-            <button type="button" class="reserve-btn nav-next" data-nav="next">次へ →</button>
-          </div>
           <!-- LINE 連携（任意）。設定済み(チャネルID/redirect あり)のときだけ表示 -->
           <div class="line-link" id="lineLink" hidden>
             <!-- 未連携 -->
@@ -241,10 +228,6 @@ const grouped = groupOrder.map((g) => ({
       <!-- STEP 4: ご要望・同意（③から移設） -->
       <section class="step" id="step-extra" hidden>
         <h2 tabindex="-1"><span class="step-no">4</span> ご要望・ご同意</h2>
-        <div class="step-nav top-nav">
-          <button type="button" class="reserve-btn ghost nav-back" data-nav="back">← 戻る</button>
-          <button type="button" class="reserve-btn nav-next" data-nav="next" disabled>次へ →</button>
-        </div>
 
         <div class="field">
           <label for="f-note">ご要望（任意）</label>
@@ -270,10 +253,6 @@ const grouped = groupOrder.map((g) => ({
       <!-- STEP 5: 確認（送信前の入力確認）。各項目群に修正リンクを置き、送信はここで行う -->
       <section class="step" id="step-confirm" hidden>
         <h2 tabindex="-1"><span class="step-no">5</span> ご予約内容の確認</h2>
-        <div class="step-nav top-nav">
-          <button type="button" class="reserve-btn ghost nav-back" data-nav="back">← 戻る</button>
-          <button type="button" class="reserve-btn nav-next" data-nav="next">この内容で仮予約する</button>
-        </div>
         <p class="confirm-lead">内容をご確認のうえ、よろしければお申し込みください。修正は各項目の「修正」からどうぞ。</p>
 
         <div class="confirm-block">
@@ -1262,6 +1241,19 @@ const grouped = groupOrder.map((g) => ({
       applyLastMenuHint();
       initLine();
       prefetchAvailabilityRaw(); // ページ表示直後にバックグラウンドで素材を1回だけ取得
+
+      // 入力欄フォーカス時、ソフトキーボードで下部ナビが隠れないよう VisualViewport で上へ逃がす
+      (function keepBottomNavAboveKeyboard() {
+        const vv = window.visualViewport;
+        const bn = document.getElementById('bottomNav');
+        if (!vv || !bn) return;
+        const adjust = () => {
+          const overlap = window.innerHeight - (vv.height + vv.offsetTop);
+          bn.style.transform = overlap > 1 ? 'translateY(-' + Math.round(overlap) + 'px)' : '';
+        };
+        vv.addEventListener('resize', adjust);
+        vv.addEventListener('scroll', adjust);
+      })();
     </script>
 
     <style is:global>
@@ -1754,6 +1746,7 @@ const grouped = groupOrder.map((g) => ({
         backdrop-filter: blur(6px);
         border-top: 1px solid var(--c-border);
         padding: .6rem 1rem calc(.6rem + env(safe-area-inset-bottom, 0px));
+        transition: transform .15s ease; will-change: transform;
       }
       .bottom-nav-inner {
         max-width: 680px; margin: 0 auto;

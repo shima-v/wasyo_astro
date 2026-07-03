@@ -25,7 +25,7 @@
 
 /** コース区分の表示ラベル */
 export const MENU_GROUPS = {
-  double: { label: 'ダブルコース', desc: '全身もみほぐし＋オイルケアを一度に体験' },
+  recommend: { label: 'おすすめコース', desc: '当店人気の4メニュー' },
   simple: { label: 'シンプルコース', desc: '' },
   petit: { label: 'プチコース', desc: '1部位重点ケア' },
 };
@@ -36,7 +36,7 @@ export const MENU = [
   {
     id: 'double-momi-part-oil-70',
     name: '全身もみほぐし＋部位オイルケア',
-    group: 'double',
+    group: 'recommend',
     durationMin: 70,
     slotMin: 150,
     price: 4300,
@@ -45,7 +45,7 @@ export const MENU = [
   {
     id: 'double-momi-full-oil-90',
     name: '全身もみほぐし＋全身オイルケア',
-    group: 'double',
+    group: 'recommend',
     durationMin: 90,
     slotMin: 180,
     price: 5500,
@@ -74,7 +74,7 @@ export const MENU = [
   {
     id: 'simple-momi-70',
     name: '全身もみほぐし 70分',
-    group: 'simple',
+    group: 'recommend',
     durationMin: 70,
     slotMin: 150,
     price: 4400,
@@ -82,7 +82,7 @@ export const MENU = [
   {
     id: 'simple-momi-100',
     name: '全身もみほぐし 100分',
-    group: 'simple',
+    group: 'recommend',
     durationMin: 100,
     slotMin: 180,
     price: 5500,
