@@ -511,7 +511,8 @@ function decide_(token, approve, message) {
     var extra = (message && String(message).trim()) ? '\n\n― サロンより ―\n' + String(message).trim() : '';
     notifyCustomerProps_(props, '【ご予約が確定しました】\n' +
       bookingSummary_(menu, ev.getStartTime(), { durationMin: displayDurationMin_(props, ev), price: Number(props.price || 0) }, props.isFirstTime === 'true') +
-      '\nご来店をお待ちしております。' + extra);
+      '\nご来店をお待ちしております。' + extra +
+      '\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(token));
   } else {
     var msg = (message && String(message).trim()) ? String(message).trim() : DECLINE_DEFAULT_MSG;
     notifyCustomerProps_(props, '【ご予約について】\n' + msg);
@@ -609,8 +610,10 @@ function cancelBooking_(b) {
   if (!withinCancelDeadline_(found.event.getStartTime())) return { ok: false, error: 'too_late' };
   var props = found.props;
   var menu = MENU[props.menuId] || { name: props.menuId };
+  var start = found.event.getStartTime(); // 通知に載せる日時は deleteEvent の前に退避する
   found.event.deleteEvent();
-  notifyOwner_('【お客様がキャンセルしました】\n' + props.name + ' 様 / ' + menu.name);
+  notifyOwner_('【お客様がキャンセルしました】\n' + props.name + ' 様 / ' + menu.name +
+    '\n日時: ' + fmt_(start, 'M/d(E) HH:mm') + '（' + (props.status === STATUS.CONFIRMED ? '確定' : '仮予約') + '）');
   notifyCustomerProps_(props, '【ご予約をキャンセルしました】\nまたのご利用をお待ちしております。');
   return { ok: true };
 }
@@ -1233,6 +1236,38 @@ function sendFollowUps() {
       'followup');
     ev.setTag('followedUp', 'true');
   });
+}
+
+/**
+ * オーナー向け日次ダイジェスト。当日の【確定】予約一覧と、未確定の【仮予約】一覧をまとめて通知する。
+ * notifyOwner_ 経由のため Discord 優先（失敗時 LINE ＋ 未達はリトライキューで追送）。
+ * PII 方針: 名前・日時・メニューのみ（電話/メールは載せない＝既存オーナー通知と同一）。
+ * トリガー: GAS UI で日次（毎朝）実行を登録する（手順は docs/SETUP.md）。
+ */
+function sendOwnerDailyDigest() {
+  var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
+  if (!cal) return;
+  var dayStart = startOfDay_(new Date());
+  var dayEnd = addDays_(dayStart, 1);
+  // 当日の確定予約（時刻順）
+  var today = cal.getEvents(dayStart, dayEnd).filter(function (ev) {
+    return getEventProp_(ev, 'status') === STATUS.CONFIRMED;
+  }).sort(function (a, b) { return a.getStartTime() - b.getStartTime(); }).map(function (ev) {
+    var p = getEventProps_(ev);
+    var menu = MENU[p.menuId] || { name: p.menuId };
+    return '・' + fmt_(ev.getStartTime(), 'HH:mm') + ' ' + p.name + ' 様 / ' + menu.name;
+  });
+  // 未確定の仮予約（承認待ち一覧を再利用。now〜maxAdvanceDays の pending）
+  var pending = adminListPending_().pending.map(function (p) {
+    return '・' + fmt_(parseDate_(p.date), 'M/d(E)') + ' ' + p.time + ' ' + p.name + ' 様 / ' + p.menuName;
+  });
+  var lines = ['【本日のご予約と未確定の仮予約】 ' + fmt_(dayStart, 'M/d(E)'), ''];
+  lines.push('■ 本日のご予約（確定 ' + today.length + '件）');
+  lines.push(today.length ? today.join('\n') : '・本日のご予約はありません');
+  lines.push('');
+  lines.push('■ 未確定の仮予約（' + pending.length + '件）');
+  lines.push(pending.length ? pending.join('\n') : '・未確定の仮予約はありません');
+  notifyOwner_(lines.join('\n'));
 }
 
 // ---- 無料枠（Messaging API push）の監視 ----
