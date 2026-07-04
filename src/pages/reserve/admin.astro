@@ -32,21 +32,27 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       <!-- 管理トークン入力ゲート（未認証時のみ表示） -->
       <section class="card" id="gate">
         <h2>管理ログイン</h2>
-        <p class="gate-lead">管理トークンを入力してください。トークンはこの端末にのみ保存され、外部には送られません。</p>
+        <p class="gate-lead">管理トークンを入力してログインしてください。</p>
         <div id="gateErr" class="status err" hidden></div>
         <div class="msg-field">
           <label for="tokenInput">管理トークン</label>
           <input type="password" id="tokenInput" autocomplete="off" inputmode="text" placeholder="管理トークン" />
         </div>
+        <!-- PIN 入力（差し込み式）。既定は非表示＝無効。Worker 側で ADMIN_PIN を設定し、
+             この要素の hidden を外すと PIN 必須運用にできる。login() は値があれば送る。 -->
+        <div class="msg-field" id="pinField" hidden>
+          <label for="pinInput">PIN（任意）</label>
+          <input type="password" id="pinInput" autocomplete="off" inputmode="numeric" placeholder="PIN" />
+        </div>
         <div class="actions">
-          <button type="button" class="reserve-btn" id="gateBtn">接続する</button>
+          <button type="button" class="reserve-btn" id="gateBtn">ログイン</button>
         </div>
       </section>
 
       <!-- 管理パネル（認証後に表示） -->
       <section id="panel" hidden>
         <div class="panel-bar">
-          <button type="button" class="linkish" id="logoutBtn">トークンを消去</button>
+          <button type="button" class="linkish" id="logoutBtn">ログアウト</button>
         </div>
 
         <!-- メニュー（セクション切替）。モバイルでも横スクロールで全機能に到達できる -->
@@ -179,16 +185,18 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
     <script type="application/json" id="reserve-config" set:html={JSON.stringify({ RESERVE_API })}></script>
     <script>
       // 共有部品を import するため bundled module 化。サーバ値は JSON から読む。
-      // トークン保管・管理 API・認証ゲートは admin-api.js に集約（挙動不変の抽出）。
-      import { getToken, setToken, clearToken, createAdminApi } from '../../lib/admin-api.js';
+      // 管理 API・認証（ログイン/セッション）・認証ゲートは admin-api.js に集約。
+      // 認証方式は環境で切替（dev=セッションCookie / prod=localStorageトークン）。
+      import { createAdminApi } from '../../lib/admin-api.js';
 
       const { RESERVE_API } = JSON.parse(document.getElementById('reserve-config').textContent);
 
       const $ = (s) => document.querySelector(s);
       const el = (id) => document.getElementById(id);
 
-      // 管理 API・認証ゲートのインスタンス（DOM は el 越しに都度解決＝従来と同じ挙動）。
-      const { apiPost, showGate, showPanel, handleForbidden } = createAdminApi({ reserveApi: RESERVE_API, el });
+      // 管理 API・認証ゲートのインスタンス（DOM は el 越しに都度解決）。
+      const { apiPost, login, logout, showGate, showPanel, handleForbidden, startup } =
+        createAdminApi({ reserveApi: RESERVE_API, el });
 
       function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
@@ -625,21 +633,28 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       });
 
       // ---- ゲートのイベント配線 ----
-      el('logoutBtn').addEventListener('click', () => { clearToken(); showGate(); });
-      el('gateBtn').addEventListener('click', () => {
+      el('logoutBtn').addEventListener('click', async () => { await logout(); showGate(); });
+      el('gateBtn').addEventListener('click', async () => {
         const t = el('tokenInput').value.trim();
         if (!t) { showGate('管理トークンを入力してください。'); return; }
-        setToken(t);
+        const pinEl = el('pinInput');
+        const pin = (pinEl && pinEl.value.trim()) || '';
+        const ok = await login(t, pin);
+        if (!ok) { showGate('ログインに失敗しました。トークン（またはPIN）をご確認ください。'); return; }
         el('tokenInput').value = '';
+        if (pinEl) pinEl.value = '';
         // 認証済みの状態でパネルを開き、初期セクション（承認待ち）を表示
         Object.keys(loaded).forEach((k) => delete loaded[k]);
         showPanel();
         showSection('pending');
       });
       el('tokenInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') el('gateBtn').click(); });
+      el('pinInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') el('gateBtn').click(); });
 
       // ---- 起動 ----
-      if (getToken()) { showPanel(); showSection('pending'); } else { showGate(); }
+      // セッション方式(dev)はパネルを開いて listPending を試行→Cookie 無効なら handleForbidden がゲートへ。
+      // レガシー方式(prod)は保存済みトークンの有無でゲート/パネルを出し分ける。
+      startup(() => { showPanel(); showSection('pending'); }, () => showGate());
     </script>
 
     <style is:global>
