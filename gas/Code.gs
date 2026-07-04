@@ -792,6 +792,21 @@ function requireAdminToken_(body, fn) {
   return fn();
 }
 
+/**
+ * Worker だけが持つ共有秘密 `GAS_ADMIN_SECRET`（Script Property）を検証するラッパ。
+ * 段階2で管理系の GAS 呼び出しを Cloudflare Worker 経由に集約したのち、顧客系・代理予約の
+ * 新エンドポイント（P4/P5）を「Worker からの呼び出しに限る」ために使う土台。
+ * GAS Web App は HTTP ヘッダを読めないため、Worker は POST body の `workerSecret` として送る。
+ * 照合は定数時間比較（constEq_）。未設定・不一致・空は forbidden。
+ * ※段階1では関数の新設のみ（まだ呼び出し側には配線しない）。値は Script Properties のみ・リポには書かない。
+ */
+function requireWorkerSecret_(body, fn) {
+  var expected = prop_('GAS_ADMIN_SECRET');
+  var given = (body && body.workerSecret) || '';
+  if (!expected || !given || !constEq_(expected, given)) return { ok: false, error: 'forbidden' };
+  return fn();
+}
+
 // オーナー通知（新規予約・枠警告）の接続テスト。実際の notifyOwner_ 経路で1通送る。
 // OWNER_DISCORD_WEBHOOK_URL 設定時は Discord、未設定なら LINE に届く。届いたチャネルを via で返す。
 function adminOwnerChannelTest_() {
@@ -1275,6 +1290,38 @@ function maskId_(s) {
   s = String(s || '');
   return s.length <= 4 ? '****' : '****' + s.slice(-4);
 }
+
+/**
+ * 監査ログ基盤。顧客台帳ブックの「監査ログ」シートへ1行追記する（logPush_ と同じ流儀）。
+ * 顧客PII（全顧客閲覧・伏字解除・カルテ・代理予約）に関わる操作の証跡を残すための土台。
+ * 列: 日時 / 操作者 / 操作 / 対象(マスク) / 結果。
+ *   - operator: 操作者識別子。**生トークンは絶対に渡さない**。呼び出し側で tokenFp_()（HMAC指紋）や
+ *               'via:line' 等のラベルに変換してから渡す。
+ *   - op: 操作種別（view | unmask | karteView | karteEdit | proxyBook）。
+ *   - target: 顧客キー等。maskId_ でさらに末尾4桁のみに落として記録する。
+ *   - result: ok | ng | forbidden 等の結果。
+ * ※段階1では関数の新設のみ。実際の呼び出しは顧客系・代理予約を載せる P4/P5 で配線する。
+ */
+function auditPush_(operator, op, target, result) {
+  try {
+    var id = prop_('LEDGER_SHEET_ID');
+    if (!id) return;
+    var ss = SpreadsheetApp.openById(id);
+    var sh = ss.getSheetByName('監査ログ');
+    if (!sh) {
+      sh = ss.insertSheet('監査ログ');
+      sh.appendRow(['日時', '操作者', '操作', '対象(マスク)', '結果']);
+    }
+    sh.appendRow([fmt_(new Date(), 'yyyy-MM-dd HH:mm:ss'), String(operator || ''), String(op || ''), maskId_(target), String(result || '')]);
+  } catch (err) { console.error('auditPush_ failed: ' + err); }
+}
+
+/**
+ * 監査ログの操作者識別子に使う「トークン指紋」。生トークンを残さないため、
+ * HMAC（sign_）に通した非可逆・安定なダイジェストの先頭のみを返す。
+ * 同一トークンなら同一指紋になるので、操作者の突き合わせには十分機能する。
+ */
+function tokenFp_(t) { return t ? 'fp:' + sign_(String(t)).slice(0, 12) : ''; }
 
 /**
  * LINE Login（Web OAuth）の認可コードを userId・表示名に交換する。
