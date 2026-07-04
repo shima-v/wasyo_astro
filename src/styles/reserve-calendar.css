@@ -1,0 +1,77 @@
+/* 予約フロント共有スタイル: カレンダー（日付選択）＋時刻ボタン＋空き枠ヒートマップ。
+   index（メニュー→日時）と manage（日時変更）が import して共有する。
+   色は各ページの :root で定義される CSS 変数（--c-purple 等）を参照する。
+   ルールは元 index.astro のインライン定義から一字一句そのまま移設（挙動不変）。 */
+
+/* カレンダー読み込み中のスケルトン */
+.cal-skeleton {
+  height: 280px; border-radius: 10px;
+  background: linear-gradient(100deg, #f3ecf2 30%, #fbf6fa 50%, #f3ecf2 70%);
+  background-size: 200% 100%; animation: shimmer 1.2s linear infinite;
+}
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+/* カレンダー（日付選択） */
+.date-list { margin-bottom: 1rem; }
+.cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .6rem; }
+.cal-title { font-weight: 600; font-size: 1rem; }
+.cal-nav {
+  font-family: inherit; font-size: 1.25rem; line-height: 1; color: var(--c-purple-dk);
+  width: 42px; height: 42px; border: 1px solid var(--c-border); background: #fff;
+  border-radius: 10px; cursor: pointer;
+}
+.cal-nav:hover:not(:disabled) { border-color: var(--c-purple-lt); }
+.cal-nav:disabled { opacity: .3; cursor: default; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: .3rem; }
+.cal-wd { text-align: center; font-size: .78rem; color: var(--c-muted); padding: .15rem 0; }
+.cal-wd.sun { color: #B23A48; }
+.cal-wd.sat { color: #3F6FB0; }
+.cal-cell {
+  aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center;
+  font-size: .92rem; font-family: inherit;
+}
+.cal-cell.empty { border: 0; }
+.cal-day { border-radius: 9px; }
+.cal-day.disabled { color: #CDBFCC; }
+.cal-day.disabled.sun { color: #e0b3ba; }
+.cal-day.disabled.sat { color: #b6c4dc; }
+/* 祝日（休業）: 日付の下に祝日名を小さく表示。色は日曜と同系の赤で休業を示す */
+.cal-day.disabled.holiday {
+  flex-direction: column; gap: 0; line-height: 1.05;
+  color: #B23A48; overflow: hidden;
+}
+.cal-day.disabled.holiday .hol-name {
+  display: block; max-width: 100%;
+  font-size: .5rem; color: #B23A48;
+  white-space: normal; word-break: break-all; text-align: center;
+}
+.cal-day.avail {
+  position: relative; flex-direction: column; gap: 2px;
+  border: 1px solid var(--c-border); background: #fff; color: var(--c-ink); cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.cal-day.avail.sun { color: #B23A48; }
+.cal-day.avail.sat { color: #3F6FB0; }
+.cal-day.avail:hover { border-color: var(--c-purple-lt); background: #FCF6FA; }
+.cal-day.avail.active { background: var(--c-purple); color: #fff; border-color: var(--c-purple); }
+.cal-day .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--c-accent); }
+.cal-day.avail.active .dot { background: #fff; }
+/* 項目3: 空き枠ヒートマップ（◎空き多い＝濃い / ○残りわずか＝薄い / ✕お休み） */
+.cal-day.avail.heat-hi { background: #F3DEEC; }
+.cal-day.avail.heat-mid { background: #FDF7FB; }
+.heat-mark { font-size: .62rem; line-height: 1; color: var(--c-purple-lt); }
+.cal-day.avail.heat-hi .heat-mark { color: var(--c-purple); }
+.cal-day.avail.active .heat-mark { color: #fff; }
+.cal-x { font-size: .6rem; line-height: 1; color: #CDBFCC; }
+.cal-legend { margin: .5rem 0 0; font-size: .72rem; color: var(--c-muted); display: flex; gap: .9rem; justify-content: center; flex-wrap: wrap; }
+
+/* 時刻ボタン（時刻ポップアップ内・および manage の時刻リスト） */
+.time-btn {
+  font-family: inherit; font-size: .9rem; cursor: pointer;
+  border: 1px solid var(--c-border); background: #fff; color: var(--c-ink);
+  border-radius: 8px; padding: .45rem .7rem; min-height: 40px;
+}
+.time-btn:hover { border-color: var(--c-purple-lt); }
+.time-btn.active { background: var(--c-purple); color: #fff; border-color: var(--c-purple); }
+.time-list { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; }
+.time-label { width: 100%; font-size: .85rem; color: var(--c-muted); margin-bottom: .15rem; }

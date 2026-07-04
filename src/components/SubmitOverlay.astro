@@ -1,0 +1,32 @@
+---
+// 送信中の全面オーバーレイ（二重送信防止＋送信中の強調）の共有コンポーネント。
+// 制御ロジックは src/lib/submit-overlay.js（showSubmitOverlay / hideSubmitOverlay / runExclusive）。
+// #submitOverlay を各画面（index / manage / admin）に1つ置く。
+// message は初期本文。実行時に runExclusive({message}) / showSubmitOverlay(message) で差し替え可。
+// spinner の基準サイズは各ページの .spinner に依存する（本コンポーネントは大きさのみ上書き）。
+const { message = 'ご予約を送信しています…', subtext = '画面をそのままでお待ちください' } = Astro.props;
+---
+<div id="submitOverlay" class="submit-overlay" role="alert" aria-live="assertive" hidden>
+  <div class="submit-overlay-card">
+    <span class="spinner" aria-hidden="true"></span>
+    <p class="submit-overlay-msg">{message}</p>
+    <small>{subtext}</small>
+  </div>
+</div>
+
+<style is:global>
+  /* 予約送信中の全面オーバーレイ（暗幕＋中央カード）。hidden 属性で消える（[hidden] が !important）。 */
+  .submit-overlay {
+    position: fixed; inset: 0; z-index: 120;
+    display: flex; align-items: center; justify-content: center; padding: 1.5rem;
+    background: rgba(44, 31, 58, .45);
+  }
+  .submit-overlay-card {
+    background: var(--c-surface); border-radius: 14px; padding: 1.6rem 1.8rem;
+    display: flex; flex-direction: column; align-items: center; gap: .85rem; text-align: center;
+    color: var(--c-purple-dk); box-shadow: 0 10px 34px rgba(44, 31, 58, .28); max-width: 320px;
+  }
+  .submit-overlay-card p { font-size: 1.02rem; font-weight: 700; }
+  .submit-overlay-card small { font-size: .82rem; color: var(--c-muted); font-weight: 400; }
+  .submit-overlay-card .spinner { width: 38px; height: 38px; border-width: 4px; border-color: #E0D0DC; border-top-color: var(--c-purple); }
+</style>
