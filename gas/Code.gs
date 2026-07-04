@@ -726,7 +726,12 @@ function getBookingByToken_(token) {
 function requireAdminToken_(body, fn) {
   var tokens = (prop_('ADMIN_TOKENS') || '').split(',').map(function (s) { return s.trim(); }).filter(String);
   var given = (body && body.adminToken) || '';
-  if (!given || tokens.indexOf(given) < 0) return { ok: false, error: 'forbidden' };
+  // 定数時間比較で全件を走査する（一致しても break しない＝どのトークンに当たったかも時間差で漏らさない）。
+  var matched = false;
+  for (var i = 0; i < tokens.length; i++) {
+    if (constEq_(tokens[i], given)) matched = true;
+  }
+  if (!given || !matched) return { ok: false, error: 'forbidden' };
   return fn();
 }
 
@@ -1037,7 +1042,8 @@ function ownerLineFallbackNote_() {
 function requireDeployToken_(body, fn) {
   var expected = prop_('DEPLOY_NOTIFY_TOKEN');
   var given = (body && body.deployToken) || '';
-  if (!expected || given !== expected) return { ok: false, error: 'forbidden' };
+  // 秘密の直接 === 比較を避け、定数時間比較（double-HMAC）に統一する。
+  if (!expected || !given || !constEq_(expected, given)) return { ok: false, error: 'forbidden' };
   return fn();
 }
 
@@ -1778,7 +1784,26 @@ function sign_(data) {
   var raw = Utilities.computeHmacSha256Signature(data, prop_('HMAC_SECRET'));
   return Utilities.base64EncodeWebSafe(raw);
 }
-function verifySig_(data, sig) { return sig && sign_(data) === sig; }
+
+/**
+ * 定数時間比較（double-HMAC）。
+ * 生の秘密同士を `===` / `indexOf` で比べると「先頭から何文字一致したか」で処理時間が変わり、
+ * タイミング攻撃で秘密を1文字ずつ推測される足がかりになる。そこで双方を一旦 sign_()
+ * （HMAC-SHA256 → 固定長 base64url）に通し、得られた同一長ダイジェスト同士をバイト単位で
+ * 差分積算して比較する（一致・不一致にかかわらず全長を走査＝早期 return しない）。
+ * sign_ の出力は攻撃者に予測不能なため、比較の分岐時間から元の秘密は復元できない。
+ */
+function constEq_(a, b) {
+  var ha = sign_(String(a == null ? '' : a));
+  var hb = sign_(String(b == null ? '' : b));
+  if (ha.length !== hb.length) return false; // sign_ は常に同一長（32byte → base64url 43文字）
+  var diff = 0;
+  for (var i = 0; i < ha.length; i++) diff |= (ha.charCodeAt(i) ^ hb.charCodeAt(i));
+  return diff === 0;
+}
+
+// capability 署名の検証。期待署名 sign_(data) と提示署名 sig を定数時間（double-HMAC）で比較する。
+function verifySig_(data, sig) { return !!sig && constEq_(sign_(data), sig); }
 
 // 日付ユーティリティ（スクリプトTZ=Asia/Tokyo 前提）
 function fmt_(d, pat) { return Utilities.formatDate(d, TZ, pat); }
