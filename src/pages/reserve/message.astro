@@ -1,6 +1,7 @@
 ---
 import { RESERVE_API, ENV_LABEL } from '../../data/config.js';
 import EnvBadge from '../../components/EnvBadge.astro';
+import SubmitOverlay from '../../components/SubmitOverlay.astro';
 
 const _base = import.meta.env.BASE_URL;
 const base = _base.endsWith('/') ? _base : _base + '/';
@@ -20,6 +21,8 @@ const pageTitle = `${ENV_LABEL}お客様へメッセージを送る | ${salonNam
   </head>
   <body>
     <EnvBadge />
+    <!-- 送信中の全面オーバーレイ（メッセージ送信中・二重送信防止）。共有部品 SubmitOverlay -->
+    <SubmitOverlay message="送信しています…" subtext="画面をそのままでお待ちください" />
     <header class="site-header">
       <a class="home-link" href={base}>‹ {salonName}</a>
       <span class="head-title">お客様へメッセージ</span>
@@ -69,7 +72,12 @@ const pageTitle = `${ENV_LABEL}お客様へメッセージを送る | ${salonNam
       <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
     </footer>
 
-    <script define:vars={{ RESERVE_API }}>
+    <script type="application/json" id="reserve-config" set:html={JSON.stringify({ RESERVE_API })}></script>
+    <script>
+      // 共有部品（src/lib）を import するため bundled module 化。サーバ値は JSON から読む。
+      import { runExclusive } from '../../lib/submit-overlay.js';
+      const { RESERVE_API } = JSON.parse(document.getElementById('reserve-config').textContent);
+
       const WD = ['日', '月', '火', '水', '木', '金', '土'];
       const $ = (s) => document.querySelector(s);
       const params = new URLSearchParams(location.search);
@@ -161,31 +169,35 @@ const pageTitle = `${ENV_LABEL}お客様へメッセージを送る | ${salonNam
       }
 
       // ---- 送信の実行（POST） ----
-      $('#sendBtn').addEventListener('click', async () => {
-        const btn = $('#sendBtn');
+      // 送信中は全面オーバーレイを出し二重送信を弾く（共有 runExclusive）。btn.disabled は多層防御で残置。
+      $('#sendBtn').addEventListener('click', () => {
         const message = $('#custMsg').value;
-        // 空はフロントでも弾いてサーバー往復を省く（サーバー側でも再検証される）
+        // 空はフロントでも弾いてサーバー往復を省く（サーバー側でも再検証される）。
+        // バリデーションエラーではオーバーレイを出さないため runExclusive の外で先に判定する。
         if (!message || !message.trim()) {
           $('#fieldMsg').textContent = errText('empty_message');
           return;
         }
-        $('#fieldMsg').textContent = '';
-        btn.disabled = true;
-        btn.textContent = '送信中…';
-        try {
-          const r = await postAction({ action: 'messageSend', token, sig, message });
-          if (r && r.ok) {
-            showResult(true, '送信しました', 'お客様へ通知済みです。');
-          } else {
+        runExclusive(async () => {
+          const btn = $('#sendBtn');
+          $('#fieldMsg').textContent = '';
+          btn.disabled = true;
+          btn.textContent = '送信中…';
+          try {
+            const r = await postAction({ action: 'messageSend', token, sig, message });
+            if (r && r.ok) {
+              showResult(true, '送信しました', 'お客様へ通知済みです。');
+            } else {
+              btn.disabled = false;
+              btn.textContent = '送信する';
+              $('#fieldMsg').textContent = errText(r && r.error);
+            }
+          } catch (e) {
             btn.disabled = false;
             btn.textContent = '送信する';
-            $('#fieldMsg').textContent = errText(r && r.error);
+            $('#fieldMsg').textContent = '通信に失敗しました。時間をおいて再度お試しください。';
           }
-        } catch (e) {
-          btn.disabled = false;
-          btn.textContent = '送信する';
-          $('#fieldMsg').textContent = '通信に失敗しました。時間をおいて再度お試しください。';
-        }
+        });
       });
 
       load();
