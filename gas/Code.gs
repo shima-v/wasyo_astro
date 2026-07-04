@@ -638,7 +638,13 @@ function changeBooking_(b) {
   } finally {
     lock.releaseLock();
   }
-  notifyOwner_('【お客様が日時変更（要再承認）】\n' + props.name + ' 様 / ' + menu.name + '\n新日時: ' + fmt_(start, 'M/d(E) HH:mm'));
+  // 変更後は再承認が必要（status=PENDING）。仮予約通知と同じ形式でオーナーに承認/辞退/メッセージの3リンクを送る。
+  var changeDetail = '【お客様が日時変更（要再承認）】\n' +
+    'お名前: ' + props.name + ' 様\n' +
+    'メニュー: ' + menu.name + '\n' +
+    '新日時: ' + fmt_(start, 'M/d(E) HH:mm') +
+    (props.note ? '\n要望: ' + props.note : '');
+  notifyOwnerPendingApproval_(changeDetail, props.token, { altLabel: '日時変更の承認/辞退' });
   notifyCustomerProps_(props, '【日時変更を受付ました】\n' + bookingSummary_(menu, start, eff, props.isFirstTime === 'true') + '\nサロンの確認後、確定のご連絡をいたします。');
   return { ok: true, status: STATUS.PENDING };
 }
@@ -792,45 +798,75 @@ function adminEventDescription_(token) {
     '✉️ お客様へメッセージを送る:\n' + base + '/reserve/message/?token=' + token + '&sig=' + msgSig;
 }
 
-function notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst) {
-  var sig = sign_('decision:' + token);
-  // 承認/辞退リンクは front の /reserve/decision（非 Google ドメイン）へ。
-  // Google 複数アカウント時の /u/N/ リダイレクトエラーを回避する（sig 検証モデルは維持）。
+/**
+ * オーナー通知に載せる3リンク（承認/辞退/メッセージ）を作る。
+ *  - 承認/辞退: front /reserve/decision（'decision:' 署名）。複数 Google アカウント時の /u/N/ リダイレクト回避。
+ *  - メッセージ: front /reserve/message（'message:' 署名）。
+ * 仮予約通知・日時変更通知の両方から使い、リンク生成の重複を作らない。
+ * @param {string} token 予約トークン
+ * @returns {{approve: string, decline: string, message: string}}
+ */
+function ownerActionLinks_(token) {
+  var decSig = encodeURIComponent(sign_('decision:' + token));
   var base = decisionBaseUrl_();
-  var approve = base + '?action=approve&token=' + token + '&sig=' + encodeURIComponent(sig);
-  var decline = base + '?action=decline&token=' + token + '&sig=' + encodeURIComponent(sig);
+  var msgBase = prop_('FRONT_BASE_URL').replace(/\/$/, '');
+  var msgSig = encodeURIComponent(sign_('message:' + token));
+  return {
+    approve: base + '?action=approve&token=' + token + '&sig=' + decSig,
+    decline: base + '?action=decline&token=' + token + '&sig=' + decSig,
+    message: msgBase + '/reserve/message/?token=' + token + '&sig=' + msgSig,
+  };
+}
+
+/**
+ * リンク付きのオーナー「要承認」通知を送る共通関数。仮予約・日時変更の両方から使う。
+ * detail（見出し＋お名前/メニュー/日時 等の本文）に承認/辞退/メッセージの3リンクを付けて
+ * Discord 優先・失敗時 LINE フォールバックで送信する。ENV_LABEL 先頭付与・顧客PII非掲載は不変。
+ *  - Discord: 3リンクをプレーンテキストで併記（テンプレートボタン不可）。
+ *  - LINE: 承認/辞退は confirm テンプレの2ボタン、メッセージURLは text に併記
+ *    （confirm は2ボタンまでのため。主経路は Discord なので LINE はテキスト併記で足りる）。
+ * @param {string} detail 通知本文（ENV_LABEL と3リンクは含めない。呼び出し側で組む）
+ * @param {string} token 予約トークン（3リンクの署名素材）
+ * @param {{altLabel?: string}} [opts] altLabel: LINE confirm テンプレの altText 用ラベル
+ */
+function notifyOwnerPendingApproval_(detail, token, opts) {
+  opts = opts || {};
   var label = prop_('ENV_LABEL'); // dev のみ【開発】
-  // 顧客PII（電話・メール）は本文に載せない。名前・日時/メニュー・性別・紹介者・要望のみ。
-  var detail = (label ? label + '\n' : '') +
-    '【新規 仮予約】\n' +
-    'お名前: ' + b.name + (isFirst ? '（新規）' : '（常連）') + '\n' +
-    bookingSummary_(menu, start, eff, isFirst) + '\n' +
-    '性別: ' + (b.gender === 'male' ? '男性' : '女性') + (b.gender === 'male' ? '\n紹介者: ' + b.referrer : '') +
-    (b.note ? '\n要望: ' + b.note : '');
+  var links = ownerActionLinks_(token);
+  var body = (label ? label + '\n' : '') + detail;
   // Discord Webhook が設定されていればそちらへ（顧客PIIを LINE の履歴に残さない移行）。
-  // 承認/辞退はプレーンテキストのURLで併記する（Discord はテンプレートボタン不可）。
   if (prop_('OWNER_DISCORD_WEBHOOK_URL')) {
     // Discord 送信が成功したら終了。失敗（非2xx/例外で false）なら下の LINE 経路へフォールバックし、
     // オーナー通知を取りこぼさない（通知が静かに消えないようにする恒久ハードニング）。
-    if (notifyOwnerDiscord_(detail + '\n\n✅ 承認: ' + approve + '\n❌ 辞退: ' + decline)) return;
-    detail = ownerLineFallbackNote_() + '\n' + detail; // Discord失敗→LINE。二重通知の可能性を明記
+    if (notifyOwnerDiscord_(body + '\n\n✅ 承認: ' + links.approve + '\n❌ 辞退: ' + links.decline + '\n✉️ メッセージ: ' + links.message)) return;
+    body = ownerLineFallbackNote_() + '\n' + body; // Discord失敗→LINE。二重通知の可能性を明記
   }
-  // LINE 経路（Discord 未設定 or 送信失敗時のフォールバック）。詳細はテキスト、承認/辞退は confirm テンプレのボタンで送る（長いURLを直接見せない）
+  // LINE 経路（Discord 未設定 or 送信失敗時のフォールバック）。詳細＋メッセージURLはテキスト、承認/辞退は confirm テンプレのボタンで送る（長いURLを直接見せない）
   linePushMessages_(prop_('LINE_OWNER_USER_ID'), [
-    { type: 'text', text: detail },
+    { type: 'text', text: body + '\n\n✉️ お客様へメッセージ: ' + links.message },
     {
       type: 'template',
-      altText: (label ? label + ' ' : '') + '仮予約の承認/辞退',
+      altText: (label ? label + ' ' : '') + (opts.altLabel || '要承認の予約'),
       template: {
         type: 'confirm',
-        text: 'この仮予約を承認しますか？\n（ボタンから確認ページが開きます）',
+        text: 'この予約を承認しますか？\n（ボタンから確認ページが開きます）',
         actions: [
-          { type: 'uri', label: '✅ 承認する', uri: approve },
-          { type: 'uri', label: '❌ 辞退する', uri: decline },
+          { type: 'uri', label: '✅ 承認する', uri: links.approve },
+          { type: 'uri', label: '❌ 辞退する', uri: links.decline },
         ],
       },
     },
   ], 'owner');
+}
+
+function notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst) {
+  // 顧客PII（電話・メール）は本文に載せない。名前・日時/メニュー・性別・紹介者・要望のみ。
+  var detail = '【新規 仮予約】\n' +
+    'お名前: ' + b.name + (isFirst ? '（新規）' : '（常連）') + '\n' +
+    bookingSummary_(menu, start, eff, isFirst) + '\n' +
+    '性別: ' + (b.gender === 'male' ? '男性' : '女性') + (b.gender === 'male' ? '\n紹介者: ' + b.referrer : '') +
+    (b.note ? '\n要望: ' + b.note : '');
+  notifyOwnerPendingApproval_(detail, token, { altLabel: '仮予約の承認/辞退' });
 }
 
 function notifyOwner_(text) {
