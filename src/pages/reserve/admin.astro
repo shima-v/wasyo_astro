@@ -178,23 +178,22 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
 
     <script type="application/json" id="reserve-config" set:html={JSON.stringify({ RESERVE_API })}></script>
     <script>
-      // 共有部品（送信オーバーレイ）を import するため bundled module 化。サーバ値は JSON から読む。
-      import { runExclusive } from '../../lib/submit-overlay.js';
+      // 共有部品を import するため bundled module 化。サーバ値は JSON から読む。
+      // トークン保管・管理 API・認証ゲートは admin-api.js に集約（挙動不変の抽出）。
+      import { getToken, setToken, clearToken, createAdminApi } from '../../lib/admin-api.js';
 
       const { RESERVE_API } = JSON.parse(document.getElementById('reserve-config').textContent);
 
       const $ = (s) => document.querySelector(s);
       const el = (id) => document.getElementById(id);
-      const TOKEN_KEY = 'wasyoAdminToken';
+
+      // 管理 API・認証ゲートのインスタンス（DOM は el 越しに都度解決＝従来と同じ挙動）。
+      const { apiPost, showGate, showPanel, handleForbidden } = createAdminApi({ reserveApi: RESERVE_API, el });
 
       function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
           ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
       }
-
-      function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (_) { return ''; } }
-      function setToken(t) { try { localStorage.setItem(TOKEN_KEY, t); } catch (_) {} }
-      function clearToken() { try { localStorage.removeItem(TOKEN_KEY); } catch (_) {} }
 
       function toast(msg) {
         const t = el('toast');
@@ -202,43 +201,6 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
         t.classList.add('show');
         clearTimeout(toast._t);
         toast._t = setTimeout(() => t.classList.remove('show'), 2600);
-      }
-
-      // 管理 API は全て POST（text/plain で CORS プリフライト回避）。adminToken を毎回添付。
-      // 既定では送信中の全面オーバーレイ＋二重送信ガード（共有 runExclusive）を通す。
-      // 一覧・設定の自動読み込み（listPending / getQuota / getSlotConfig）は opts.silent で素通し。
-      // ＝この1関数への組み込みで、7つの送信操作すべてに一律で効く。
-      async function apiPost(action, extra, opts = {}) {
-        const send = async () => {
-          const payload = Object.assign({ action, adminToken: getToken() }, extra || {});
-          const res = await fetch(RESERVE_API, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify(payload),
-          });
-          return res.json();
-        };
-        if (opts.silent) return send();
-        return runExclusive(send, { message: '送信しています…' });
-      }
-
-      // ---- 認証ゲートの出し入れ ----
-      function showGate(errMsg) {
-        el('panel').hidden = true;
-        el('gate').hidden = false;
-        const e = el('gateErr');
-        if (errMsg) { e.textContent = errMsg; e.hidden = false; } else { e.hidden = true; }
-        el('tokenInput').focus();
-      }
-      function showPanel() {
-        el('gate').hidden = true;
-        el('panel').hidden = false;
-      }
-
-      // forbidden（トークン不正）を検知したら token を消してゲートへ戻す
-      function handleForbidden() {
-        clearToken();
-        showGate('管理トークンが無効です。正しいトークンを入力してください。');
       }
 
       // ============================================================
