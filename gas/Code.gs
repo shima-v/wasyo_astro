@@ -142,10 +142,12 @@ function doGet(e) {
 }
 
 function doPost(e) {
+  var raw = (e && e.postData && e.postData.contents) || '{}';
   var body = {};
-  try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); } catch (_) {}
-  // LINE Webhook（events を含む POST）: 通知先ID（グループ/ルーム/ユーザー）を捕捉する設定用ハンドラ
-  if (body.events) return handleLineWebhook_(body);
+  try { body = JSON.parse(raw); } catch (_) {}
+  // LINE Webhook（events を含む POST）: 通知先ID（グループ/ルーム/ユーザー）を捕捉する設定用ハンドラ。
+  // 署名検証に本文（raw）が要るためそのまま渡す。X-Line-Signature の取得可否は handleLineWebhook_ 側で扱う。
+  if (body.events) return handleLineWebhook_(body, raw, lineSignature_(e));
   var action = body.action || '';
   try {
     switch (action) {
@@ -189,8 +191,30 @@ function doPost(e) {
  * 手順: ①公式アカウントでグループ参加を許可 ②ボットを対象グループに招待
  *       ③グループで誰かが発言 → ここで source を捕捉し Script Property
  *       `LINE_LAST_SOURCE`（例: group:Cxxxx）へ保存 → その値を `LINE_OWNER_USER_ID` に設定。
+ *
+ * 【セキュリティ】この POST は匿名到達可能なため、詐称された events で Script Property
+ * `LINE_LAST_SOURCE` を書き換えられないよう、LINE の署名検証を必須にする（検証できないなら書き込まない）。
+ * 正規の LINE Webhook はヘッダ X-Line-Signature に「チャネルシークレットで本文を HMAC-SHA256 → base64」した値を載せる。
+ *
+ * 【GAS の制約・重要】GAS Web App の doPost(e) は HTTP リクエストヘッダを一切参照できない
+ * （e に headers が無い）。したがって純 GAS 単体では X-Line-Signature を取得できず、本関数は
+ * 事実上つねに「検証不能 → 無処理（fail-closed）」になる。実運用で Webhook 捕捉を使うには、
+ * 段階2で導入する Cloudflare Worker を前段に置き、Worker がヘッダの署名を検証してから
+ * GAS_ADMIN_SECRET 付きで転送する構成（Worker はヘッダを読める）に載せ替える。
+ * その際は Worker が検証済み署名を lineSignature_(e) が拾える形（body 等）で引き渡すよう拡張する。
  */
-function handleLineWebhook_(body) {
+function handleLineWebhook_(body, rawBody, signature) {
+  var secret = prop_('LINE_CHANNEL_SECRET');
+  // secret 未設定なら検証不能 → 安全側に倒して書き込まない（fail-closed）。
+  if (!secret) {
+    console.warn('handleLineWebhook_: LINE_CHANNEL_SECRET 未設定のため検証不可・無処理で返す');
+    return json_({ ok: true, skipped: 'unverified' });
+  }
+  // 署名が取得できない／一致しない場合も書き込まない。
+  if (!verifyLineSignature_(rawBody || '', signature || '', secret)) {
+    console.warn('handleLineWebhook_: 署名検証に失敗（または署名を取得できない）ため無処理で返す');
+    return json_({ ok: true, skipped: 'unverified' });
+  }
   (body.events || []).forEach(function (ev) {
     var s = (ev && ev.source) || {};
     var id = s.groupId || s.roomId || s.userId || '';
@@ -198,6 +222,35 @@ function handleLineWebhook_(body) {
     if (id) PropertiesService.getScriptProperties().setProperty('LINE_LAST_SOURCE', (s.type || '?') + ':' + id);
   });
   return json_({ ok: true });
+}
+
+/**
+ * doPost の event から X-Line-Signature を取り出す（取得できなければ空文字）。
+ * ※GAS Web App はリクエストヘッダを公開しないため純 GAS ではつねに空になる。
+ *   段階2で Worker を前段に置いた場合に、検証済み署名を body 経由で受け取れるよう
+ *   フォールバック（body._lineSignature）だけ用意しておく（Worker 連携時に活用）。
+ */
+function lineSignature_(e) {
+  try {
+    if (e && e.postData && e.postData.contents) {
+      var b = JSON.parse(e.postData.contents);
+      if (b && b._lineSignature) return String(b._lineSignature);
+    }
+  } catch (_) {}
+  return '';
+}
+
+/**
+ * LINE Messaging API Webhook の署名検証。
+ * X-Line-Signature は「チャネルシークレットを鍵に、リクエスト本文そのものを HMAC-SHA256 した値の base64」。
+ * 同じ手順で再計算し、定数時間（constEq_）で突き合わせる。一致すれば LINE からの正規リクエストと判断できる。
+ * ※LINE の署名は標準 base64（webSafe ではない）。
+ */
+function verifyLineSignature_(rawBody, signature, secret) {
+  if (!secret || !signature) return false;
+  var mac = Utilities.computeHmacSha256Signature(rawBody, secret);
+  var expected = Utilities.base64Encode(mac);
+  return constEq_(expected, signature);
 }
 
 function json_(obj) {
