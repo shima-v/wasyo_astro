@@ -98,9 +98,11 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
       const $ = (s) => document.querySelector(s);
       const params = new URLSearchParams(location.search);
       const token = params.get('token') || '';
-      const state = { booking: null, days: [], date: null, time: null, availSet: null, calMin: null, calMax: null };
+      const state = { booking: null, days: [], holidays: {}, date: null, time: null, availSet: null, calMin: null, calMax: null };
       let calMonth = null; // カレンダー表示中の月 {y, m(0始まり)}
 
+      const esc = (s) =>
+        String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
       const fmtYen = (n) => '¥' + Number(n).toLocaleString('ja-JP');
       const fmtDateLabel = (ymd) => {
         const [y, m, d] = ymd.split('-').map(Number);
@@ -212,6 +214,7 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
           const data = await res.json();
           if (!data.ok) throw new Error('err');
           state.days = data.days || [];
+          state.holidays = data.holidays || {}; // { 'yyyy-MM-dd': '祝日名' } 祝日名の表示に使う（index と揃える）
           renderDates();
         } catch (e) {
           setStatusText('空き状況を取得できませんでした。', 'err');
@@ -270,8 +273,13 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
             const heatCls = ' ' + cls;
             html += `<button type="button" class="cal-cell cal-day avail${heatCls}${active}${dowCls}" data-date="${ymd}" title="空き ${cnt} 枠">${day}<span class="heat-mark" aria-hidden="true">${mark}</span></button>`;
           } else {
-            // 非 avail（休業・受付外・満）は index と揃えて ✕ を出す（凡例「✕ お休み」と整合）
-            html += `<span class="cal-cell cal-day disabled${dowCls}">${day}<span class="cal-x" aria-hidden="true">✕</span></span>`;
+            // 非 avail は index と揃える: 祝日は祝日名、それ以外の休業・受付外・満は ✕（凡例「✕ お休み」と整合）
+            const hol = state.holidays[ymd];
+            if (hol) {
+              html += `<span class="cal-cell cal-day disabled holiday${dowCls}" title="${esc(hol)}">${day}<small class="hol-name">${esc(hol)}</small></span>`;
+            } else {
+              html += `<span class="cal-cell cal-day disabled${dowCls}">${day}<span class="cal-x" aria-hidden="true">✕</span></span>`;
+            }
           }
         }
         html += '</div>';
