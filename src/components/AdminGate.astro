@@ -1,0 +1,34 @@
+---
+// 予約管理画面の「認証ゲート枠」。未認証時に出す #gate（ログインフォーム）と、
+// 認証後に出す #panel（管理パネルの外枠）をまとめて提供する。
+// パネルの中身（メニュー・各セクション）は <slot /> で各ページから差し込む。
+//
+// 認証方式の切替（dev=セッションCookie / prod=localStorage トークン）や、
+// showGate/showPanel/handleForbidden の出し入れは src/lib/admin-api.js が担う。
+// このコンポーネントは「枠」だけを持ち、IDと構造を admin.astro と一字一句合わせて挙動不変を保つ。
+// スタイルは持たせない（src/styles/admin.css に集約。EnvBadge.astro のコメント参照）。
+---
+<!-- 管理トークン入力ゲート（未認証時のみ表示） -->
+<section class="card" id="gate">
+  <h2>管理ログイン</h2>
+  <p class="gate-lead">管理トークンを入力してログインしてください。</p>
+  <div id="gateErr" class="status err" hidden></div>
+  <div class="msg-field">
+    <label for="tokenInput">管理トークン</label>
+    <input type="password" id="tokenInput" autocomplete="off" inputmode="text" placeholder="管理トークン" />
+  </div>
+  <!-- PIN 入力（差し込み式）。既定は非表示＝無効。Worker 側で ADMIN_PIN を設定し、
+       この要素の hidden を外すと PIN 必須運用にできる。login() は値があれば送る。 -->
+  <div class="msg-field" id="pinField" hidden>
+    <label for="pinInput">PIN（任意）</label>
+    <input type="password" id="pinInput" autocomplete="off" inputmode="numeric" placeholder="PIN" />
+  </div>
+  <div class="actions">
+    <button type="button" class="reserve-btn" id="gateBtn">ログイン</button>
+  </div>
+</section>
+
+<!-- 管理パネル（認証後に表示）。中身は各ページから <slot /> で差し込む -->
+<section id="panel" hidden>
+  <slot />
+</section>

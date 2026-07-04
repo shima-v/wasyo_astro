@@ -2,6 +2,8 @@
 import { RESERVE_API, ENV_LABEL } from '../../data/config.js';
 import EnvBadge from '../../components/EnvBadge.astro';
 import SubmitOverlay from '../../components/SubmitOverlay.astro';
+import AdminHeader from '../../components/AdminHeader.astro';
+import AdminGate from '../../components/AdminGate.astro';
 import '../../styles/admin.css';
 
 const _base = import.meta.env.BASE_URL;
@@ -24,34 +26,12 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
     <EnvBadge />
     <!-- 送信中の全面オーバーレイ（管理操作の送信中・二重送信防止）。共有部品 SubmitOverlay -->
     <SubmitOverlay message="送信しています…" subtext="画面をそのままでお待ちください" />
-    <header class="site-header">
-      <a class="home-link" href={base}>‹ {salonName}</a>
-      <span class="head-title">予約管理</span>
-    </header>
+    <AdminHeader base={base} salonName={salonName} />
 
     <main class="wrap">
-      <!-- 管理トークン入力ゲート（未認証時のみ表示） -->
-      <section class="card" id="gate">
-        <h2>管理ログイン</h2>
-        <p class="gate-lead">管理トークンを入力してログインしてください。</p>
-        <div id="gateErr" class="status err" hidden></div>
-        <div class="msg-field">
-          <label for="tokenInput">管理トークン</label>
-          <input type="password" id="tokenInput" autocomplete="off" inputmode="text" placeholder="管理トークン" />
-        </div>
-        <!-- PIN 入力（差し込み式）。既定は非表示＝無効。Worker 側で ADMIN_PIN を設定し、
-             この要素の hidden を外すと PIN 必須運用にできる。login() は値があれば送る。 -->
-        <div class="msg-field" id="pinField" hidden>
-          <label for="pinInput">PIN（任意）</label>
-          <input type="password" id="pinInput" autocomplete="off" inputmode="numeric" placeholder="PIN" />
-        </div>
-        <div class="actions">
-          <button type="button" class="reserve-btn" id="gateBtn">ログイン</button>
-        </div>
-      </section>
-
-      <!-- 管理パネル（認証後に表示） -->
-      <section id="panel" hidden>
+      <!-- 認証ゲート枠（#gate ログインフォーム＋#panel パネル外枠）は AdminGate に抽出。
+           パネルの中身（メニュー・各セクション）を slot で差し込む。 -->
+      <AdminGate>
         <div class="panel-bar">
           <button type="button" class="linkish" id="logoutBtn">ログアウト</button>
         </div>
@@ -173,7 +153,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
           </div>
           <div id="ownerTestResult"></div>
         </section>
-      </section>
+      </AdminGate>
     </main>
 
     <footer class="site-footer">
@@ -189,6 +169,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       // 管理 API・認証（ログイン/セッション）・認証ゲートは admin-api.js に集約。
       // 認証方式は環境で切替（dev=セッションCookie / prod=localStorageトークン）。
       import { createAdminApi } from '../../lib/admin-api.js';
+      import { esc, createToast, loadingHtml, emptyHtml } from '../../lib/admin-ui.js';
 
       const { RESERVE_API } = JSON.parse(document.getElementById('reserve-config').textContent);
 
@@ -199,18 +180,9 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       const { apiPost, login, logout, showGate, showPanel, handleForbidden, startup } =
         createAdminApi({ reserveApi: RESERVE_API, el });
 
-      function esc(s) {
-        return String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
-          ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-      }
-
-      function toast(msg) {
-        const t = el('toast');
-        t.textContent = msg;
-        t.classList.add('show');
-        clearTimeout(toast._t);
-        toast._t = setTimeout(() => t.classList.remove('show'), 2600);
-      }
+      // esc / loadingHtml / emptyHtml は admin-ui.js の純ヘルパ。
+      // toast は #toast を el 越しに解決するインスタンス（元 toast._t はクロージャのタイマに移動）。
+      const toast = createToast(el);
 
       // ============================================================
       // メニュー（セクション切替）
@@ -245,13 +217,12 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       // 1. 承認待ち一覧
       // ============================================================
       async function loadPending() {
-        el('pendingArea').innerHTML =
-          '<div class="status loading"><span class="spinner" aria-hidden="true"></span><span>読み込んでいます…</span></div>';
+        el('pendingArea').innerHTML = loadingHtml();
         let res;
         try {
           res = await apiPost('listPending', null, { silent: true });
         } catch (_) {
-          el('pendingArea').innerHTML = '<div class="empty">通信に失敗しました。時間をおいて再度お試しください。</div>';
+          el('pendingArea').innerHTML = emptyHtml('通信に失敗しました。時間をおいて再度お試しください。');
           return;
         }
         if (res && res.error === 'forbidden') { handleForbidden(); return; }
@@ -260,9 +231,9 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
 
       function renderPending(res) {
         const area = el('pendingArea');
-        if (!res || !res.ok) { area.innerHTML = '<div class="empty">取得に失敗しました。</div>'; return; }
+        if (!res || !res.ok) { area.innerHTML = emptyHtml('取得に失敗しました。'); return; }
         const list = res.pending || [];
-        if (!list.length) { area.innerHTML = '<div class="empty">承認待ちの仮予約はありません。</div>'; return; }
+        if (!list.length) { area.innerHTML = emptyHtml('承認待ちの仮予約はありません。'); return; }
         area.innerHTML = list.map((p) => {
           const badges = (p.isFirstTime ? '<span class="badge first">新規</span>' : '')
             + (p.gender === 'male' ? '<span class="badge male">男性</span>' : '');
@@ -303,7 +274,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
           toast(approve ? '確定しました（お客様へ通知済み）' : '辞退しました（お客様へ通知済み）');
           card.parentNode.removeChild(card);
           if (!el('pendingArea').querySelector('.pcard')) {
-            el('pendingArea').innerHTML = '<div class="empty">承認待ちの仮予約はありません。</div>';
+            el('pendingArea').innerHTML = emptyHtml('承認待ちの仮予約はありません。');
           }
         } else {
           toast('失敗: ' + ((res && res.error) || '不明なエラー'));
@@ -325,13 +296,12 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       // 5. LINE無料枠（当月送信数）
       // ============================================================
       async function loadQuota() {
-        el('quotaArea').innerHTML =
-          '<div class="status loading"><span class="spinner" aria-hidden="true"></span><span>読み込んでいます…</span></div>';
+        el('quotaArea').innerHTML = loadingHtml();
         let res;
         try {
           res = await apiPost('getQuota', null, { silent: true });
         } catch (_) {
-          el('quotaArea').innerHTML = '<div class="empty">取得に失敗しました。時間をおいて再度お試しください。</div>';
+          el('quotaArea').innerHTML = emptyHtml('取得に失敗しました。時間をおいて再度お試しください。');
           return;
         }
         if (res && res.error === 'forbidden') { handleForbidden(); return; }
@@ -339,9 +309,9 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       }
       function renderQuota(res) {
         const area = el('quotaArea');
-        if (!res || !res.ok) { area.innerHTML = '<div class="empty">取得に失敗しました。</div>'; return; }
+        if (!res || !res.ok) { area.innerHTML = emptyHtml('取得に失敗しました。'); return; }
         if (res.used == null) {
-          area.innerHTML = '<div class="empty">送信数を取得できませんでした（LINEトークン未設定の可能性）。</div>';
+          area.innerHTML = emptyHtml('送信数を取得できませんでした（LINEトークン未設定の可能性）。');
           return;
         }
         const pct = res.limit ? Math.round(res.used / res.limit * 100) : 0;
@@ -349,7 +319,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
         area.innerHTML = '<div class="quota-num"><strong>' + res.used + ' / ' + res.limit + ' 通</strong>'
           + '<span class="muted">（残り ' + res.available + ' 通・' + pct + '%）</span></div>'
           + (warn
-            ? '<div class="empty warn">⚠ 無料枠の80%を超えています。上限を超えると追加メッセージは送信されません。</div>'
+            ? emptyHtml('⚠ 無料枠の80%を超えています。上限を超えると追加メッセージは送信されません。', { warn: true })
             : '');
       }
       el('reloadQuota').addEventListener('click', loadQuota);
@@ -369,7 +339,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       // 本文（プレビュー）を作る。送信後見込み used+lineCount も併記
       function renderBcPreview(res) {
         const area = el('bcPreviewArea');
-        if (!res || !res.ok) { area.innerHTML = '<div class="empty">確認に失敗しました。</div>'; el('bcSend').disabled = true; return; }
+        if (!res || !res.ok) { area.innerHTML = emptyHtml('確認に失敗しました。'); el('bcSend').disabled = true; return; }
         bcCounts.line = res.lineCount;
         bcCounts.mail = res.mailCount;
         const quotaStr = (res.used == null)
@@ -391,14 +361,14 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       // 対象と残枠を確認
       el('bcPreview').addEventListener('click', async () => {
         if (!bcMessage().trim()) { toast('本文を入力してください'); return; }
-        el('bcPreviewArea').innerHTML = '<div class="status loading"><span class="spinner" aria-hidden="true"></span><span>確認中…</span></div>';
+        el('bcPreviewArea').innerHTML = loadingHtml('確認中…');
         const btn = el('bcPreview'); btn.disabled = true;
         let res;
         try {
           res = await apiPost('broadcastPreview', { scope: bcScope() });
         } catch (_) {
           btn.disabled = false;
-          el('bcPreviewArea').innerHTML = '<div class="empty">確認に失敗しました。時間をおいて再度お試しください。</div>';
+          el('bcPreviewArea').innerHTML = emptyHtml('確認に失敗しました。時間をおいて再度お試しください。');
           return;
         }
         btn.disabled = false;
@@ -611,16 +581,16 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       el('ownerTest').addEventListener('click', async () => {
         const btn = el('ownerTest'); btn.disabled = true;
         const area = el('ownerTestResult');
-        area.innerHTML = '<div class="status loading"><span class="spinner" aria-hidden="true"></span><span>送信中…</span></div>';
+        area.innerHTML = loadingHtml('送信中…');
         let res;
         try {
           res = await apiPost('ownerChannelTest');
         } catch (_) {
-          btn.disabled = false; area.innerHTML = '<div class="empty">通信エラー。時間をおいて再度お試しください。</div>'; return;
+          btn.disabled = false; area.innerHTML = emptyHtml('通信エラー。時間をおいて再度お試しください。'); return;
         }
         btn.disabled = false;
         if (res && res.error === 'forbidden') { handleForbidden(); return; }
-        if (!res || !res.ok) { area.innerHTML = '<div class="empty">テストに失敗しました: ' + esc((res && res.error) || '不明') + '</div>'; return; }
+        if (!res || !res.ok) { area.innerHTML = emptyHtml('テストに失敗しました: ' + esc((res && res.error) || '不明')); return; }
         // 診断結果（Discord設定・送信成否・HTTPコード・エラー・実到達先）を表示
         let rows = '<dt>Discord設定</dt><dd>' + (res.discordConfigured ? 'あり' : 'なし') + '</dd>';
         if (res.discordConfigured) {

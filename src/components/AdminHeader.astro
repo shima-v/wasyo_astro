@@ -1,0 +1,17 @@
+---
+// 予約管理画面（/reserve/admin 配下）共通のヘッダ（sticky サイトバー）。
+// P2 でハブ＋4区分に分割する際、全管理ページで同じヘッダを再利用するために抽出した。
+// スタイルは持たせない（.site-header/.home-link/.head-title は src/styles/admin.css に集約）。
+// ※コンポーネントに scoped <style> を置くと prod の <head> にも残るため、ここでは持たない
+//   （EnvBadge.astro のコメント参照）。
+//
+// props:
+//   base       … サイト内リンクのプレフィックス（末尾スラッシュ正規化済みを渡す）
+//   salonName  … 戻りリンクに表示するサロン名
+//   title      … 右側に出す画面名（既定「予約管理」）
+const { base, salonName, title = '予約管理' } = Astro.props;
+---
+<header class="site-header">
+  <a class="home-link" href={base}>‹ {salonName}</a>
+  <span class="head-title">{title}</span>
+</header>
