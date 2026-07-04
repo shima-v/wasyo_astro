@@ -1,20 +1,29 @@
 # Cloudflare Workers（dev フロント）設定
 #
-# Workers Builds の「デプロイ コマンド」(`npx wrangler deploy`) がこの設定を読み、
-# Astro の静的出力 dist/ を「静的アセット」として配信する。Worker スクリプト(main)は不要。
-# 本番(prod)は GitHub Pages → wwwasyo.com（main ブランチ）側のため、Cloudflare は dev 専用。
+# ⚠️ dev 専用。本番(prod)は GitHub Pages → wwwasyo.com（main ブランチ）側で、Cloudflare は使わない。
+#
+# @astrojs/cloudflare アダプタ導入後の構成:
+#   - `pnpm build`（dev＝PUBLIC_ENV=development / WORKER_BUILD=1）が dist/client（静的）＋
+#     dist/server/entry.mjs（Worker）を生成し、マージ済みデプロイ設定 dist/server/wrangler.json と
+#     リダイレクト .wrangler/deploy/config.json を書き出す。
+#   - 「デプロイ コマンド」`npx wrangler deploy` は上記リダイレクト経由で dist/server/wrangler.json を使う。
+#     このファイル（root wrangler.toml）はアダプタが読み取る「ユーザー設定」（name/compat/flags/vars）を提供し、
+#     main / assets（ASSETS binding）はアダプタが自動設定する（ここには書かない）。
 #
 # ⚠️ name は Cloudflare ダッシュボードの Worker 名と完全一致させること。
-#    不一致だと別 Worker に配信される／デプロイが失敗する。
 name = "wasyo-dev"
 compatibility_date = "2025-09-01"
+# Astro の Cloudflare アダプタが生成する Worker ランタイムで Node 互換 API を使えるようにする。
+compatibility_flags = ["nodejs_compat"]
 
-# dev フロントの URL（wasyo-dev.<account>.workers.dev）を有効化。
-# バージョンごとのプレビューURLも有効（既定どおり明示）。
+# dev フロントの URL（wasyo-dev.<account>.workers.dev）とバージョンごとのプレビューURLを有効化。
 workers_dev = true
 preview_urls = true
 
-# pnpm build の出力先（dist/）を静的配信。
-# トレイリングスラッシュ等の扱いは既定（auto）で /reserve/ → /reserve/index.html を解決。
-[assets]
-directory = "./dist"
+# 静的アセットは dist/client、Worker エントリは dist/server/entry.mjs をアダプタが自動設定する
+# （旧 `[assets] directory = "./dist"` は不要になったため撤去）。
+
+# ── 秘密・変数の置き場所（リポジトリには実値を書かない） ──────────────────
+# 管理系 Worker が使う秘密は Cloudflare の secret（`wrangler secret put` / ダッシュボード）または
+# ローカルは `.dev.vars`（gitignore 済み）に置く。キー名の一覧は .dev.vars.example を参照。
+#   SESSION_SECRET / ADMIN_TOKEN / ADMIN_PIN(任意) / RESERVE_API(=GAS /exec) / ALLOWED_ORIGIN(任意)
