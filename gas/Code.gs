@@ -137,7 +137,9 @@ function doGet(e) {
         return json_({ ok: false, error: 'unknown_action' });
     }
   } catch (err) {
-    return json_({ ok: false, error: String(err) });
+    // 例外の詳細（スタック・内部識別子）はクライアントに返さずログ側にとどめる（情報漏えい防止）。
+    console.error('doGet failed: ' + err + ((err && err.stack) ? '\n' + err.stack : ''));
+    return json_({ ok: false, error: 'server_error' });
   }
 }
 
@@ -181,7 +183,9 @@ function doPost(e) {
       default: return json_({ ok: false, error: 'unknown_action' });
     }
   } catch (err) {
-    return json_({ ok: false, error: String(err) });
+    // 例外の詳細（スタック・内部識別子）はクライアントに返さずログ側にとどめる（情報漏えい防止）。
+    console.error('doPost failed: ' + err + ((err && err.stack) ? '\n' + err.stack : ''));
+    return json_({ ok: false, error: 'server_error' });
   }
 }
 
