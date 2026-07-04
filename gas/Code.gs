@@ -437,20 +437,53 @@ function isClosedSlot_(dateStr, hhmm, config) {
 // 予約作成（仮予約）
 // ============================================================
 
-function createBooking_(b) {
+/**
+ * 予約作成の既定 opts。createBooking_（お客様の通常予約）が渡す値で、
+ * この既定は抽出前の createBooking_ の挙動を 100% 再現する。
+ * 将来の代理予約（adminCreateBooking_）は opts を差し替えて分岐する土台。
+ */
+var DEFAULT_CREATE_OPTS = {
+  requireContact: true,      // 連絡手段（contactMethod / email / line）の必須チェック
+  requireReferrer: true,     // 男性は紹介者必須のチェック
+  confirm: false,            // false=【仮】/ORANGE/pending・台帳更新は承認時。true=生成時点で確定
+  bypassWindow: false,       // false=リードタイム・受付上限・営業日/開始時刻/休枠を検証
+  notifyOwnerPending: true,  // 仮予約のオーナー通知を送る
+};
+
+/**
+ * 予約作成の本体。opts で挙動を分岐できるが、既定 opts（= DEFAULT_CREATE_OPTS 相当）
+ * は現行 createBooking_ を 100% 再現する。
+ * 【重要】ダブルブッキング防止（overlapsBusy_）は opts に関係なく常に実施する。
+ * @param {Object} b 予約入力
+ * @param {Object} [opts] 分岐フラグ（省略時は全既定＝現行挙動）
+ */
+function createBookingCore_(b, opts) {
+  opts = opts || {};
+  var requireContact = opts.requireContact !== false;    // 既定 true
+  var requireReferrer = opts.requireReferrer !== false;  // 既定 true
+  var confirm = opts.confirm === true;                   // 既定 false
+  var bypassWindow = opts.bypassWindow === true;         // 既定 false
+  var notifyOwnerPending = opts.notifyOwnerPending !== false; // 既定 true
+
   var menu = MENU[b.menuId];
   if (!menu) return { ok: false, error: 'invalid_menu' };
-  if (!b.name || !b.contactMethod) return { ok: false, error: 'missing_required' };
-  if (b.contactMethod === 'email' && !b.email) return { ok: false, error: 'missing_email' };
-  if (b.contactMethod === 'line' && !b.lineUserId && !b.email) return { ok: false, error: 'missing_contact' };
-  if (b.gender === 'male' && !b.referrer) return { ok: false, error: 'referrer_required' };
+  if (requireContact) {
+    if (!b.name || !b.contactMethod) return { ok: false, error: 'missing_required' };
+    if (b.contactMethod === 'email' && !b.email) return { ok: false, error: 'missing_email' };
+    if (b.contactMethod === 'line' && !b.lineUserId && !b.email) return { ok: false, error: 'missing_contact' };
+  }
+  if (requireReferrer) {
+    if (b.gender === 'male' && !b.referrer) return { ok: false, error: 'referrer_required' };
+  }
   if (!b.date || !b.time) return { ok: false, error: 'missing_slot' };
 
   // リードタイム・受付上限の検証
   var start = atTime_(parseDate_(b.date), b.time);
   var today = startOfDay_(new Date());
-  if (start < addDays_(today, RULES.leadTimeDays)) return { ok: false, error: 'too_soon' };
-  if (start > addDays_(today, RULES.maxAdvanceDays + 1)) return { ok: false, error: 'too_far' };
+  if (!bypassWindow) {
+    if (start < addDays_(today, RULES.leadTimeDays)) return { ok: false, error: 'too_soon' };
+    if (start > addDays_(today, RULES.maxAdvanceDays + 1)) return { ok: false, error: 'too_far' };
+  }
 
   // 新規/常連判定 → 初回料金確定
   var ledgerKey = ledgerKey_(b);
@@ -462,49 +495,64 @@ function createBooking_(b) {
   var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
   if (!cal) return { ok: false, error: 'calendar_not_configured' };
 
+  var status = confirm ? STATUS.CONFIRMED : STATUS.PENDING;
+
   var lock = LockService.getScriptLock();
   lock.waitLock(15000);
-  var token, ev;
+  var token, ev, evProps;
   try {
-    // 直前再検証（受付日・開始時刻・休枠・重複）。フロント値は信用しない。
-    var config = readSlotConfig_();
-    var holidaySet = holidayDateSet_(start, start);
-    if (!isOpenDay_(start, config, holidaySet) ||
-        !isValidStart_(start, b.time, config, holidaySet) ||
-        isClosedSlot_(b.date, b.time, config)) {
-      return { ok: false, error: 'slot_closed' };
+    // 直前再検証（受付日・開始時刻・休枠）。フロント値は信用しない。
+    if (!bypassWindow) {
+      var config = readSlotConfig_();
+      var holidaySet = holidayDateSet_(start, start);
+      if (!isOpenDay_(start, config, holidaySet) ||
+          !isValidStart_(start, b.time, config, holidaySet) ||
+          isClosedSlot_(b.date, b.time, config)) {
+        return { ok: false, error: 'slot_closed' };
+      }
     }
+    // ダブルブッキング防止（重複）は opts に関係なく常に実施する。
     var busy = busySpansForDay_(cal, start, null);
     if (overlapsBusy_(start, end, busy)) return { ok: false, error: 'slot_taken' };
 
     token = Utilities.getUuid();
-    ev = cal.createEvent('【仮】' + menu.name + ' / ' + b.name, start, end);
-    setEventProps_(ev, {
-      token: token, status: STATUS.PENDING, menuId: b.menuId,
+    ev = cal.createEvent((confirm ? '【確定】' : '【仮】') + menu.name + ' / ' + b.name, start, end);
+    evProps = {
+      token: token, status: status, menuId: b.menuId,
       name: b.name, phone: b.phone || '', email: b.email || '',
       gender: b.gender || '', referrer: b.referrer || '',
       lineUserId: b.lineUserId || '', isFirstTime: String(isFirst),
       price: String(eff.price), durationMin: String(eff.durationMin), slotMin: String(slot),
       note: b.note || '',
-    });
-    try { ev.setColor(CalendarApp.EventColor.ORANGE); } catch (_) {}
+    };
+    setEventProps_(ev, evProps);
+    try { ev.setColor(confirm ? CalendarApp.EventColor.GREEN : CalendarApp.EventColor.ORANGE); } catch (_) {}
     // カレンダー説明欄に管理者向けリンクを入れる（オーナーが予約を開いて操作できる導線）。
     // 説明欄には PII（連絡先）を生書きしない。載せるのは署名付きリンクのみ。
     try { ev.setDescription(adminEventDescription_(token)); } catch (_) {}
+    // 生成時点で確定扱いのときのみ、この場で台帳を更新（既定は承認時 decide_ で更新）。
+    if (confirm) ledgerUpsert_(evProps, start);
   } finally {
     lock.releaseLock();
   }
 
   // 通知
-  notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst);
+  if (notifyOwnerPending) {
+    notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst);
+  }
   notifyCustomer_(b, '【仮予約を受付ました】\n' + bookingSummary_(menu, start, eff, isFirst) +
     '\nサロンの確認後、確定のご連絡をいたします。\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(token));
 
   return {
-    ok: true, token: token, status: STATUS.PENDING,
+    ok: true, token: token, status: status,
     isFirstTime: isFirst, durationMin: eff.durationMin, price: eff.price,
     manageUrl: manageUrl_(token),
   };
+}
+
+/** お客様の通常予約。既定 opts（現行挙動）で本体を呼ぶ薄いラッパ。 */
+function createBooking_(b) {
+  return createBookingCore_(b, DEFAULT_CREATE_OPTS);
 }
 
 // ============================================================
