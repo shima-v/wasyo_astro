@@ -46,6 +46,8 @@ P1 のセッション Cookie は **`Path=/reserve/admin`** で発行している
 
 ## 決定 2: 技術構造（配信とゲート）
 
+> ※**本決定は [ADR-0002](0002-cloudflare-unify.md) により Superseded（2026-07-06・Accepted）**。「二態（dev=Worker／prod=static）＋prod はクライアントゲート」は、dev/prod とも Cloudflare 配信へ統一し**全管理ページをサーバゲートに一本化**する方針へ置き換わった。以下の記述は設計経緯の履歴として残す。**決定1（IA）・決定3（ビジュアル）は引き続き有効**。
+
 ### 選択肢（配信）
 - **A. 全ページ静的（prerender）＋クライアント JS でゲート**: 現状の admin.astro 方式。prod（GitHub Pages）でも動く。ただし「HTML 自体は誰でも取得でき、JS で隠すだけ」で、PII を載せる顧客管理には弱い。
 - **B. 管理ページを Worker 配信（オンデマンド）にし、サーバでゲート**: dev（Cloudflare Workers）のみ可能。P1 のセッション Cookie をサーバ側で検証してから中身を返せる。prod（静的）は Worker が無い。
