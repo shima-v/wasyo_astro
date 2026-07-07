@@ -72,7 +72,7 @@
    - `SESSION_SECRET`（強ランダム）／`ADMIN_TOKEN`（GAS `ADMIN_TOKENS` の1つと一致）／`ADMIN_PIN`（任意）／`RESERVE_API`（prod GAS `/exec`）。
    - ※現状 prod にはこれらの Worker 秘密が**存在しない**（Pages=静的だったため）。統一で**新規に必要**になる点に注意。
    - LINE 系（`PUBLIC_LINE_LOGIN_*`／`PUBLIC_LIFF_ID`）はドメイン不変ゆえ **REDIRECT/LIFF 再設定は不要**・継続（Workers Builds のビルド変数で注入）。
-4. **Event Subscriptions 通知の準備**: Discord Webhook URL（末尾 `/slack`）の用意と、Consumer Worker＋Queue のデプロイ（公式テンプレート `cloudflare/templates/workers-builds-notifications-template`）。**Queue の無料枠は未確認のため、移行前に実測で確認**（§9-④）。
+4. **Event Subscriptions 通知の準備**: Discord Webhook URL（末尾 `/slack`）の用意と、Consumer Worker＋Queue のデプロイ（公式テンプレート `cloudflare/templates/workers-builds-notifications-template`）。**Queue の無料枠は確認済み**（Workers Free で 10,000 オペレーション/日＝デプロイ通知の頻度なら十分。researcher 実測 2026-07-07・§9-④）。※ここでの通知は Workers Builds の**ビルドイベント**（`build.*`）の載せ替えであり、予約通知（GAS 側）とは別系統。
 5. **（GitHub Actions 廃止に伴う後片付け）**: 旧 GAS 通知の repo secret（`GAS_DEPLOY_ENDPOINT`/`DEPLOY_NOTIFY_TOKEN`）は Event Subscriptions 移行後に不要。Pages 撤去（PR-D）で `deploy.yml` ごと退場。
 
 ---
@@ -137,7 +137,7 @@ GitHub Pages の無料運用は実質 public リポ前提。**Pages 稼働中に
 1. **① prod Worker 名／環境分け**: `wasyo-prod`。wrangler `[env.production]` で dev（`wasyo-dev`）と1ファイル分離（§3）。
 2. **② デプロイ／通知**: prod も Workers Builds に統一（GitHub Actions 廃止）。Discord 通知は Event Subscriptions（Queue→Consumer Worker→Discord Webhook）で維持・失敗も確実に通知（§2）。ブランチ↔Worker＝main→`wasyo-prod`／develop→`wasyo-dev`。
 3. **③ DNS**: NS を Google 系→Cloudflare へ変更するフル移行（レジストラ移管不要）。NS 移行とレコード切替を2段階に分けて無停止化（§6）。
-4. **④ Cloudflare 無料枠**: Workers＋カスタムドメインは適合見込み。ただし **Event Subscriptions 用 Queue の無料枠は未確認 → 移行前に実測で確認**（researcher 未確認。作話しない）。
+4. **④ Cloudflare 無料枠**: Workers＋カスタムドメインは適合見込み。**Event Subscriptions 用 Queue の無料枠は確認済み**（Workers Free で 10,000 オペレーション/日・超過時 Workers Paid $5/月で月100万込み。researcher 実測 2026-07-07、出典＝Cloudflare 公式 Queues Pricing/Limits・Free plan changelog）。デプロイ通知（ビルドイベント）の頻度では無料枠内で十分。
 5. **⑤ LINE 系 `PUBLIC_*`**: ドメイン不変ゆえ REDIRECT/LIFF 再設定不要・継続。
 
 ---
