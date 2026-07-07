@@ -1,0 +1,90 @@
+---
+// 予約管理のログインページ（公開・プリレンダ静的）。
+// サーバゲート（src/middleware.js）に一本化したため、管理ページ本体は未認証者に HTML を返さず、
+// このページへ 302 で誘導される。ここで管理トークン（＋任意 PIN）を Worker の
+// /reserve/admin/api/login へ送り、短命の署名付き httpOnly セッション Cookie を発行してもらう。
+// 発行後は /reserve/admin へ遷移する（以降はミドルウェアが Cookie を検証して通す）。
+// ※ 公開ページのため PII は一切持たない。ゲートの内側（顧客情報等）はこのページには出さない。
+import { ENV_LABEL } from '../../../data/config.js';
+import EnvBadge from '../../../components/EnvBadge.astro';
+import SubmitOverlay from '../../../components/SubmitOverlay.astro';
+import AdminHeader from '../../../components/AdminHeader.astro';
+import '../../../styles/admin.css';
+
+const _base = import.meta.env.BASE_URL;
+const base = _base.endsWith('/') ? _base : _base + '/';
+const salonName = 'サロン和笑〜Violane〜';
+const tel = '090-9095-6034';
+const pageTitle = `${ENV_LABEL}管理ログイン | ${salonName}`;
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <EnvBadge />
+    <SubmitOverlay message="ログインしています…" subtext="画面をそのままでお待ちください" />
+    <AdminHeader base={base} salonName={salonName} title="管理ログイン" />
+
+    <main class="wrap">
+      <section class="card" id="gate">
+        <h2>管理ログイン</h2>
+        <p class="gate-lead">管理トークンを入力してログインしてください。</p>
+        <div id="gateErr" class="status err" hidden></div>
+        <div class="msg-field">
+          <label for="tokenInput">管理トークン</label>
+          <input type="password" id="tokenInput" autocomplete="off" inputmode="text" placeholder="管理トークン" />
+        </div>
+        <!-- PIN 入力（差し込み式）。既定は非表示＝無効。Worker 側で ADMIN_PIN を設定し、
+             この要素の hidden を外すと PIN 必須運用にできる。adminLogin() は値があれば送る。 -->
+        <div class="msg-field" id="pinField" hidden>
+          <label for="pinInput">PIN（任意）</label>
+          <input type="password" id="pinInput" autocomplete="off" inputmode="numeric" placeholder="PIN" />
+        </div>
+        <div class="actions">
+          <button type="button" class="reserve-btn" id="gateBtn">ログイン</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>{salonName}</p>
+      <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
+    </footer>
+
+    <script>
+      // 管理トークンを Worker の /login へ送りセッション Cookie を発行してもらう。
+      // 成功したら管理ページへ遷移（以降はミドルウェアが Cookie を検証して通す）。
+      import { adminLogin } from '../../../lib/admin-api.js';
+
+      const el = (id) => document.getElementById(id);
+
+      function showErr(msg) {
+        const e = el('gateErr');
+        if (msg) { e.textContent = msg; e.hidden = false; } else { e.hidden = true; }
+      }
+
+      async function doLogin() {
+        const t = el('tokenInput').value.trim();
+        if (!t) { showErr('管理トークンを入力してください。'); return; }
+        const pinEl = el('pinInput');
+        const pin = (pinEl && pinEl.value.trim()) || '';
+        const ok = await adminLogin(t, pin);
+        if (!ok) { showErr('ログインに失敗しました。トークン（またはPIN）をご確認ください。'); return; }
+        el('tokenInput').value = '';
+        if (pinEl) pinEl.value = '';
+        location.href = '/reserve/admin';
+      }
+
+      el('gateBtn').addEventListener('click', doLogin);
+      el('tokenInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+      el('pinInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+      el('tokenInput').focus();
+    </script>
+  </body>
+</html>

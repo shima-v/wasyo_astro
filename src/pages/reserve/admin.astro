@@ -1,9 +1,14 @@
 ---
-import { RESERVE_API, ENV_LABEL } from '../../data/config.js';
+// 管理ページ本体はオンデマンド（サーバレンダ）にする。静的アセットとして配信されると
+// Cloudflare が Worker を介さず直接返してしまい middleware のサーバゲートが効かないため、
+// 必ず prerender:false にして Worker（＝middleware）を通す（ADR-0002）。
+// ※ PR-1 のスパイクで literal `false` はオンデマンド化が確認済み（式のみ静的評価されない）。
+export const prerender = false;
+
+import { ENV_LABEL } from '../../data/config.js';
 import EnvBadge from '../../components/EnvBadge.astro';
 import SubmitOverlay from '../../components/SubmitOverlay.astro';
 import AdminHeader from '../../components/AdminHeader.astro';
-import AdminGate from '../../components/AdminGate.astro';
 import '../../styles/admin.css';
 
 const _base = import.meta.env.BASE_URL;
@@ -29,12 +34,12 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
     <AdminHeader base={base} salonName={salonName} />
 
     <main class="wrap">
-      <!-- 認証ゲート枠（#gate ログインフォーム＋#panel パネル外枠）は AdminGate に抽出。
-           パネルの中身（メニュー・各セクション）を slot で差し込む。 -->
-      <AdminGate>
-        <div class="panel-bar">
-          <button type="button" class="linkish" id="logoutBtn">ログアウト</button>
-        </div>
+      <!-- サーバゲート（src/middleware.js）に一本化したため、このページは認証済みでのみ配信される。
+           以前の #gate ログインフォーム／#panel の出し入れ（クライアントゲート）は撤去し、
+           管理パネルの中身を直接描画する。ログインは /reserve/admin/login（公開ページ）で行う。 -->
+      <div class="panel-bar">
+        <button type="button" class="linkish" id="logoutBtn">ログアウト</button>
+      </div>
 
         <!-- メニュー（セクション切替）。モバイルでも横スクロールで全機能に到達できる -->
         <nav class="admin-menu" id="adminMenu" aria-label="管理メニュー">
@@ -153,7 +158,6 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
           </div>
           <div id="ownerTestResult"></div>
         </section>
-      </AdminGate>
     </main>
 
     <footer class="site-footer">
@@ -163,22 +167,17 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
 
     <div id="toast"></div>
 
-    <script type="application/json" id="reserve-config" set:html={JSON.stringify({ RESERVE_API })}></script>
     <script>
-      // 共有部品を import するため bundled module 化。サーバ値は JSON から読む。
-      // 管理 API・認証（ログイン/セッション）・認証ゲートは admin-api.js に集約。
-      // 認証方式は環境で切替（dev=セッションCookie / prod=localStorageトークン）。
+      // 共有部品を import するため bundled module 化。
+      // 管理 API（Cookie 前提の /action への POST）・ログアウト・未認証時の導線は admin-api.js に集約。
+      // 認証はサーバゲート（middleware）に一本化済み。このページは認証済みでのみ配信される。
       import { createAdminApi } from '../../lib/admin-api.js';
       import { esc, createToast, loadingHtml, emptyHtml } from '../../lib/admin-ui.js';
 
-      const { RESERVE_API } = JSON.parse(document.getElementById('reserve-config').textContent);
-
-      const $ = (s) => document.querySelector(s);
       const el = (id) => document.getElementById(id);
 
-      // 管理 API・認証ゲートのインスタンス（DOM は el 越しに都度解決）。
-      const { apiPost, login, logout, showGate, showPanel, handleForbidden, startup } =
-        createAdminApi({ reserveApi: RESERVE_API, el });
+      // 管理 API クライアント（Cookie 前提で Worker を叩く）。DOM は el 越しに都度解決。
+      const { apiPost, logout, handleForbidden } = createAdminApi();
 
       // esc / loadingHtml / emptyHtml は admin-ui.js の純ヘルパ。
       // toast は #toast を el 越しに解決するインスタンス（元 toast._t はクロージャのタイマに移動）。
@@ -603,29 +602,17 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
         toast(res.via === 'discord' ? 'Discord に届きました' : 'LINE に届きました');
       });
 
-      // ---- ゲートのイベント配線 ----
-      el('logoutBtn').addEventListener('click', async () => { await logout(); showGate(); });
-      el('gateBtn').addEventListener('click', async () => {
-        const t = el('tokenInput').value.trim();
-        if (!t) { showGate('管理トークンを入力してください。'); return; }
-        const pinEl = el('pinInput');
-        const pin = (pinEl && pinEl.value.trim()) || '';
-        const ok = await login(t, pin);
-        if (!ok) { showGate('ログインに失敗しました。トークン（またはPIN）をご確認ください。'); return; }
-        el('tokenInput').value = '';
-        if (pinEl) pinEl.value = '';
-        // 認証済みの状態でパネルを開き、初期セクション（承認待ち）を表示
-        Object.keys(loaded).forEach((k) => delete loaded[k]);
-        showPanel();
-        showSection('pending');
+      // ---- ログアウト ----
+      // Worker がセッション Cookie を失効させたら、公開のログイン導線へ遷移する。
+      el('logoutBtn').addEventListener('click', async () => {
+        await logout();
+        location.href = '/reserve/admin/login/';
       });
-      el('tokenInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') el('gateBtn').click(); });
-      el('pinInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') el('gateBtn').click(); });
 
       // ---- 起動 ----
-      // セッション方式(dev)はパネルを開いて listPending を試行→Cookie 無効なら handleForbidden がゲートへ。
-      // レガシー方式(prod)は保存済みトークンの有無でゲート/パネルを出し分ける。
-      startup(() => { showPanel(); showSection('pending'); }, () => showGate());
+      // サーバゲート済み（middleware が Cookie を検証して通した）前提。初期セクションを表示する。
+      // 起動直後の listPending でセッションが切れていれば handleForbidden がログイン導線へ戻す。
+      showSection('pending');
     </script>
   </body>
 </html>
