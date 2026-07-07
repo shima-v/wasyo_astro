@@ -76,7 +76,7 @@ P1 のセッション Cookie は **`Path=/reserve/admin`** で発行している
 
 ### 決定: **B（カルテ棚メタファ／和を1段上げた管理画面）**
 
-design エージェントの確定案を採用（実装は後続 PR。モック: `cla-co/hiromasa/wasyo/design-mocks/`）。
+design エージェントの確定案を採用（実装は後続 PR。詳細モックは別管理のデザイン作業領域に保管）。
 
 - **色**: 漆紫ヘッダ（`#3B2A4B`→`#2C1E38`）＋金線／上質紙地（`#F2EDF0`・**ピンク地は退場**）／ゴールドは**金線・金環・印**に限定（多用しない）。
 - **区分4色**: 藍鼠（reservations）／紫（customers）／古金（broadcast）／苔鼠（settings）。**朱=要対応・金=構造**の意味づけ。
@@ -110,7 +110,7 @@ design エージェントの確定案を採用（実装は後続 PR。モック:
 - `prerender` 式スパイクの結果次第で PR-2 の実装方式が分岐する（middleware+二態 か injectRoute 併用か）。
 
 ## 参照
-- 設計・デザインの詳細モック（ダミーデータ・個人情報なし）: `cla-co/hiromasa/wasyo/design-mocks/`（`mock-1-hub.html` 等）
+- 設計・デザインの詳細モック（ダミーデータ・個人情報なし）: 別管理のデザイン作業領域に保管（`mock-1-hub.html` 等）
 - P0 記録: `docs/log/2026-07-04-p0-refactor.md`
 - P1 記録: `docs/log/2026-07-04-p1-security.md`
 - 予約機能プラン: `docs/RESERVATION_PLAN.md`
