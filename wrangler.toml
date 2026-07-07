@@ -1,6 +1,7 @@
-# Cloudflare Workers（dev フロント）設定
+# Cloudflare Workers 設定
 #
-# ⚠️ dev 専用。本番(prod)は GitHub Pages → wwwasyo.com（main ブランチ）側で、Cloudflare は使わない。
+# dev/prod とも Cloudflare へ統一（ADR-0002）。dev=トップレベル（既定環境・wasyo-dev）、
+# prod=[env.production]（wasyo-prod・main ブランチ）で1ファイル分離する（末尾）。
 #
 # @astrojs/cloudflare アダプタ導入後の構成:
 #   - `pnpm build`（dev＝PUBLIC_ENV=development / WORKER_BUILD=1）が dist/client（静的）＋
@@ -27,3 +28,18 @@ preview_urls = true
 # 管理系 Worker が使う秘密は Cloudflare の secret（`wrangler secret put` / ダッシュボード）または
 # ローカルは `.dev.vars`（gitignore 済み）に置く。キー名の一覧は .dev.vars.example を参照。
 #   SESSION_SECRET / ADMIN_TOKEN / ADMIN_PIN(任意) / RESERVE_API(=GAS /exec) / ALLOWED_ORIGIN(任意)
+
+# ── prod（本番）環境 ───────────────────────────────────────────────────────
+# ADR-0002 / MIGRATION_CLOUDFLARE.md §3 に基づき、prod を wrangler の named environment として
+# 1ファイル分離する。main ブランチ → wasyo-prod（Cloudflare Workers Builds）。
+# compatibility_date / compatibility_flags はトップレベルから継承（§3「共通」）。
+# prod 秘密は `wrangler secret put --env production` かダッシュボードで登録する。
+# ※ wwwasyo.com のカスタムドメイン割当・証明書発行・NS 移行・prod Worker 作成は本人操作
+#   （MIGRATION_CLOUDFLARE.md §4/§6）。この block は宣言のみで、本 PR では未デプロイ・DNS 不変更。
+[env.production]
+name = "wasyo-prod"
+# 本番ルート。ワイルドカードパスを含むルートはゾーン文脈が要るため zone_name を明示する
+# （実際のカスタムドメイン割当・証明書発行は Cloudflare ダッシュボードで本人が設定＝§6）。
+routes = [
+  { pattern = "wwwasyo.com/*", zone_name = "wwwasyo.com" }
+]
