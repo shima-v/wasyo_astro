@@ -9,9 +9,13 @@
 //   base       … サイト内リンクのプレフィックス（末尾スラッシュ正規化済みを渡す）
 //   salonName  … 戻りリンクに表示するサロン名
 //   title      … 右側に出す画面名（既定「予約管理」）
-const { base, salonName, title = '予約管理' } = Astro.props;
+//   back       … 戻りリンクの href（既定=base＝サイトトップ）。区分ページはハブ '/reserve/admin' を渡す
+//   backLabel  … 戻りリンクの表示（既定=salonName）。区分ページは '管理トップ' 等を渡す
+// ※ back/backLabel は後方互換の任意 props。無指定なら従来どおり「‹ サロン名」でサイトトップへ戻る
+//   （ハブ／ログインは無指定＝従来挙動）。
+const { base, salonName, title = '予約管理', back = base, backLabel = salonName } = Astro.props;
 ---
 <header class="site-header">
-  <a class="home-link" href={base}>‹ {salonName}</a>
+  <a class="home-link" href={back}>‹ {backLabel}</a>
   <span class="head-title">{title}</span>
 </header>

@@ -7,10 +7,29 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 [hidden] { display: none !important; }
 :root {
-  --c-bg: #FDF2F5; --c-surface: #FFFFFF; --c-ink: #2C1F3A; --c-muted: #7A6080;
-  --c-border: #E2D0D8; --c-purple: #8B6080; --c-purple-lt: #B09AB0; --c-purple-dk: #3E2B4A;
-  --c-reserve: #8B6080; --c-reserve-hv: #3E2B4A; --c-accent: #C9A84C;
+  /* 既存キーは保持し、値だけ「カルテ棚」配色へ差し替える（既存クラスが自動追従する）。
+     権威値は mock-1-hub.html / mock-3-agent.html の :root（別管理のデザインモック）と一致。 */
+  --c-bg: #F2EDF0; --c-surface: #FCFAFB; --c-ink: #2C1F3A; --c-muted: #7A6080;
+  --c-border: #E4D8DF; --c-purple: #8B6080; --c-purple-lt: #B09AB0; --c-purple-dk: #2C1E38;
+  --c-reserve: #2C1E38; --c-reserve-hv: #3B2A4B; --c-accent: #C9A84C;
   --f-serif: 'Noto Serif JP', 'YuMincho', 'Yu Mincho', serif;
+  /* --- カルテ棚（1段上げた管理画面）拡張トークン。ハブ／予約管理の admin-cabinet.css が使う --- */
+  --a-paper: #F2EDF0;   /* 地：藤鼠がかった上質紙 */
+  --a-cabinet: #2C1E38; /* chrome：漆紫（ヘッダ／棚枠） */
+  --a-cabinet2: #3B2A4B;
+  --a-surface: #FCFAFB; /* カルテ台紙（カード面） */
+  --a-ink: #2C1F3A; --a-ink-soft: #4A3A54; --a-muted: #7A6080;
+  --a-line: #E4D8DF;    /* 罫（ヘアライン） */
+  --a-gold: #C9A84C;    /* 金線・印 */
+  --a-gold-dp: #A8842F; /* 明地に載る金文字（コントラスト確保） */
+  --a-seal: #B0403A;    /* 朱：要対応のみ */
+  /* 区分カラー（和色の抑えた四色：位置＋色で覚える） */
+  --k-reserve: #4E6E8E;   --k-reserve-bg: #E9EEF3;
+  --k-customer: #8B6080;  --k-customer-bg: #F0E8EE;
+  --k-broadcast: #B08D3C; --k-broadcast-bg: #F2EBD9;
+  --k-settings: #6E7A5E;  --k-settings-bg: #EBEEE5;
+  /* 書体：明朝＝読み物／サンセリフ tabular＝数値の実務面 */
+  --f-sans: 'Noto Sans JP', 'Noto Sans CJK JP', system-ui, -apple-system, sans-serif;
 }
 body { font-family: var(--f-serif); background: var(--c-bg); color: var(--c-ink); line-height: 1.9; font-size: 16px; }
 html, body { overflow-x: clip; }
@@ -20,11 +39,14 @@ a { color: var(--c-purple-dk); }
 .site-header {
   position: sticky; top: 0; z-index: 10;
   display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-  padding: .7rem 1rem; background: rgba(253,242,245,.92); backdrop-filter: blur(6px);
-  border-bottom: 1px solid var(--c-border);
+  padding: .7rem 1rem;
+  /* 漆紫グラデ＋金線（棚の天板）。地が不透明になったため backdrop-filter は不要 */
+  background: linear-gradient(180deg, var(--a-cabinet2), var(--a-cabinet));
+  border-bottom: 2px solid var(--a-gold);
 }
-.home-link { text-decoration: none; color: var(--c-purple-dk); font-size: .9rem; }
-.head-title { font-size: .9rem; color: var(--c-muted); }
+/* 漆紫地の上で読めるよう、戻りリンク＝金／画面名＝淡色にする（必須コントラスト修正） */
+.home-link { text-decoration: none; color: var(--a-gold); font-size: .9rem; }
+.head-title { font-size: .9rem; color: #E5D8E2; }
 .wrap { max-width: 640px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
 
 .status { color: var(--c-muted); font-size: .92rem; padding: .5rem 0; }
@@ -32,7 +54,7 @@ a { color: var(--c-purple-dk); }
 .status.loading {
   display: flex; align-items: center; gap: .55rem;
   color: var(--c-purple-dk); font-weight: 600;
-  background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 8px; padding: .65rem .8rem;
+  background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 8px; padding: .65rem .8rem;
 }
 .spinner {
   width: 18px; height: 18px; flex: none;
@@ -67,7 +89,7 @@ a { color: var(--c-purple-dk); }
   padding: .45rem 1rem; min-height: 42px; white-space: nowrap;
   transition: background .15s, color .15s, border-color .15s;
 }
-.menu-btn:hover { background: #FCF6FA; }
+.menu-btn:hover { background: var(--c-bg); }
 .menu-btn[aria-current="true"] {
   background: var(--c-reserve); color: #fff; border-color: var(--c-reserve);
 }
@@ -75,7 +97,7 @@ a { color: var(--c-purple-dk); }
 .sec { }
 .sec-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .3rem; }
 
-.empty { color: var(--c-muted); font-size: .92rem; background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 8px; padding: .8rem; }
+.empty { color: var(--c-muted); font-size: .92rem; background: var(--c-bg); border: 1px solid var(--c-border); border-radius: 8px; padding: .8rem; }
 .empty.warn { color: #8E2230; }
 .muted { color: var(--c-muted); font-size: .88rem; }
 
@@ -147,7 +169,7 @@ a { color: var(--c-purple-dk); }
 .reserve-btn:hover { background: var(--c-reserve-hv); transform: translateY(-1px); }
 .reserve-btn:disabled { opacity: .55; cursor: default; transform: none; }
 .reserve-btn.ghost { background: transparent; color: var(--c-purple-dk); border: 1px solid var(--c-border); }
-.reserve-btn.ghost:hover { background: #FCF6FA; }
+.reserve-btn.ghost:hover { background: var(--c-bg); }
 .reserve-btn.sm { width: auto; font-size: .9rem; padding: .5rem 1rem; min-height: 40px; }
 .reserve-btn.decline { background: #b00020; }
 .reserve-btn.decline:hover { background: #8a0019; }
