@@ -1,0 +1,110 @@
+/* カルテ棚（1段上げた管理画面）コンポーネント。
+   ハブ（/reserve/admin）と予約管理（/reserve/admin/reservations）が
+   admin.css に続けて import する（admin.css 本体の肥大を避けるため分離）。
+   :root トークン（--a-* / --k-* / --f-sans）は admin.css に定義済み。
+   値はデザインモック（mock-1-hub.html / mock-3-agent.html）の <style> と一致させ、
+   375px フルブリード前提の「外側の横 margin/padding」だけ .wrap 内に収まるよう 0 に調整した
+   （色・書体・余白リズムはモックの権威値のまま）。 */
+
+/* ============ 今日の帯（一望の要約・数字はサンセリフ tabular） ============ */
+.today { display: flex; gap: .5rem; margin-bottom: .9rem; }
+.today__cell {
+  flex: 1; background: var(--a-surface); border: 1px solid var(--a-line); border-radius: 10px;
+  padding: .55rem .3rem .5rem; text-align: center;
+}
+.today__cell.alert { border-color: rgba(176,64,58,.4); box-shadow: 0 0 0 3px rgba(176,64,58,.06); }
+.today__n { font-family: var(--f-sans); font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; color: var(--a-ink); }
+.today__cell.alert .today__n { color: var(--a-seal); }
+.today__lbl { font-family: var(--f-sans); font-size: .68rem; letter-spacing: .06em; color: var(--a-muted); margin-top: .35rem; }
+.today__soon { display: block; font-size: .62rem; color: var(--a-muted); opacity: .8; margin-top: .12rem; }
+
+/* ============ カルテ棚 見出し＋棚 ============ */
+.shelf-eyebrow {
+  font-family: var(--f-sans); font-size: .66rem; letter-spacing: .28em; color: var(--a-muted);
+  margin: 1.15rem 0 .5rem; display: flex; align-items: center; gap: .6rem;
+}
+.shelf-eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--a-line); }
+.shelf { display: flex; flex-direction: column; gap: .7rem; }
+
+/* 区分カード（＝棚のカルテ）。a.chart はリンク／div.chart は準備中の非リンク */
+.chart {
+  --k: var(--a-muted); --k-bg: #eee;
+  position: relative; display: flex; align-items: stretch;
+  background: var(--a-surface); border: 1px solid var(--a-line);
+  border-radius: 12px; min-height: 76px; overflow: visible;
+  box-shadow: 0 1px 0 rgba(44,30,56,.04);
+  text-decoration: none; color: inherit;
+}
+a.chart:hover { border-color: var(--k); transform: translateY(-1px); transition: transform .15s, border-color .15s; }
+.chart.reserve   { --k: var(--k-reserve);   --k-bg: var(--k-reserve-bg); }
+.chart.customer  { --k: var(--k-customer);  --k-bg: var(--k-customer-bg); }
+.chart.broadcast { --k: var(--k-broadcast); --k-bg: var(--k-broadcast-bg); }
+.chart.settings  { --k: var(--k-settings);  --k-bg: var(--k-settings-bg); }
+.chart__spine {
+  position: relative; flex: 0 0 56px; background: var(--k-bg);
+  border-right: 1px solid var(--a-line); border-radius: 12px 0 0 12px;
+  display: flex; align-items: center; justify-content: center; color: var(--k);
+}
+.chart__spine::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--k); border-radius: 12px 0 0 12px; }
+.chart__lug { position: absolute; top: -9px; left: 10px; width: 34px; height: 11px; background: var(--k); border-radius: 4px 4px 0 0; }
+.chart__icon { width: 24px; height: 24px; }
+.chart__body { flex: 1; padding: .7rem .85rem; display: flex; flex-direction: column; justify-content: center; gap: .2rem; }
+.chart__title { font-family: var(--f-serif); font-size: 1.08rem; font-weight: 600; letter-spacing: .03em; color: var(--a-ink); }
+.chart__status { font-family: var(--f-sans); font-size: .78rem; color: var(--a-muted); font-variant-numeric: tabular-nums; }
+.chart__status b { color: var(--a-ink-soft); font-weight: 600; }
+.chart__aside { display: flex; align-items: center; padding-right: .9rem; }
+.chevron { color: #C3B2C2; width: 16px; height: 16px; }
+
+/* 要対応：朱印（tabular 数字＋金の細環）。対応が要る区分だけ点灯 */
+.chart--attn { border-color: rgba(176,64,58,.28); }
+.chart--attn .chart__spine { box-shadow: inset 0 0 0 1px rgba(176,64,58,.18); }
+.seal {
+  font-family: var(--f-sans); font-size: .9rem; font-weight: 700; font-variant-numeric: tabular-nums;
+  min-width: 26px; height: 26px; padding: 0 .35rem; border-radius: 50px;
+  background: var(--a-seal); color: #fff; display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 2px rgba(201,168,76,.55); letter-spacing: .02em;
+}
+.cabinet-foot { font-family: var(--f-sans); text-align: center; color: var(--a-muted); font-size: .72rem; letter-spacing: .06em; padding: .8rem 0 .4rem; }
+
+/* ============ 代理予約：1画面フォーム（mock-3-agent.html） ============ */
+.form-lead { font-family: var(--f-sans); font-size: .8rem; color: var(--a-muted); margin: .9rem 0 .2rem; }
+.fcard { background: var(--a-surface); border: 1px solid var(--a-line); border-radius: 12px; margin: .7rem 0; overflow: hidden; }
+.fsec { padding: .85rem 1rem; border-bottom: 1px solid var(--a-line); }
+.fsec:last-child { border-bottom: none; }
+.fsec__lbl { font-family: var(--f-sans); font-size: .7rem; letter-spacing: .14em; color: var(--a-muted); margin-bottom: .55rem; display: flex; align-items: center; gap: .45rem; }
+.fsec__lbl .req { color: var(--a-seal); font-size: .62rem; letter-spacing: .1em; border: 1px solid rgba(176,64,58,.4); border-radius: 4px; padding: 0 .3rem; }
+.fsec__lbl .opt { color: var(--a-muted); font-size: .62rem; letter-spacing: .1em; border: 1px solid var(--a-line); border-radius: 4px; padding: 0 .3rem; }
+
+.menu-chips { display: flex; flex-wrap: wrap; gap: .4rem; }
+.mchip {
+  font-family: var(--f-serif); font-size: .86rem; cursor: pointer; background: #fff;
+  border: 1px solid var(--a-line); border-radius: 9px; padding: .45rem .7rem; color: var(--a-ink-soft);
+  display: flex; flex-direction: column; gap: .05rem; min-height: 44px; justify-content: center;
+  text-align: left; -webkit-appearance: none; appearance: none;
+}
+.mchip .price { font-family: var(--f-sans); font-size: .68rem; color: var(--a-muted); font-variant-numeric: tabular-nums; }
+.mchip.on { background: var(--k-customer-bg); border-color: var(--k-customer); color: #4a3350; box-shadow: inset 0 0 0 1px var(--k-customer); }
+.mchip.on .price { color: var(--a-gold-dp); }
+
+.dt-row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.dt-field {
+  font-family: var(--f-sans); font-size: 1rem; padding: .55rem .65rem; border: 1px solid var(--a-line);
+  border-radius: 8px; background: #fff; color: var(--a-ink); font-variant-numeric: tabular-nums; flex: 1; min-width: 0;
+}
+.dt-chip { display: inline-flex; align-items: center; gap: .4rem; background: var(--a-paper); border: 1px solid var(--a-line); border-radius: 9px; padding: .4rem .75rem; font-family: var(--f-sans); font-size: .86rem; font-variant-numeric: tabular-nums; margin-top: .5rem; }
+.dt-chip .g { color: var(--a-gold-dp); }
+
+.tin { width: 100%; font-family: var(--f-sans); font-size: 1rem; padding: .6rem .7rem; border: 1px solid var(--a-line); border-radius: 8px; background: #fff; color: var(--a-ink); }
+.tin::placeholder { color: #B9A6BC; }
+.tin.tel { font-variant-numeric: tabular-nums; letter-spacing: .06em; }
+
+.submit-wrap { padding: .2rem 0 1.5rem; }
+.submit {
+  width: 100%; font-family: var(--f-serif); font-size: 1.05rem; font-weight: 600; letter-spacing: .08em; cursor: pointer;
+  background: var(--a-cabinet); color: #fff; border: none; border-radius: 11px; padding: .85rem; min-height: 52px;
+  display: flex; align-items: center; justify-content: center; gap: .5rem;
+  box-shadow: 0 2px 0 rgba(201,168,76,.5), 0 6px 16px rgba(44,30,56,.18);
+}
+.submit svg { width: 18px; height: 18px; color: var(--a-gold); }
+.submit:disabled { cursor: default; opacity: .5; box-shadow: none; }
+.submit-note { font-family: var(--f-sans); font-size: .7rem; color: var(--a-muted); text-align: center; margin-top: .6rem; }

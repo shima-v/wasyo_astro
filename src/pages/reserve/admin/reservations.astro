@@ -1,0 +1,265 @@
+---
+// 予約管理ページ（/reserve/admin/reservations）。P2 IA（ADR-0001 決定1）の「予約管理」区分。
+// 承認待ち一覧（admin.astro から移設・listPending/adminDecision＝既存API）と、
+// 代理登録フォーム（mock-3-agent.html 準拠・UI のみ）を1画面に載せる。
+//
+// ⚠️ 代理登録の「実送信」は GAS 側の新設（adminCreateBooking_・不可逆・本人GO）が要るため
+//    本 PR では送信ボタンを disabled にし「準備中」を明示する。ペイロード組立・クライアント検証
+//    までは実装し、次 PR で apiPost('adminCreateBooking', ...) に配線する。
+//
+// 管理ページ本体はオンデマンド（prerender:false リテラル）。static 配信されると middleware の
+// サーバゲートを通らないため、必ずリテラル false にして Worker を通す（ADR-0002）。
+// URL は Cookie Path=/reserve/admin 制約により /reserve/admin/ 配下固定（ADR-0001 決定1）。
+export const prerender = false;
+
+import { ENV_LABEL } from '../../../data/config.js';
+import { MENU, formatYen } from '../../../data/menu.js';
+import EnvBadge from '../../../components/EnvBadge.astro';
+import SubmitOverlay from '../../../components/SubmitOverlay.astro';
+import AdminHeader from '../../../components/AdminHeader.astro';
+import '../../../styles/admin.css';
+import '../../../styles/admin-cabinet.css';
+
+const _base = import.meta.env.BASE_URL;
+const base = _base.endsWith('/') ? _base : _base + '/';
+const salonName = 'サロン和笑〜Violane〜';
+const tel = '090-9095-6034';
+const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <EnvBadge />
+    <SubmitOverlay message="送信しています…" subtext="画面をそのままでお待ちください" />
+    <AdminHeader base={base} salonName={salonName} title="予約管理" back="/reserve/admin" backLabel="管理トップ" />
+
+    <main class="wrap">
+      <!-- 承認待ち一覧（admin.astro から移設・挙動不変） -->
+      <section class="sec" id="sec-pending">
+        <div class="sec-head">
+          <h2 class="section-title">承認待ちの仮予約</h2>
+          <button type="button" class="reserve-btn ghost sm" id="reloadPending">再読み込み</button>
+        </div>
+        <div id="pendingArea"><div class="status loading"><span class="spinner" aria-hidden="true"></span><span>読み込んでいます…</span></div></div>
+      </section>
+
+      <!-- 代理登録（電話・来店で受けた予約を代わりに入れる）。UI のみ・送信は準備中 -->
+      <section class="sec" id="sec-agent">
+        <h2 class="section-title" style="margin-top:1.6rem">代理で予約を入れる</h2>
+        <p class="form-lead">電話や来店で受けた予約を、この1画面でそのまま登録します。</p>
+
+        <div class="fcard">
+          <div class="fsec">
+            <div class="fsec__lbl">メニュー <span class="req">必須</span></div>
+            <div class="menu-chips" id="agentMenuChips">
+              {MENU.map((m) => (
+                <button type="button" class="mchip" data-id={m.id} data-name={m.name} data-duration={m.durationMin}>
+                  {m.name}<span class="price">{formatYen(m.price)} / {m.durationMin}分</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div class="fsec">
+            <div class="fsec__lbl">日時 <span class="req">必須</span></div>
+            <div class="dt-row">
+              <input class="dt-field" type="date" id="agentDate" />
+              <input class="dt-field" type="time" id="agentTime" step="1800" />
+            </div>
+            <div class="dt-chip" id="agentDtChip" hidden></div>
+          </div>
+
+          <div class="fsec">
+            <div class="fsec__lbl">お名前 <span class="req">必須</span></div>
+            <input class="tin" type="text" id="agentName" autocomplete="off" />
+          </div>
+
+          <div class="fsec">
+            <div class="fsec__lbl">電話番号 <span class="req">必須</span></div>
+            <input class="tin tel" type="tel" id="agentPhone" autocomplete="off" inputmode="tel" />
+          </div>
+
+          <div class="fsec">
+            <div class="fsec__lbl">メール <span class="opt">任意</span></div>
+            <input class="tin" type="email" id="agentEmail" autocomplete="off" placeholder="控えメールが要るときだけ" />
+          </div>
+        </div>
+
+        <div class="submit-wrap">
+          <button class="submit" id="agentSubmit" type="button" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+            この内容で予約を入れる
+          </button>
+          <p class="submit-note">次のアップデートで有効化（現在は準備中）。確定通知（お客様控え・お店通知）の送信は次の PR で接続します。</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>{salonName}</p>
+      <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
+    </footer>
+
+    <div id="toast"></div>
+
+    <script>
+      // 承認待ち＝既存 API（listPending/adminDecision）。代理登録＝UI のみ（送信は次 PR）。
+      // 共有部品（admin-api.js / admin-ui.js）を再利用し重複実装しない。
+      import { createAdminApi } from '../../../lib/admin-api.js';
+      import { esc, createToast, loadingHtml, emptyHtml } from '../../../lib/admin-ui.js';
+
+      const el = (id) => document.getElementById(id);
+      const { apiPost, handleForbidden } = createAdminApi();
+      const toast = createToast(el);
+
+      // ============================================================
+      // 承認待ち一覧（admin.astro から一字一句移設・挙動不変）
+      // ============================================================
+      async function loadPending() {
+        el('pendingArea').innerHTML = loadingHtml();
+        let res;
+        try {
+          res = await apiPost('listPending', null, { silent: true });
+        } catch (_) {
+          el('pendingArea').innerHTML = emptyHtml('通信に失敗しました。時間をおいて再度お試しください。');
+          return;
+        }
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        renderPending(res);
+      }
+
+      function renderPending(res) {
+        const area = el('pendingArea');
+        if (!res || !res.ok) { area.innerHTML = emptyHtml('取得に失敗しました。'); return; }
+        const list = res.pending || [];
+        if (!list.length) { area.innerHTML = emptyHtml('承認待ちの仮予約はありません。'); return; }
+        area.innerHTML = list.map((p) => {
+          const badges = (p.isFirstTime ? '<span class="badge first">新規</span>' : '')
+            + (p.gender === 'male' ? '<span class="badge male">男性</span>' : '');
+          const contact = [p.phone, p.email].filter(Boolean).map(esc).join(' / ');
+          return '<div class="pcard" data-token="' + esc(p.token) + '">'
+            + '<div class="pcard-title">' + esc(p.name) + ' 様' + badges + '</div>'
+            + '<dl class="detail-dl">'
+            + '<dt>メニュー</dt><dd>' + esc(p.menuName) + '</dd>'
+            + '<dt>日時</dt><dd>' + esc(p.date) + ' ' + esc(p.time) + '</dd>'
+            + (p.gender === 'male' ? '<dt>紹介者</dt><dd>' + esc(p.referrer || '（未記入）') + '</dd>' : '')
+            + (contact ? '<dt>連絡先</dt><dd>' + contact + '</dd>' : '')
+            + (p.note ? '<dt>ご要望</dt><dd>' + esc(p.note) + '</dd>' : '')
+            + '</dl>'
+            + '<textarea class="cust-msg" rows="2" placeholder="お客様へのメッセージ（任意・承認/辞退の通知に添えます）"></textarea>'
+            + '<div class="actions row">'
+            + '<button class="reserve-btn sm" type="button" data-act="approve">承認して確定</button>'
+            + '<button class="reserve-btn sm decline" type="button" data-act="decline">辞退</button>'
+            + '</div></div>';
+        }).join('');
+      }
+
+      async function decide(token, approve, btn) {
+        const card = btn.closest('.pcard');
+        const msgEl = card.querySelector('.cust-msg');
+        const message = msgEl ? msgEl.value : '';
+        const btns = card.querySelectorAll('button');
+        btns.forEach((b) => { b.disabled = true; });
+        let res;
+        try {
+          res = await apiPost('adminDecision', { token, approve, message });
+        } catch (_) {
+          toast('通信エラー。時間をおいて再度お試しください。');
+          btns.forEach((b) => { b.disabled = false; });
+          return;
+        }
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        if (res && res.ok) {
+          toast(approve ? '確定しました（お客様へ通知済み）' : '辞退しました（お客様へ通知済み）');
+          card.parentNode.removeChild(card);
+          if (!el('pendingArea').querySelector('.pcard')) {
+            el('pendingArea').innerHTML = emptyHtml('承認待ちの仮予約はありません。');
+          }
+        } else {
+          toast('失敗: ' + ((res && res.error) || '不明なエラー'));
+          btns.forEach((b) => { b.disabled = false; });
+        }
+      }
+
+      el('pendingArea').addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-act]');
+        if (!btn) return;
+        const token = btn.closest('.pcard').getAttribute('data-token');
+        const approve = btn.getAttribute('data-act') === 'approve';
+        if (!approve && !confirm('この仮予約を辞退します。お客様へ通知されます。よろしいですか？')) return;
+        decide(token, approve, btn);
+      });
+      el('reloadPending').addEventListener('click', loadPending);
+
+      // ============================================================
+      // 代理登録（UI のみ・送信は準備中）
+      //   メニュー選択（トグル）／日時プレビュー／ペイロード組立＋クライアント検証まで実装。
+      //   実送信（GAS adminCreateBooking_ 新設・本人GO）は次 PR で配線する。
+      // ============================================================
+      let selectedMenu = null; // { id, name, duration }
+
+      el('agentMenuChips').addEventListener('click', (e) => {
+        const btn = e.target.closest('.mchip');
+        if (!btn) return;
+        el('agentMenuChips').querySelectorAll('.mchip').forEach((b) => b.classList.remove('on'));
+        btn.classList.add('on');
+        selectedMenu = {
+          id: btn.getAttribute('data-id'),
+          name: btn.getAttribute('data-name'),
+          duration: Number(btn.getAttribute('data-duration')),
+        };
+        updateDtChip();
+      });
+
+      const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
+      function updateDtChip() {
+        const d = el('agentDate').value, t = el('agentTime').value;
+        const chip = el('agentDtChip');
+        if (!d || !t) { chip.hidden = true; return; }
+        const dt = new Date(d + 'T' + t);
+        const md = isNaN(dt.getTime())
+          ? (d + ' ' + t)
+          : ((dt.getMonth() + 1) + '/' + dt.getDate() + '（' + WEEK[dt.getDay()] + '） ' + t);
+        const menuStr = selectedMenu ? ' ・ ' + selectedMenu.name + '（約' + selectedMenu.duration + '分）' : '';
+        chip.innerHTML = '<span class="g">◆</span>' + esc(md + '〜' + menuStr + ' で登録');
+        chip.hidden = false;
+      }
+      el('agentDate').addEventListener('change', updateDtChip);
+      el('agentTime').addEventListener('change', updateDtChip);
+
+      // ペイロード組立・クライアント検証（次 PR の送信実装で使う。現在は送信ボタン disabled のため未接続）。
+      function agentPayload() {
+        return {
+          menuId: selectedMenu ? selectedMenu.id : '',
+          date: el('agentDate').value,
+          time: el('agentTime').value,
+          name: el('agentName').value.trim(),
+          phone: el('agentPhone').value.trim(),
+          email: el('agentEmail').value.trim(),
+        };
+      }
+      function validateAgent() {
+        const p = agentPayload();
+        if (!p.menuId) { toast('メニューを選んでください'); return false; }
+        if (!p.date || !p.time) { toast('日時を入力してください'); return false; }
+        if (!p.name) { toast('お名前を入力してください'); return false; }
+        if (!p.phone) { toast('電話番号を入力してください'); return false; }
+        return true;
+      }
+      // 送信ボタンは disabled（準備中）。次 PR で GAS adminCreateBooking_ を新設したら
+      // validateAgent() → agentPayload() → apiPost('adminCreateBooking', ...) を配線する。
+      void validateAgent; void agentPayload;
+
+      // ---- 起動 ----
+      // サーバゲート済み（middleware が Cookie を検証して通した）前提。承認待ちを読み込む。
+      loadPending();
+    </script>
+  </body>
+</html>
