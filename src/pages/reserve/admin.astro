@@ -1,0 +1,182 @@
+---
+// 管理トップ（ハブ）。P2 IA（ADR-0001 決定1）の入口。4区分（予約・顧客・一斉送信・設定）への
+// 導線＋「今日の帯」で要対応を一望する。カルテ棚ビジュアル（ADR-0001 決定3・mock-1-hub.html 準拠）。
+//
+// 実データは既存 API のみで賄う（GAS ゼロ改修）:
+//   ・承認待ち件数 = listPending / ・一斉送信 残枠 = getQuota を並列取得。
+//   ・pending>0 / quota>=80% の区分に朱印（chart--attn）を点灯。
+//   ・「今日の予約件数」「顧客数」は供給 API 未実装のため「—」＋「準備中」で未接続を明示（作話しない）。
+//
+// 管理ページ本体はオンデマンド（prerender:false リテラル）。static 配信されると middleware の
+// サーバゲートを通らないため、必ずリテラル false にして Worker を通す（ADR-0002）。
+export const prerender = false;
+
+import { ENV_LABEL } from '../../data/config.js';
+import EnvBadge from '../../components/EnvBadge.astro';
+import SubmitOverlay from '../../components/SubmitOverlay.astro';
+import AdminHeader from '../../components/AdminHeader.astro';
+import '../../styles/admin.css';
+import '../../styles/admin-cabinet.css';
+
+const _base = import.meta.env.BASE_URL;
+const base = _base.endsWith('/') ? _base : _base + '/';
+const salonName = 'サロン和笑〜Violane〜';
+const tel = '090-9095-6034';
+const pageTitle = `${ENV_LABEL}管理トップ | ${salonName}`;
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <EnvBadge />
+    <SubmitOverlay message="送信しています…" subtext="画面をそのままでお待ちください" />
+    <AdminHeader base={base} salonName={salonName} title="管理トップ" />
+
+    <main class="wrap">
+      <div class="panel-bar">
+        <button type="button" class="linkish" id="logoutBtn">ログアウト</button>
+      </div>
+
+      <!-- 今日の帯（一望の要約・数字はサンセリフ tabular）。承認待ちのみ実データ、他は準備中 -->
+      <div class="today">
+        <div class="today__cell" id="todayPendingCell">
+          <div class="today__n" id="todayPendingN">…</div>
+          <div class="today__lbl">承認待ち</div>
+        </div>
+        <div class="today__cell">
+          <div class="today__n">—</div>
+          <div class="today__lbl">今日の予約<span class="today__soon">準備中</span></div>
+        </div>
+        <div class="today__cell">
+          <div class="today__n">—</div>
+          <div class="today__lbl">顧客<span class="today__soon">準備中</span></div>
+        </div>
+      </div>
+
+      <!-- カルテ棚：位置＋色で覚える4区分。要対応の区分だけ朱で点灯 -->
+      <div class="shelf-eyebrow">カルテ棚</div>
+      <div class="shelf">
+        <a class="chart reserve" href="/reserve/admin/reservations" id="chartReserve">
+          <div class="chart__spine"><span class="chart__lug"></span><svg class="chart__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5"/><path d="M3.5 9h17M8 3v3M16 3v3"/><path d="M7.5 13h3M13.5 13h3M7.5 16.5h3"/></svg></div>
+          <div class="chart__body"><span class="chart__title">予約</span><span class="chart__status" id="reserveStatus">読み込んでいます…</span></div>
+          <div class="chart__aside" id="reserveAside"><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>
+        </a>
+
+        <div class="chart customer">
+          <div class="chart__spine"><span class="chart__lug"></span><svg class="chart__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.4-3.2 2.8-5 5.5-5s5.1 1.8 5.5 5"/><path d="M16 5.4a3 3 0 010 5.4M17.5 19c-.2-2.2-1.2-3.9-2.7-4.7"/></svg></div>
+          <div class="chart__body"><span class="chart__title">顧客</span><span class="chart__status">準備中（次のアップデート）</span></div>
+          <div class="chart__aside"></div>
+        </div>
+
+        <a class="chart broadcast" href="/reserve/admin/tools" id="chartBroadcast">
+          <div class="chart__spine"><span class="chart__lug"></span><svg class="chart__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4a1.5 1.5 0 001.5 1.5H7l1 4h2l-1-4 8 3.2V6.3L9 9.5H5.5A1.5 1.5 0 004 11z"/><path d="M19.5 9.5a3.5 3.5 0 010 5"/></svg></div>
+          <div class="chart__body"><span class="chart__title">一斉送信</span><span class="chart__status" id="broadcastStatus">読み込んでいます…</span></div>
+          <div class="chart__aside" id="broadcastAside"><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>
+        </a>
+
+        <a class="chart settings" href="/reserve/admin/tools">
+          <div class="chart__spine"><span class="chart__lug"></span><svg class="chart__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M5 12h14M5 17h14"/><circle cx="9" cy="7" r="2" fill="#FCFAFB"/><circle cx="15" cy="12" r="2" fill="#FCFAFB"/><circle cx="8" cy="17" r="2" fill="#FCFAFB"/></svg></div>
+          <div class="chart__body"><span class="chart__title">設定</span><span class="chart__status">受付枠・通知先・臨時営業</span></div>
+          <div class="chart__aside"><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>
+        </a>
+      </div>
+      <p class="cabinet-foot">位置と色で覚える棚 ・ 要対応の区分だけ朱で点灯</p>
+    </main>
+
+    <footer class="site-footer">
+      <p>{salonName}</p>
+      <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
+    </footer>
+
+    <div id="toast"></div>
+
+    <script>
+      // 「今日の帯」＋区分カードの実データは既存 API（listPending / getQuota）だけで賄う。
+      // 認証はサーバゲート（middleware）に一本化済み。このページは認証済みでのみ配信される。
+      import { createAdminApi } from '../../lib/admin-api.js';
+
+      const el = (id) => document.getElementById(id);
+      const { apiPost, logout, handleForbidden } = createAdminApi();
+
+      // 非要対応時に aside へ戻すシェブロン
+      const CHEVRON = '<svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
+
+      // 承認待ち（listPending）と一斉送信残枠（getQuota）を並列取得。
+      async function loadHub() {
+        let pending, quota;
+        try {
+          [pending, quota] = await Promise.all([
+            apiPost('listPending', null, { silent: true }),
+            apiPost('getQuota', null, { silent: true }),
+          ]);
+        } catch (_) {
+          el('todayPendingN').textContent = '—';
+          el('reserveStatus').textContent = '通信に失敗しました';
+          el('broadcastStatus').textContent = '通信に失敗しました';
+          return;
+        }
+        if ((pending && pending.error === 'forbidden') || (quota && quota.error === 'forbidden')) {
+          handleForbidden();
+          return;
+        }
+        renderPending(pending);
+        renderQuota(quota);
+      }
+
+      // 承認待ち件数 → 今日の帯＋予約カード（>0 で朱印点灯）
+      function renderPending(res) {
+        const ok = res && res.ok && Array.isArray(res.pending);
+        const n = ok ? res.pending.length : null;
+        if (n == null) {
+          el('todayPendingN').textContent = '—';
+          el('reserveStatus').textContent = '承認待ちを取得できませんでした';
+          return;
+        }
+        el('todayPendingN').textContent = String(n);
+        if (n > 0) {
+          el('todayPendingCell').classList.add('alert');
+          el('chartReserve').classList.add('chart--attn');
+          el('reserveStatus').innerHTML = '<b>承認待ち ' + n + '件</b>';
+          el('reserveAside').innerHTML = '<span class="seal">' + n + '</span>';
+        } else {
+          el('todayPendingCell').classList.remove('alert');
+          el('chartReserve').classList.remove('chart--attn');
+          el('reserveStatus').textContent = '承認待ちはありません';
+          el('reserveAside').innerHTML = CHEVRON;
+        }
+      }
+
+      // 一斉送信残枠 → 一斉送信カード（80%以上で朱印点灯）
+      function renderQuota(res) {
+        if (!res || !res.ok || res.used == null) {
+          el('broadcastStatus').textContent = '無料枠を取得できませんでした';
+          return;
+        }
+        const pct = res.limit ? Math.round(res.used / res.limit * 100) : 0;
+        el('broadcastStatus').innerHTML = '今月 <b>' + res.used + ' / ' + res.limit + '</b> 通';
+        if (pct >= 80) {
+          el('chartBroadcast').classList.add('chart--attn');
+          el('broadcastAside').innerHTML = '<span class="seal">!</span>';
+        } else {
+          el('chartBroadcast').classList.remove('chart--attn');
+          el('broadcastAside').innerHTML = CHEVRON;
+        }
+      }
+
+      // ---- ログアウト ----
+      el('logoutBtn').addEventListener('click', async () => {
+        await logout();
+        location.href = '/reserve/admin/login/';
+      });
+
+      // ---- 起動 ----
+      loadHub();
+    </script>
+  </body>
+</html>
