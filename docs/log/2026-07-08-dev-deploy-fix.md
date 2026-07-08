@@ -55,6 +55,33 @@ Failed: error occurred while running deploy command
    - ※ dev Worker は wrangler.toml トップレベル（`wasyo-dev`）なので `--env` は付けない。ダッシュボードの
      Variables and Secrets からの登録でも可。**登録は本人操作**（CTO/クロコは secret を触らない）。キー名の正は `.dev.vars.example`。
 
+## 追記: secret が env に届かない件＝Build 変数とランタイム変数の別枠（2026-07-08）
+デプロイ成功後、dev の実機 E2E で secret 前まで green を確認（未認証302-no-HTML／login 表示／
+公開回帰なし／API は fail-closed 401）。一方、誤トークン `POST /reserve/admin/api/login` は
+**500 `server_unconfigured` のまま**だった。本人がダッシュボードで `SESSION_SECRET`／`ADMIN_TOKEN`
+を Secret 種別で保存しても変わらず。原因を Cloudflare 公式 doc で切り分け:
+
+- **Workers Builds には別枠が2つある**。**Build variables and secrets（Settings › Build・CI ビルド用）は
+  実行時に読めない**（公式明記「**Build variables will not be accessible at runtime**」）。ランタイムの
+  `import { env } from 'cloudflare:workers'` に届くのは **Settings › “Variables and Secrets”（ランタイム）**
+  に入れたものだけ。Build 側に入れると `env.SESSION_SECRET` が空のまま → 500。
+- **ダッシュボードで secret を追加しても “Deploy” を押す（＝新バージョン反映）まで有効にならない**。
+  Deploy が見当たらない Git 連携構成では、**空でない push で再ビルドを起こせば反映**される
+  （コードの新ビルド自体は不要だが再デプロイが要る）。
+- **secret はデプロイ間で保持**される（次の push/`wrangler deploy` で消えない）。
+- **wrangler.toml の SESSION/IMAGES 無効化は無関係**（無効化したのは KV/Images の**バインディング**で、
+  `SESSION_SECRET`/`ADMIN_TOKEN` は別枠の**ランタイム secret**。現構成の bindings は `ASSETS` のみ）。
+
+対処（本人）: secret を **Variables and Secrets（ランタイム）**に入れ、**Deploy か push で再ビルド**して反映。
+確認: 誤トークンで 500→401 に変われば env 到達 OK。prod でも同じ罠があるため
+`docs/OWNER_HANDOFF_CLOUDFLARE.md` A-3 にも追記した。
+
+出典（確認日 2026-07-08・Cloudflare 公式）:
+- Workers Builds — Configuration: https://developers.cloudflare.com/workers/ci-cd/builds/configuration/
+- Secrets: https://developers.cloudflare.com/workers/configuration/secrets/
+- Environment variables: https://developers.cloudflare.com/workers/configuration/environment-variables/
+
 ## 申し送り
 - push はしていない（本人GO 待ち）。stash@{0}（PR-2 仮コード）は温存。
 - Event Subscriptions（ビルド通知）は本移行の別項（MIGRATION §2/§4）。本修正はデプロイ成否そのものの回復。
+- **この docs 追記コミット自体が dev 再ビルドのトリガーを兼ねる**（クロコが push → secret 反映）。

@@ -26,6 +26,13 @@
 
 - [ ] **A-1. prod Worker `wasyo-prod` を作成** — Cloudflare ダッシュボードで Git 連携の Workers Builds を設定。main ブランチ連携（dev の `wasyo-dev` と同じ仕組み）。
 - [ ] **A-3. prod Worker secret を登録** — `wrangler secret put --env production` かダッシュボードで。キー名: `SESSION_SECRET`（強ランダム）／`ADMIN_TOKEN`（GAS `ADMIN_TOKENS` の1つと一致）／`ADMIN_PIN`（任意）／`RESERVE_API`（prod GAS `/exec`）。**実値はここで直接入れる（リポには書かない）**。※現状 prod には Worker 秘密が存在しない（Pages=静的だったため）→ 新規に必要。
+
+  > **⚠️ Workers Builds の落とし穴（2026-07-08 dev で実際に踏んだ・prod でも同じ罠に注意）**
+  > - **secret は必ず Settings › “Variables and Secrets”（ランタイム）に入れる**。同じ設定画面にある **“Build variables and secrets”（CI ビルド用）は実行時 `env` に読めない**（公式明記「Build variables will not be accessible at runtime」）。Build 側に入れると、コードの `import { env } from 'cloudflare:workers'` に届かず **`server_unconfigured`(500)** のまま。
+  > - **追加しただけでは反映されない**。Variables and Secrets 画面の **“Deploy” を押す**（＝新バージョン反映）まで有効にならない。**ダッシュボードに Deploy が見当たらない Git 連携構成では、空でない push で再ビルドを起こせば反映**される（コードの新ビルド自体は不要だが、再デプロイが要る）。
+  > - **secret はデプロイ間で保持**される（次の `wrangler deploy`／push で消えない）。
+  > - 環境の別: **dev=`wasyo-dev`（wrangler.toml トップレベル・`--env` 無し）／prod=`wasyo-prod`（`[env.production]`＝`wrangler secret put --env production`）**。workers.dev/カスタムドメインで配信されるのは各 Worker の **production デプロイ**なので、そこに登録する。
+  > - 反映確認: 誤トークンで `POST /reserve/admin/api/login` して **500→401** に変われば `env` 到達 OK（401=トークン不一致＝secret は読めている）。
 - [ ] **A-4. デプロイ通知の準備** — Discord Webhook URL（末尾 `/slack`）を用意し、Consumer Worker＋Queue を公式テンプレート `cloudflare/templates/workers-builds-notifications-template` でデプロイ。ビルド成功/失敗イベント（`build.*`）が Event Subscriptions 経由で Discord に飛ぶ構成。**Queue 無料枠は確認済み（10,000 オペレーション/日・デプロイ通知の頻度なら十分）**。
 - [ ] **A-5. workers.dev で prod Worker を完全動作確認** — 公開ページ・予約フロー・管理サーバゲート（§7）。あわせて Cloudflare でカスタムドメイン設定・**証明書発行まで**完了させておく。
 
