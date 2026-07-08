@@ -1,4 +1,4 @@
-import { defineConfig } from 'astro/config';
+import { defineConfig, sessionDrivers } from 'astro/config';
 import cloudflare from '@astrojs/cloudflare';
 
 // site は環境で切替: 既定=本番(wwwasyo.com)。dev(Cloudflare Workers) は
@@ -36,8 +36,17 @@ export default defineConfig({
   base: '/', // サブディレクトリ（wasyo_astro）を空にする
   output: 'static', // 公開ページはプリレンダ（静的HTML）。管理系だけ prerender=false でオンデマンド化。
   integrations: [adminWorkerRoutes()],
+  // Astro の Session API は未使用（管理セッションは自前の HMAC 署名 Cookie ＝ src/worker/session.js）。
+  // 既定のままだと @astrojs/cloudflare が SESSION KV バインディングを自動有効化し、deploy 時に
+  // KV 名前空間のプロビジョニングが要る。非 KV ドライバ（memory）を明示して KV 依存を断つ
+  // （sessions は実際には使わないのでドライバは何でもよい）。
+  // オブジェクト形式で渡す（文字列 'memory' は Astro 6 で deprecated のため sessionDrivers ヘルパを使う）。
+  session: { driver: sessionDrivers.memory() },
   adapter: cloudflare({
     // astro dev / wrangler dev でローカルの .dev.vars・バインディングを参照できるようにする。
     platformProxy: { enabled: true },
+    // Astro Image / astro:assets は未使用（画像は生 <img>）。既定だと Cloudflare Images の
+    // IMAGES バインディングを有効化するため、passthrough にして Images 依存を断つ。
+    imageService: 'passthrough',
   }),
 });
