@@ -5,18 +5,20 @@
 // ※ PR-1 のスパイクで literal `false` はオンデマンド化が確認済み（式のみ静的評価されない）。
 export const prerender = false;
 
-import { ENV_LABEL } from '../../data/config.js';
-import EnvBadge from '../../components/EnvBadge.astro';
-import SubmitOverlay from '../../components/SubmitOverlay.astro';
-import AdminHeader from '../../components/AdminHeader.astro';
-import '../../styles/admin.css';
+import { ENV_LABEL } from '../../../data/config.js';
+import EnvBadge from '../../../components/EnvBadge.astro';
+import SubmitOverlay from '../../../components/SubmitOverlay.astro';
+import AdminHeader from '../../../components/AdminHeader.astro';
+import '../../../styles/admin.css';
 
 const _base = import.meta.env.BASE_URL;
 const base = _base.endsWith('/') ? _base : _base + '/';
 const salonName = 'サロン和笑〜Violane〜';
 const tel = '090-9095-6034';
 // title は単一の式にする（<title> RCDATA で式＋生テキストの混在を避ける）
-const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
+// ※ 予約管理（承認待ち）は /reserve/admin/reservations に分割したため、この退避ページの
+//    ラベルは「通知・設定」にする（旧「予約管理」との名前衝突を避ける）。
+const pageTitle = `${ENV_LABEL}通知・設定 | ${salonName}`;
 ---
 
 <html lang="ja">
@@ -31,7 +33,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
     <EnvBadge />
     <!-- 送信中の全面オーバーレイ（管理操作の送信中・二重送信防止）。共有部品 SubmitOverlay -->
     <SubmitOverlay message="送信しています…" subtext="画面をそのままでお待ちください" />
-    <AdminHeader base={base} salonName={salonName} />
+    <AdminHeader base={base} salonName={salonName} title="通知・設定" back="/reserve/admin" backLabel="管理トップ" />
 
     <main class="wrap">
       <!-- サーバゲート（src/middleware.js）に一本化したため、このページは認証済みでのみ配信される。
@@ -43,22 +45,12 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
 
         <!-- メニュー（セクション切替）。モバイルでも横スクロールで全機能に到達できる -->
         <nav class="admin-menu" id="adminMenu" aria-label="管理メニュー">
-          <button type="button" class="menu-btn" data-sec="pending" aria-current="true">承認待ち</button>
-          <button type="button" class="menu-btn" data-sec="broadcast">一斉送信</button>
+          <button type="button" class="menu-btn" data-sec="broadcast" aria-current="true">一斉送信</button>
           <button type="button" class="menu-btn" data-sec="schedule">臨時営業/休業</button>
           <button type="button" class="menu-btn" data-sec="slotconfig">受付枠設定</button>
           <button type="button" class="menu-btn" data-sec="quota">LINE無料枠</button>
           <button type="button" class="menu-btn" data-sec="ownertest">オーナー通知</button>
         </nav>
-
-        <!-- 1. 承認待ち一覧 -->
-        <section class="sec" id="sec-pending">
-          <div class="sec-head">
-            <h2 class="section-title">承認待ちの仮予約</h2>
-            <button type="button" class="reserve-btn ghost sm" id="reloadPending">再読み込み</button>
-          </div>
-          <div id="pendingArea"><div class="status loading"><span class="spinner" aria-hidden="true"></span><span>読み込んでいます…</span></div></div>
-        </section>
 
         <!-- 2. 一斉送信 -->
         <section class="sec" id="sec-broadcast" hidden>
@@ -171,8 +163,8 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       // 共有部品を import するため bundled module 化。
       // 管理 API（Cookie 前提の /action への POST）・ログアウト・未認証時の導線は admin-api.js に集約。
       // 認証はサーバゲート（middleware）に一本化済み。このページは認証済みでのみ配信される。
-      import { createAdminApi } from '../../lib/admin-api.js';
-      import { esc, createToast, loadingHtml, emptyHtml } from '../../lib/admin-ui.js';
+      import { createAdminApi } from '../../../lib/admin-api.js';
+      import { esc, createToast, loadingHtml, emptyHtml } from '../../../lib/admin-ui.js';
 
       const el = (id) => document.getElementById(id);
 
@@ -187,7 +179,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       // メニュー（セクション切替）
       // 選択中セクションのみ表示。初回表示時に一度だけ各セクションを遅延ロードする。
       // ============================================================
-      const SECTIONS = ['pending', 'broadcast', 'schedule', 'slotconfig', 'quota', 'ownertest'];
+      const SECTIONS = ['broadcast', 'schedule', 'slotconfig', 'quota', 'ownertest'];
       const loaded = {};
       function showSection(name) {
         SECTIONS.forEach((s) => {
@@ -201,8 +193,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
         // 各セクションの初回表示で必要なデータを一度だけ取得する
         if (!loaded[name]) {
           loaded[name] = true;
-          if (name === 'pending') loadPending();
-          else if (name === 'quota') loadQuota();
+          if (name === 'quota') loadQuota();
           else if (name === 'slotconfig') loadConfig();
         }
       }
@@ -211,85 +202,6 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
         if (!btn) return;
         showSection(btn.getAttribute('data-sec'));
       });
-
-      // ============================================================
-      // 1. 承認待ち一覧
-      // ============================================================
-      async function loadPending() {
-        el('pendingArea').innerHTML = loadingHtml();
-        let res;
-        try {
-          res = await apiPost('listPending', null, { silent: true });
-        } catch (_) {
-          el('pendingArea').innerHTML = emptyHtml('通信に失敗しました。時間をおいて再度お試しください。');
-          return;
-        }
-        if (res && res.error === 'forbidden') { handleForbidden(); return; }
-        renderPending(res);
-      }
-
-      function renderPending(res) {
-        const area = el('pendingArea');
-        if (!res || !res.ok) { area.innerHTML = emptyHtml('取得に失敗しました。'); return; }
-        const list = res.pending || [];
-        if (!list.length) { area.innerHTML = emptyHtml('承認待ちの仮予約はありません。'); return; }
-        area.innerHTML = list.map((p) => {
-          const badges = (p.isFirstTime ? '<span class="badge first">新規</span>' : '')
-            + (p.gender === 'male' ? '<span class="badge male">男性</span>' : '');
-          const contact = [p.phone, p.email].filter(Boolean).map(esc).join(' / ');
-          return '<div class="pcard" data-token="' + esc(p.token) + '">'
-            + '<div class="pcard-title">' + esc(p.name) + ' 様' + badges + '</div>'
-            + '<dl class="detail-dl">'
-            + '<dt>メニュー</dt><dd>' + esc(p.menuName) + '</dd>'
-            + '<dt>日時</dt><dd>' + esc(p.date) + ' ' + esc(p.time) + '</dd>'
-            + (p.gender === 'male' ? '<dt>紹介者</dt><dd>' + esc(p.referrer || '（未記入）') + '</dd>' : '')
-            + (contact ? '<dt>連絡先</dt><dd>' + contact + '</dd>' : '')
-            + (p.note ? '<dt>ご要望</dt><dd>' + esc(p.note) + '</dd>' : '')
-            + '</dl>'
-            + '<textarea class="cust-msg" rows="2" placeholder="お客様へのメッセージ（任意・承認/辞退の通知に添えます）"></textarea>'
-            + '<div class="actions row">'
-            + '<button class="reserve-btn sm" type="button" data-act="approve">承認して確定</button>'
-            + '<button class="reserve-btn sm decline" type="button" data-act="decline">辞退</button>'
-            + '</div></div>';
-        }).join('');
-      }
-
-      async function decide(token, approve, btn) {
-        const card = btn.closest('.pcard');
-        const msgEl = card.querySelector('.cust-msg');
-        const message = msgEl ? msgEl.value : '';
-        const btns = card.querySelectorAll('button');
-        btns.forEach((b) => { b.disabled = true; });
-        let res;
-        try {
-          res = await apiPost('adminDecision', { token, approve, message });
-        } catch (_) {
-          toast('通信エラー。時間をおいて再度お試しください。');
-          btns.forEach((b) => { b.disabled = false; });
-          return;
-        }
-        if (res && res.error === 'forbidden') { handleForbidden(); return; }
-        if (res && res.ok) {
-          toast(approve ? '確定しました（お客様へ通知済み）' : '辞退しました（お客様へ通知済み）');
-          card.parentNode.removeChild(card);
-          if (!el('pendingArea').querySelector('.pcard')) {
-            el('pendingArea').innerHTML = emptyHtml('承認待ちの仮予約はありません。');
-          }
-        } else {
-          toast('失敗: ' + ((res && res.error) || '不明なエラー'));
-          btns.forEach((b) => { b.disabled = false; });
-        }
-      }
-
-      el('pendingArea').addEventListener('click', (e) => {
-        const btn = e.target.closest('button[data-act]');
-        if (!btn) return;
-        const token = btn.closest('.pcard').getAttribute('data-token');
-        const approve = btn.getAttribute('data-act') === 'approve';
-        if (!approve && !confirm('この仮予約を辞退します。お客様へ通知されます。よろしいですか？')) return;
-        decide(token, approve, btn);
-      });
-      el('reloadPending').addEventListener('click', loadPending);
 
       // ============================================================
       // 5. LINE無料枠（当月送信数）
@@ -611,8 +523,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
 
       // ---- 起動 ----
       // サーバゲート済み（middleware が Cookie を検証して通した）前提。初期セクションを表示する。
-      // 起動直後の listPending でセッションが切れていれば handleForbidden がログイン導線へ戻す。
-      showSection('pending');
+      showSection('broadcast');
     </script>
   </body>
 </html>
