@@ -1,0 +1,247 @@
+---
+// 一斉通知ページ（/reserve/admin/broadcast）。P2 IA（ADR-0001 決定1）の「一斉通知」区分。
+// 集約ページ tools.astro から一斉送信（broadcast）と LINE 無料枠（quota）を移設し、
+// タブ切替をやめて reservations.astro と同じ「セクション積み上げ」レイアウトにする。
+//   ・一斉送信＝broadcast / broadcastPreview / broadcastTest（既存API）。送信前に残枠を確認する動線。
+//   ・LINE無料枠＝getQuota（既存API）。一斉送信が無料枠を消費するため同居（送る前に残枠を見る）。
+// DOM/ID/JS は tools.astro から一字一句そのまま移設（挙動不変）。唯一の意図的差分は「タブ撤去」で、
+// タブ表示時に遅延ロードしていた quota を init 時に loadQuota() で即時化する（同じデータ・タイミング）。
+//
+// 管理ページ本体はオンデマンド（prerender:false リテラル）。static 配信されると middleware の
+// サーバゲートを通らないため、必ずリテラル false にして Worker を通す（ADR-0002）。
+// URL は Cookie Path=/reserve/admin 制約により /reserve/admin/ 配下固定（ADR-0001 決定1）。
+export const prerender = false;
+
+import { ENV_LABEL } from '../../../data/config.js';
+import EnvBadge from '../../../components/EnvBadge.astro';
+import SubmitOverlay from '../../../components/SubmitOverlay.astro';
+import AdminHeader from '../../../components/AdminHeader.astro';
+import '../../../styles/admin.css';
+import '../../../styles/admin-cabinet.css';
+
+const _base = import.meta.env.BASE_URL;
+const base = _base.endsWith('/') ? _base : _base + '/';
+const salonName = 'サロン和笑〜Violane〜';
+const tel = '090-9095-6034';
+const pageTitle = `${ENV_LABEL}一斉通知 | ${salonName}`;
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <EnvBadge />
+    <!-- 送信中の全面オーバーレイ（管理操作の送信中・二重送信防止）。共有部品 SubmitOverlay -->
+    <SubmitOverlay message="送信しています…" subtext="画面をそのままでお待ちください" />
+    <AdminHeader base={base} salonName={salonName} title="一斉通知" back="/reserve/admin" backLabel="管理トップ" />
+
+    <main class="wrap">
+      <!-- サーバゲート（src/middleware.js）に一本化したため、このページは認証済みでのみ配信される。
+           ログインは /reserve/admin/login（公開ページ）で行う。 -->
+      <div class="panel-bar">
+        <button type="button" class="linkish" id="logoutBtn">ログアウト</button>
+      </div>
+
+      <!-- 一斉送信 -->
+      <section class="sec" id="sec-broadcast">
+        <h2 class="section-title">臨時のお知らせを一斉送信</h2>
+        <p class="lead-muted">お客様へお知らせを送信します。LINE は無料枠を消費するため、送信前に「対象と残枠を確認」で人数と残りを確かめてください。</p>
+
+        <div class="bc-scope">
+          <span class="field-label">送信対象</span>
+          <label class="opt"><input type="radio" name="bcScope" value="regulars" checked /> 常連（2回以上）</label>
+          <label class="opt"><input type="radio" name="bcScope" value="all" /> 全予約客</label>
+        </div>
+
+        <div class="msg-field">
+          <label for="bcMessage">お知らせ本文</label>
+          <textarea id="bcMessage" rows="4" placeholder="例）本日◯日は都合により臨時休業いたします。ご不便をおかけします。"></textarea>
+        </div>
+
+        <div id="bcPreviewArea"></div>
+
+        <div class="actions row wrap-actions">
+          <button class="reserve-btn ghost sm" id="bcPreview" type="button">対象と残枠を確認</button>
+          <button class="reserve-btn ghost sm" id="bcTest" type="button">オーナーに試し送信</button>
+          <button class="reserve-btn sm" id="bcSend" type="button" disabled>この内容で一斉送信</button>
+        </div>
+      </section>
+
+      <!-- LINE無料枠 -->
+      <section class="sec" id="sec-quota">
+        <div class="sec-head">
+          <h2 class="section-title">LINE無料枠（当月）</h2>
+          <button class="reserve-btn ghost sm" id="reloadQuota" type="button">再読み込み</button>
+        </div>
+        <div id="quotaArea"><div class="status loading"><span class="spinner" aria-hidden="true"></span><span>読み込んでいます…</span></div></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>{salonName}</p>
+      <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
+    </footer>
+
+    <div id="toast"></div>
+
+    <script>
+      // 共有部品を import するため bundled module 化。
+      // 管理 API（Cookie 前提の /action への POST）・ログアウト・未認証時の導線は admin-api.js に集約。
+      // 認証はサーバゲート（middleware）に一本化済み。このページは認証済みでのみ配信される。
+      import { createAdminApi } from '../../../lib/admin-api.js';
+      import { esc, createToast, loadingHtml, emptyHtml } from '../../../lib/admin-ui.js';
+
+      const el = (id) => document.getElementById(id);
+
+      // 管理 API クライアント（Cookie 前提で Worker を叩く）。DOM は el 越しに都度解決。
+      const { apiPost, logout, handleForbidden } = createAdminApi();
+
+      // esc / loadingHtml / emptyHtml は admin-ui.js の純ヘルパ。toast は #toast を el 越しに解決する。
+      const toast = createToast(el);
+
+      // ============================================================
+      // 一斉送信
+      // ============================================================
+      // 送信 confirm で使うため、直近プレビューの対象人数を保持する
+      const bcCounts = { line: 0, mail: 0 };
+
+      function bcScope() {
+        const r = document.querySelector('input[name="bcScope"]:checked');
+        return r ? r.value : 'regulars';
+      }
+      function bcMessage() { return el('bcMessage').value; }
+
+      // 本文（プレビュー）を作る。送信後見込み used+lineCount も併記
+      function renderBcPreview(res) {
+        const area = el('bcPreviewArea');
+        if (!res || !res.ok) { area.innerHTML = emptyHtml('確認に失敗しました。'); el('bcSend').disabled = true; return; }
+        bcCounts.line = res.lineCount;
+        bcCounts.mail = res.mailCount;
+        const quotaStr = (res.used == null)
+          ? '無料枠は取得できませんでした'
+          : '今月 ' + res.used + '/' + res.limit + ' 通（残 ' + res.available + '）・送信後見込み ' + (res.used + res.lineCount);
+        let head = '<div class="pcard"><div class="pcard-title">送信対象</div>'
+          + '<div class="bc-count">LINE ' + res.lineCount + '人 / メール ' + res.mailCount + '人 / 届かない ' + res.unreachable + '人</div>'
+          + '<div class="muted">' + esc(quotaStr) + '</div>';
+        if (res.willExceed) {
+          area.innerHTML = head
+            + '<div class="empty warn">⚠ 残枠不足のため送信できません（LINE対象 ' + res.lineCount + '人 > 残 ' + res.available + '）。</div></div>';
+          el('bcSend').disabled = true;
+        } else {
+          area.innerHTML = head + '</div>';
+          el('bcSend').disabled = false;
+        }
+      }
+
+      // 対象と残枠を確認
+      el('bcPreview').addEventListener('click', async () => {
+        if (!bcMessage().trim()) { toast('本文を入力してください'); return; }
+        el('bcPreviewArea').innerHTML = loadingHtml('確認中…');
+        const btn = el('bcPreview'); btn.disabled = true;
+        let res;
+        try {
+          res = await apiPost('broadcastPreview', { scope: bcScope() });
+        } catch (_) {
+          btn.disabled = false;
+          el('bcPreviewArea').innerHTML = emptyHtml('確認に失敗しました。時間をおいて再度お試しください。');
+          return;
+        }
+        btn.disabled = false;
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        renderBcPreview(res);
+      });
+
+      // オーナーに試し送信
+      el('bcTest').addEventListener('click', async () => {
+        if (!bcMessage().trim()) { toast('本文を入力してください'); return; }
+        const btn = el('bcTest'); btn.disabled = true;
+        let res;
+        try {
+          res = await apiPost('broadcastTest', { message: bcMessage() });
+        } catch (_) {
+          btn.disabled = false; toast('通信エラー。時間をおいて再度お試しください。'); return;
+        }
+        btn.disabled = false;
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        if (res && res.ok) toast('オーナーに試し送信しました');
+        else toast('試し送信に失敗: ' + ((res && res.error) || '不明'));
+      });
+
+      // 一斉送信の実行
+      el('bcSend').addEventListener('click', async () => {
+        const btn = el('bcSend');
+        if (!bcMessage().trim()) { toast('本文を入力してください'); return; }
+        if (!confirm('LINE ' + bcCounts.line + '人・メール ' + bcCounts.mail + '人へ送信します。よろしいですか？')) return;
+        btn.disabled = true;
+        let res;
+        try {
+          res = await apiPost('broadcast', { scope: bcScope(), message: bcMessage() });
+        } catch (_) {
+          btn.disabled = false; toast('通信エラー。時間をおいて再度お試しください。'); return;
+        }
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        if (res && res.ok) {
+          toast('送信しました（LINE ' + res.sentLine + '人 / メール ' + res.sentMail + '人）');
+          // 送信後は残枠が変わるため、再確認を促して無効のまま維持
+          btn.disabled = true;
+        } else {
+          btn.disabled = false;
+          if (res && res.error === 'quota_exceeded') {
+            toast('残枠不足で送信できません（必要 ' + res.need + '・残 ' + res.available + '）');
+          } else {
+            toast('送信に失敗: ' + ((res && res.error) || '不明'));
+          }
+        }
+      });
+
+      // ============================================================
+      // LINE無料枠（当月送信数）
+      // ============================================================
+      async function loadQuota() {
+        el('quotaArea').innerHTML = loadingHtml();
+        let res;
+        try {
+          res = await apiPost('getQuota', null, { silent: true });
+        } catch (_) {
+          el('quotaArea').innerHTML = emptyHtml('取得に失敗しました。時間をおいて再度お試しください。');
+          return;
+        }
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        renderQuota(res);
+      }
+      function renderQuota(res) {
+        const area = el('quotaArea');
+        if (!res || !res.ok) { area.innerHTML = emptyHtml('取得に失敗しました。'); return; }
+        if (res.used == null) {
+          area.innerHTML = emptyHtml('送信数を取得できませんでした（LINEトークン未設定の可能性）。');
+          return;
+        }
+        const pct = res.limit ? Math.round(res.used / res.limit * 100) : 0;
+        const warn = pct >= 80;
+        area.innerHTML = '<div class="quota-num"><strong>' + res.used + ' / ' + res.limit + ' 通</strong>'
+          + '<span class="muted">（残り ' + res.available + ' 通・' + pct + '%）</span></div>'
+          + (warn
+            ? emptyHtml('⚠ 無料枠の80%を超えています。上限を超えると追加メッセージは送信されません。', { warn: true })
+            : '');
+      }
+      el('reloadQuota').addEventListener('click', loadQuota);
+
+      // ---- ログアウト ----
+      // Worker がセッション Cookie を失効させたら、公開のログイン導線へ遷移する。
+      el('logoutBtn').addEventListener('click', async () => {
+        await logout();
+        location.href = '/reserve/admin/login/';
+      });
+
+      // ---- 起動 ----
+      // サーバゲート済み（middleware が Cookie を検証して通した）前提。
+      // 積み上げレイアウトでは quota が常に見えるため、タブ時の遅延ロードを init で即時化する。
+      loadQuota();
+    </script>
+  </body>
+</html>
