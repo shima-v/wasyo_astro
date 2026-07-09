@@ -178,6 +178,8 @@ function doPost(e) {
       case 'broadcastTest': return json_(requireAdminToken_(body, function () { return adminBroadcastTest_(body); }));
       case 'setTempSchedule': return json_(requireAdminToken_(body, function () { return adminSetTempSchedule_(body); }));
       case 'ownerChannelTest': return json_(requireAdminToken_(body, adminOwnerChannelTest_));
+      // 代理登録（電話/来店で受けた予約を"確定"で代理登録）。bearer 保護必須。
+      case 'adminCreateBooking': return json_(requireAdminToken_(body, function () { return adminCreateBooking_(body); }));
       // デプロイ通知（deploy.yml / gas/deploy.sh から叩く）。DEPLOY_NOTIFY_TOKEN で保護（管理トークンとは別系統）。
       case 'deployNotify': return json_(requireDeployToken_(body, function () { return notifyDeploy_(body); }));
       default: return json_({ ok: false, error: 'unknown_action' });
@@ -521,6 +523,7 @@ function createBookingCore_(b, opts) {
   var confirm = opts.confirm === true;                   // 既定 false
   var bypassWindow = opts.bypassWindow === true;         // 既定 false
   var notifyOwnerPending = opts.notifyOwnerPending !== false; // 既定 true
+  var notifyCustomerFlag = opts.notifyCustomer !== false; // 既定 true（代理予約は自前で控えを送るため false で渡す）
 
   var menu = MENU[b.menuId];
   if (!menu) return { ok: false, error: 'invalid_menu' };
@@ -597,8 +600,11 @@ function createBookingCore_(b, opts) {
   if (notifyOwnerPending) {
     notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst);
   }
-  notifyCustomer_(b, '【仮予約を受付ました】\n' + bookingSummary_(menu, start, eff, isFirst) +
-    '\nサロンの確認後、確定のご連絡をいたします。\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(token));
+  // 顧客への自動通知（代理予約は notifyCustomer:false で無効化し、確定控えを自前で送る）
+  if (notifyCustomerFlag) {
+    notifyCustomer_(b, '【仮予約を受付ました】\n' + bookingSummary_(menu, start, eff, isFirst) +
+      '\nサロンの確認後、確定のご連絡をいたします。\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(token));
+  }
 
   return {
     ok: true, token: token, status: status,
@@ -610,6 +616,54 @@ function createBookingCore_(b, opts) {
 /** お客様の通常予約。既定 opts（現行挙動）で本体を呼ぶ薄いラッパ。 */
 function createBooking_(b) {
   return createBookingCore_(b, DEFAULT_CREATE_OPTS);
+}
+
+/**
+ * 代理登録。管理者が電話・来店で受けた予約を代わりに"確定"で登録する。
+ * front /reserve/admin/reservations → Worker → doPost 'adminCreateBooking'（bearer 保護）。
+ * 【設計3点（本人ロック済み）】
+ *   1. 即確定  : confirm:true（生成時点で CONFIRMED・【確定】・GREEN・台帳即時 upsert）。
+ *   2. 同一受付制約: bypassWindow:false（リードタイム・受付上限・営業日/開始時刻/休枠を通常客同様に検証）。
+ *   3. 控えはメール入力時だけ: email があれば顧客へ確定控えメール。空なら顧客へは送らずオーナーへは必ず通知。
+ * 代理は連絡手段/性別/紹介者を集めないため core の requireContact/requireReferrer は外し、
+ * 組み込み通知（notifyOwnerPending/notifyCustomer）も両方オフにして、確定用の通知を自前で出す。
+ */
+function adminCreateBooking_(b) {
+  b = b || {};
+  // core は menu/date/time を検証する。代理では連絡手段チェックを外す分、name/phone をここで必須化する。
+  if (!b.name || !b.phone) return { ok: false, error: 'missing_required' };
+
+  var res = createBookingCore_(b, {
+    requireContact: false,    // 連絡手段（contactMethod/email/line）は代理では集めない
+    requireReferrer: false,   // 男性の紹介者チェックも代理では課さない
+    confirm: true,            // 生成時点で確定（【確定】/GREEN/台帳即時 upsert）
+    bypassWindow: false,      // 受付制約は通常客と同じ（特別扱いしない）
+    notifyOwnerPending: false, // 「承認待ち」通知は出さない（確定済みのため）
+    notifyCustomer: false,     // 顧客への自動通知はオフ。確定控えを下で自前送信
+  });
+  if (!res.ok) return res;
+
+  var menu = MENU[b.menuId] || { name: b.menuId };
+  var start = atTime_(parseDate_(b.date), b.time);
+  var eff = { durationMin: res.durationMin, price: res.price };
+
+  // オーナー通知（Discord優先→LINEフォールバック＝notifyOwner_）。確定済みなので承認/辞退リンクは付けない。
+  // 顧客 PII を LINE 履歴に生で残さない既存方針は Discord 優先で踏襲する。
+  notifyOwner_('【代理で"確定"予約を登録しました】\n' +
+    'お名前: ' + b.name + (res.isFirstTime ? '（新規）' : '（常連）') + '\n' +
+    '電話: ' + (b.phone || '（未登録）') + '\n' +
+    bookingSummary_(menu, start, eff, res.isFirstTime));
+
+  // 顧客控え（メール入力時だけ）。代理では lineUserId を集めないためメール限定。
+  if (b.email) {
+    sendMail_(b.email, 'サロン和笑〜Violane〜 ご予約',
+      '【ご予約が確定しました】\n' +
+      bookingSummary_(menu, start, eff, res.isFirstTime) +
+      '\nご来店をお待ちしております。' +
+      '\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(res.token));
+  }
+
+  return res;
 }
 
 // ============================================================

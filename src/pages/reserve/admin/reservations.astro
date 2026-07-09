@@ -1,11 +1,11 @@
 ---
 // 予約管理ページ（/reserve/admin/reservations）。P2 IA（ADR-0001 決定1）の「予約管理」区分。
 // 承認待ち一覧（admin.astro から移設・listPending/adminDecision＝既存API）と、
-// 代理登録フォーム（mock-3-agent.html 準拠・UI のみ）を1画面に載せる。
+// 代理登録フォーム（mock-3-agent.html 準拠）を1画面に載せる。
 //
-// ⚠️ 代理登録の「実送信」は GAS 側の新設（adminCreateBooking_・不可逆・本人GO）が要るため
-//    本 PR では送信ボタンを disabled にし「準備中」を明示する。ペイロード組立・クライアント検証
-//    までは実装し、次 PR で apiPost('adminCreateBooking', ...) に配線する。
+// 代理登録は apiPost('adminCreateBooking', ...)（GAS adminCreateBooking_・確定登録）に配線済み。
+// 生成時点で確定（confirm）＆通常客と同じ受付制約（bypassWindow なし）。控えはメール入力時のみ顧客へ、
+// お店へは常に通知する。※実 GAS 往復の疎通確認は clasp push（本人GO）後に行う。
 //
 // 管理ページ本体はオンデマンド（prerender:false リテラル）。static 配信されると middleware の
 // サーバゲートを通らないため、必ずリテラル false にして Worker を通す（ADR-0002）。
@@ -50,7 +50,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
         <div id="pendingArea"><div class="status loading"><span class="spinner" aria-hidden="true"></span><span>読み込んでいます…</span></div></div>
       </section>
 
-      <!-- 代理登録（電話・来店で受けた予約を代わりに入れる）。UI のみ・送信は準備中 -->
+      <!-- 代理登録（電話・来店で受けた予約を代わりに"確定"で入れる） -->
       <section class="sec" id="sec-agent">
         <h2 class="section-title" style="margin-top:1.6rem">代理で予約を入れる</h2>
         <p class="form-lead">電話や来店で受けた予約を、この1画面でそのまま登録します。</p>
@@ -93,11 +93,11 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
         </div>
 
         <div class="submit-wrap">
-          <button class="submit" id="agentSubmit" type="button" disabled>
+          <button class="submit" id="agentSubmit" type="button">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
             この内容で予約を入れる
           </button>
-          <p class="submit-note">次のアップデートで有効化（現在は準備中）。確定通知（お客様控え・お店通知）の送信は次の PR で接続します。</p>
+          <p class="submit-note">確定で登録します。メールを入れた場合はお客様へ確定控えを送信し、お店へは必ず通知します。</p>
         </div>
       </section>
     </main>
@@ -110,7 +110,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
     <div id="toast"></div>
 
     <script>
-      // 承認待ち＝既存 API（listPending/adminDecision）。代理登録＝UI のみ（送信は次 PR）。
+      // 承認待ち＝既存 API（listPending/adminDecision）。代理登録＝adminCreateBooking（確定登録）。
       // 共有部品（admin-api.js / admin-ui.js）を再利用し重複実装しない。
       import { createAdminApi } from '../../../lib/admin-api.js';
       import { esc, createToast, loadingHtml, emptyHtml } from '../../../lib/admin-ui.js';
@@ -199,9 +199,9 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       el('reloadPending').addEventListener('click', loadPending);
 
       // ============================================================
-      // 代理登録（UI のみ・送信は準備中）
-      //   メニュー選択（トグル）／日時プレビュー／ペイロード組立＋クライアント検証まで実装。
-      //   実送信（GAS adminCreateBooking_ 新設・本人GO）は次 PR で配線する。
+      // 代理登録（確定登録）
+      //   メニュー選択（トグル）／日時プレビュー／ペイロード組立＋クライアント検証／
+      //   apiPost('adminCreateBooking', ...) 実送信までを実装。GAS 側で確定・受付制約検証・通知を行う。
       // ============================================================
       let selectedMenu = null; // { id, name, duration }
 
@@ -253,9 +253,50 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
         if (!p.phone) { toast('電話番号を入力してください'); return false; }
         return true;
       }
-      // 送信ボタンは disabled（準備中）。次 PR で GAS adminCreateBooking_ を新設したら
-      // validateAgent() → agentPayload() → apiPost('adminCreateBooking', ...) を配線する。
-      void validateAgent; void agentPayload;
+      // 送信＝GAS adminCreateBooking_（確定登録）。二重送信は apiPost の runExclusive オーバーレイが防ぐ。
+      // GAS の error コードを日本語化して toast する（未知コードはそのまま添えて可視化）。
+      const AGENT_ERRORS = {
+        missing_required: '必須項目（お名前・電話番号）が未入力です。',
+        missing_slot: '日時を入力してください。',
+        invalid_menu: 'メニューの選択が正しくありません。',
+        too_soon: '受付開始前の日時です。予約できる日時を選んでください。',
+        too_far: '受付範囲より先の日時です。予約できる日時を選んでください。',
+        slot_closed: 'その日時は受付時間外（休枠・営業時間外）です。',
+        slot_taken: 'その時間帯はすでに予約が入っています。',
+        calendar_not_configured: 'カレンダー設定が未完了です。オーナーへご確認ください。',
+        server_unconfigured: 'サーバ設定が未完了です。オーナーへご確認ください。',
+        server_error: 'サーバでエラーが発生しました。時間をおいて再度お試しください。',
+      };
+
+      function resetAgentForm() {
+        el('agentMenuChips').querySelectorAll('.mchip').forEach((b) => b.classList.remove('on'));
+        selectedMenu = null;
+        ['agentDate', 'agentTime', 'agentName', 'agentPhone', 'agentEmail'].forEach((id) => { el(id).value = ''; });
+        el('agentDtChip').hidden = true;
+      }
+
+      async function submitAgent() {
+        if (!validateAgent()) return;
+        const payload = agentPayload();
+        let res;
+        try {
+          res = await apiPost('adminCreateBooking', payload); // runExclusive で二重送信ガード＋オーバーレイ
+        } catch (_) {
+          toast('通信エラー。時間をおいて再度お試しください。');
+          return;
+        }
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        if (res && res.ok) {
+          toast(payload.email
+            ? '確定で登録しました（お客様へ控えメールを送信）'
+            : '確定で登録しました（お店へ通知）');
+          resetAgentForm();
+        } else {
+          const key = res && res.error;
+          toast(AGENT_ERRORS[key] || ('登録に失敗しました' + (key ? '（' + key + '）' : '')));
+        }
+      }
+      el('agentSubmit').addEventListener('click', submitAgent);
 
       // ---- 起動 ----
       // サーバゲート済み（middleware が Cookie を検証して通した）前提。承認待ちを読み込む。

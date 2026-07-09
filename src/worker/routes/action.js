@@ -11,6 +11,7 @@ export const prerender = false;
 const ALLOWED_ACTIONS = new Set([
   'getSlotConfig', 'setSlotConfig', 'listPending', 'getQuota', 'adminDecision',
   'broadcastPreview', 'broadcast', 'broadcastTest', 'setTempSchedule', 'ownerChannelTest',
+  'adminCreateBooking',
 ]);
 
 export async function POST(context) {
