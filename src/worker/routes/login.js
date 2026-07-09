@@ -2,7 +2,7 @@
 // 管理トークン（＋任意 PIN）を検証し、短命の署名付き httpOnly セッション Cookie を発行する。
 // ブラウザに長寿命トークンを持たせないための入口。
 import { env } from 'cloudflare:workers';
-import { issueSession, sessionCookie, secretMatches, SESSION_TTL_SEC } from '../session.js';
+import { issueSession, sessionCookie, secretMatches } from '../session.js';
 import { rateLimited, originAllowed, jsonNoStore } from '../guard.js';
 
 export const prerender = false;
@@ -27,6 +27,8 @@ export async function POST(context) {
   const okPin = adminPin ? await secretMatches(secret, adminPin, pin) : true;
   if (!okToken || !okPin) return jsonNoStore({ ok: false, error: 'invalid_credentials' }, 401);
 
-  const session = await issueSession(secret, SESSION_TTL_SEC);
-  return jsonNoStore({ ok: true }, 200, { 'Set-Cookie': sessionCookie(session, SESSION_TTL_SEC) });
+  // 新規セッション（iat=seen=now）。Cookie の Max-Age はアイドル（30分・sessionCookie 既定）。
+  // 絶対上限（12時間）はサーバ側の iat で担保する。
+  const session = await issueSession(secret);
+  return jsonNoStore({ ok: true }, 200, { 'Set-Cookie': sessionCookie(session) });
 }

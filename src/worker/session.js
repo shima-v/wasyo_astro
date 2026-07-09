@@ -3,8 +3,16 @@
 // Cloudflare Worker（Web Crypto）で動く。localStorage トークン方式を置き換える。
 
 export const SESSION_COOKIE = 'wasyo_admin_session';
-// セッション有効期間（秒）。**仮 60分**。後で本人と確定するため定数として切り出しておく。
-export const SESSION_TTL_SEC = 60 * 60;
+
+// 管理セッションの複合タイムアウト（2026-07-04 本人確定）。
+// 単一の絶対 TTL ではなく「アイドル（無活動）＋絶対（発行からの上限）」の二段構え。
+// - アイドル 30分: 最終アクティビティから 30分 無操作で失効（席を離れた端末の乗っ取り窓を狭める）。
+//   根拠: OWASP Session Management（低リスク業務のアイドルは 15–30分）。活動ごとに再発行して延長。
+// - 絶対 12時間: ログイン時刻（iat）から 12時間で必ず失効（再発行でも延びない硬い上限）。
+//   根拠: NIST SP 800-63B-4 AAL2（再認証は「アイドル ≤ 1h」かつ「絶対 ≤ 24h」を SHOULD）。
+//   小規模サロン運用に合わせ、SHOULD の範囲内でより短い 30分/12時間に寄せた。値は定数。
+export const SESSION_IDLE_SEC = 30 * 60;        // アイドル: 最終活動から 30分
+export const SESSION_ABSOLUTE_SEC = 12 * 60 * 60; // 絶対: 発行（iat）から 12時間
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -43,35 +51,67 @@ function constEq(a, b) {
   return diff === 0;
 }
 
-// セッショントークンを発行。payload に exp（epoch秒）を入れて署名する。形式: `<body>.<sig>`。
-export async function issueSession(secret, ttlSec = SESSION_TTL_SEC) {
-  const payload = { exp: Math.floor(Date.now() / 1000) + ttlSec };
+// 現在時刻（epoch秒）。発行・検証系の nowSec 既定値に使う。
+// これらの関数は nowSec を引数で受け取り既定値としてのみ使うため、テストで任意の時刻を注入して
+// 境界（アイドル/絶対の失効タイミング）を決定的に検証できる。
+function nowSecDefault() {
+  return Math.floor(Date.now() / 1000);
+}
+
+// payload {iat, seen} を署名して `<body>.<sig>` 形式のトークンにする（内部ヘルパ）。
+async function signToken(secret, payload) {
   const body = b64urlEncode(enc.encode(JSON.stringify(payload)));
   const sig = await sign(secret, body);
   return body + '.' + sig;
 }
 
-// セッショントークンを検証。改ざん（署名不一致）・期限切れは false。
-export async function verifySession(secret, token) {
-  if (!secret || !token) return false;
+// 新規セッションを発行。iat=seen=now（ログイン直後・絶対上限のアンカーを now に置く）。
+export async function issueSession(secret, nowSec = nowSecDefault()) {
+  return signToken(secret, { iat: nowSec, seen: nowSec });
+}
+
+// 既存セッションのスライド再発行。iat は据置（絶対上限は動かさない）・seen のみ now に更新。
+export async function reissueSession(secret, iat, nowSec = nowSecDefault()) {
+  return signToken(secret, { iat, seen: nowSec });
+}
+
+// 署名を検証し payload {iat, seen} を返す（内部ヘルパ）。時刻（失効）判定はしない。
+// 署名不一致・形式不正・旧 exp 形式（iat/seen を持たない）は null（＝無効扱い、後方互換は持たない）。
+async function verifiedPayload(secret, token) {
+  if (!secret || !token) return null;
   const parts = String(token).split('.');
-  if (parts.length !== 2) return false;
+  if (parts.length !== 2) return null;
   const body = parts[0];
   const sig = parts[1];
   const expected = await sign(secret, body);
-  if (!constEq(expected, sig)) return false;
+  if (!constEq(expected, sig)) return null; // 定数時間比較（改ざん検出）
   try {
     const payload = JSON.parse(dec.decode(b64urlToBytes(body)));
-    if (!payload || typeof payload.exp !== 'number') return false;
-    if (Math.floor(Date.now() / 1000) >= payload.exp) return false;
-    return true;
+    if (!payload || typeof payload.iat !== 'number' || typeof payload.seen !== 'number') return null;
+    return payload;
   } catch (_) {
-    return false;
+    return null;
   }
 }
 
+// 検証＋スライド再発行を1経路に集約する。呼び側はこの1関数で「通す/拒否」と「延長トークン」を得る。
+//   戻り値: 有効なら「iat 据置・seen=now で再署名した新トークン文字列」／無効・期限切れなら '' (falsy)。
+// 判定順: ①署名一致（verifiedPayload） ②絶対上限（iat から SESSION_ABSOLUTE_SEC 経過で失効・再発行でも延びない）
+//   ③アイドル（最終活動 seen から SESSION_IDLE_SEC 無活動で失効）。全て通れば seen を now に進めて再署名。
+// 呼び側は truthy なら next()/成功レスポンスに sessionCookie(fresh) を付けてアイドル窓をスライドし、
+// falsy なら 302/401 で拒否する（Cookie は付けない）。
+export async function refreshSession(secret, token, nowSec = nowSecDefault()) {
+  const payload = await verifiedPayload(secret, token);
+  if (!payload) return '';
+  if (nowSec >= payload.iat + SESSION_ABSOLUTE_SEC) return ''; // 絶対上限（硬い上限・延長不可）
+  if (nowSec >= payload.seen + SESSION_IDLE_SEC) return '';     // アイドル（無活動で失効）
+  return reissueSession(secret, payload.iat, nowSec);           // 通過 → iat 据置・seen=now で延長
+}
+
 // Set-Cookie 文字列。httpOnly / Secure / SameSite=Strict / Path は管理系に限定。
-export function sessionCookie(token, maxAgeSec = SESSION_TTL_SEC) {
+// Max-Age はアイドル（30分）を既定にする＝活動ごとに再発行して延長するため、ブラウザ側 Cookie も
+// アイドルで失効し、サーバ側 iat による絶対上限と併せて多層防御になる（絶対上限はサーバで担保）。
+export function sessionCookie(token, maxAgeSec = SESSION_IDLE_SEC) {
   return SESSION_COOKIE + '=' + token + '; Max-Age=' + maxAgeSec + '; Path=/reserve/admin; HttpOnly; Secure; SameSite=Strict';
 }
 export function clearCookie() {

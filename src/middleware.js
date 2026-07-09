@@ -6,7 +6,7 @@
 // このミドルウェアが実際にゲートするのは「オンデマンド（prerender:false）の管理ページ」だけ。
 // 公開ページ・静的アセット（ログインページを含む）は Cloudflare が ASSETS から直接配信するため、
 // 実行時にはここを通らない（＝ゲート対象外で正しい）。
-import { verifySession, readCookie } from './worker/session.js';
+import { refreshSession, readCookie, sessionCookie } from './worker/session.js';
 
 const ADMIN_PREFIX = '/reserve/admin';
 const LOGIN_PATH = '/reserve/admin/login';
@@ -33,9 +33,15 @@ export async function onRequest(context, next) {
   // 読み込まないよう、動的 import で実行時にだけ解決する。
   const { env } = await import('cloudflare:workers');
   const secret = (env && env.SESSION_SECRET) || '';
-  const valid = await verifySession(secret, readCookie(context.request));
-  if (valid) return next();
-
-  // 未認証 → 管理ページの HTML は返さず、ログイン導線へリダイレクト。
-  return context.redirect(LOGIN_REDIRECT, 302);
+  // 検証＋スライド再発行を1経路で。fresh が truthy なら通し、その延長トークンで Cookie を更新して
+  // アイドル窓をスライドする（ページ遷移＝活動）。falsy（無効/期限切れ）なら 302 でログインへ。
+  const fresh = await refreshSession(secret, readCookie(context.request));
+  if (!fresh) {
+    // 未認証 → 管理ページの HTML は返さず、ログイン導線へリダイレクト（Cookie は付けない）。
+    return context.redirect(LOGIN_REDIRECT, 302);
+  }
+  const res = await next();
+  // オンデマンド管理ページのレスポンス（prerender:false）にアイドル延長 Cookie を追記する。
+  res.headers.append('Set-Cookie', sessionCookie(fresh));
+  return res;
 }
