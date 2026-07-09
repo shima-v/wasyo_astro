@@ -3,8 +3,8 @@
 // 顧客台帳シート（LEDGER_SHEET）だけを素材にした「台帳ベース MVP」:
 //   ・一覧＝氏名／タグ（新規 or 常連）／電話は常にマスク。行タップで同一ページ内の詳細パネルを開く。
 //   ・詳細＝連絡先を PII 段階開示（既定マスク→[表示]で開示＋[コピー]＋放置で自動再マスク＝ADR-0001 決定3）。
-//   ・来店履歴の「明細（日付＋メニュー）」は台帳に無いため作らず「準備中」で正直に未接続（作話しない）。
-//     明細はカレンダー集約（adminListConfirmed_ 系）で別 PL に載せる。
+//   ・来店履歴の「明細（日付＋メニュー）」は詳細を開くたびに read-only の adminListConfirmed（顧客キーで
+//     突合したカレンダーの確定イベント）で取得して表示する。0件・失敗は正直に示す（作話しない）。
 //
 // 詳細は URL に顧客キーを載せず「在ページのパネル」で開く（のぞき見／Cookie Path 両面で有利）。
 // データは read-only の GAS `adminListCustomers`（Worker 経由・requireAdminToken_ 保護）だけで賄う。
@@ -246,11 +246,53 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         el('detailSection').hidden = false;
         window.scrollTo({ top: 0, behavior: 'auto' });
         wireDetail();
+        loadVisits(c); // 来店履歴は詳細を開くたびに取りに行く（一覧段階で明細 PII を持たない＝段階開示）
       }
       function closeDetail() {
         clearRemask();
         el('detailSection').hidden = true;
         el('listSection').hidden = false;
+      }
+
+      // 来店履歴＝read-only の adminListConfirmed（顧客キー c.key でカレンダーの確定イベントを突合）。
+      // その顧客の来店だけが返る（他人の履歴は混ざらない＝GAS 側で突合済み）。0件・失敗は正直に示す。
+      async function loadVisits(c) {
+        const body = el('histBody');
+        if (!body) return;
+        if (!c.key) { // 突合キーが無ければ履歴を引けない（作話しない）
+          body.innerHTML = emptyHtml('来店履歴を表示できませんでした。');
+          return;
+        }
+        let res;
+        try {
+          res = await apiPost('adminListConfirmed', { key: c.key }, { silent: true });
+        } catch (_) {
+          if (el('histBody') !== body) return; // 取得中に別の詳細へ切り替わっていたら破棄
+          body.innerHTML = emptyHtml('来店履歴の取得に失敗しました。', { warn: true });
+          return;
+        }
+        if (el('histBody') !== body) return; // レース対策：開いている詳細が変わっていたら反映しない
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        if (!res || !res.ok || !Array.isArray(res.visits)) {
+          body.innerHTML = emptyHtml('来店履歴を取得できませんでした。', { warn: true });
+          return;
+        }
+        renderVisits(body, res.visits);
+      }
+
+      function renderVisits(body, visits) {
+        if (!visits.length) {
+          body.innerHTML = emptyHtml('来店履歴がまだありません。');
+          return;
+        }
+        body.innerHTML = '<ul class="hist__list">' + visits.map((v) => {
+          const d = esc(fmtDate(v.date));
+          const t = v.time ? '<span class="hist__time">' + esc(v.time) + '</span>' : '';
+          return '<li class="hist__item">'
+            + '<span class="hist__date">' + d + t + '</span>'
+            + '<span class="hist__menu">' + esc(v.menuName || '') + '</span>'
+            + '</li>';
+        }).join('') + '</ul>';
       }
 
       // 連絡先フィールド（phone→電話番号 / email→メール / line→台帳に連絡先なしを明示）。
@@ -295,7 +337,7 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           + '</div>'
           + '<div class="hist">'
           +   '<div class="hist__h">来店履歴 <span class="n">全 ' + esc(cnt) + ' 回</span></div>'
-          +   emptyHtml('来店ごとのメニュー明細は準備中です（次のアップデートでカレンダーから表示します）。')
+          +   '<div id="histBody">' + loadingHtml('来店履歴を読み込んでいます…') + '</div>'
           + '</div>';
       }
 

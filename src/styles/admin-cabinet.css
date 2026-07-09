@@ -184,7 +184,13 @@ a.chart:hover { border-color: var(--k); transform: translateY(-1px); transition:
 .reveal-note { font-family: var(--f-sans); font-size: .68rem; color: var(--a-gold-dp); margin-top: .35rem; display: flex; align-items: center; gap: .3rem; }
 .reveal-note svg { width: 12px; height: 12px; flex: none; }
 
-/* 来店履歴（明細は準備中＝空箱を .empty で正直に出す） */
+/* 来店履歴（確定イベントの明細＝日付・時刻・メニュー。0件・失敗は .empty で正直に出す） */
 .hist { background: var(--a-surface); border: 1px solid var(--a-line); border-radius: 12px; padding: .9rem 1rem 1rem; }
 .hist__h { font-family: var(--f-serif); font-size: .98rem; font-weight: 600; margin-bottom: .7rem; padding-bottom: .45rem; border-bottom: 1px solid var(--a-line); display: flex; align-items: center; gap: .5rem; color: var(--a-ink); }
 .hist__h .n { font-family: var(--f-sans); font-size: .72rem; color: var(--a-muted); margin-left: auto; font-variant-numeric: tabular-nums; }
+.hist__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.hist__item { display: flex; align-items: baseline; justify-content: space-between; gap: .8rem; padding: .55rem 0; border-bottom: 1px dashed var(--a-line); }
+.hist__item:last-child { border-bottom: 0; padding-bottom: 0; }
+.hist__date { font-family: var(--f-sans); font-size: .8rem; color: var(--a-muted); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+.hist__time { margin-left: .35rem; }
+.hist__menu { font-size: .9rem; color: var(--a-ink); text-align: right; line-height: 1.4; }
