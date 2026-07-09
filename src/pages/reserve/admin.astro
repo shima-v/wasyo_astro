@@ -2,10 +2,11 @@
 // 管理トップ（ハブ）。P2 IA（ADR-0001 決定1）の入口。4区分（予約・顧客・一斉送信・設定）への
 // 導線＋「今日の帯」で要対応を一望する。カルテ棚ビジュアル（ADR-0001 決定3・mock-1-hub.html 準拠）。
 //
-// 実データは既存 API のみで賄う（GAS ゼロ改修）:
-//   ・承認待ち件数 = listPending / ・一斉送信 残枠 = getQuota を並列取得。
+// 実データは既存 API で賄う:
+//   ・承認待ち件数 = listPending / ・一斉送信 残枠 = getQuota / ・顧客数 = adminListCustomers を並列取得。
 //   ・pending>0 / quota>=80% の区分に朱印（chart--attn）を点灯。
-//   ・「今日の予約件数」「顧客数」は供給 API 未実装のため「—」＋「準備中」で未接続を明示（作話しない）。
+//   ・「顧客数」は台帳（adminListCustomers）から実数化。取得失敗時は「—」にフォールバック（作話しない）。
+//   ・「今日の予約件数」は供給 API 未実装のため「—」＋「準備中」のまま（確定一覧の供給後に実数化）。
 //
 // 管理ページ本体はオンデマンド（prerender:false リテラル）。static 配信されると middleware の
 // サーバゲートを通らないため、必ずリテラル false にして Worker を通す（ADR-0002）。
@@ -53,9 +54,9 @@ const pageTitle = `${ENV_LABEL}管理トップ | ${salonName}`;
           <div class="today__n">—</div>
           <div class="today__lbl">今日の予約<span class="today__soon">準備中</span></div>
         </div>
-        <div class="today__cell">
-          <div class="today__n">—</div>
-          <div class="today__lbl">顧客<span class="today__soon">準備中</span></div>
+        <div class="today__cell" id="todayCustomerCell">
+          <div class="today__n" id="todayCustomerN">…</div>
+          <div class="today__lbl">顧客</div>
         </div>
       </div>
 
@@ -68,11 +69,11 @@ const pageTitle = `${ENV_LABEL}管理トップ | ${salonName}`;
           <div class="chart__aside" id="reserveAside"><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>
         </a>
 
-        <div class="chart customer">
+        <a class="chart customer" href="/reserve/admin/customers" id="chartCustomer">
           <div class="chart__spine"><span class="chart__lug"></span><svg class="chart__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.4-3.2 2.8-5 5.5-5s5.1 1.8 5.5 5"/><path d="M16 5.4a3 3 0 010 5.4M17.5 19c-.2-2.2-1.2-3.9-2.7-4.7"/></svg></div>
-          <div class="chart__body"><span class="chart__title">顧客</span><span class="chart__status">準備中（次のアップデート）</span></div>
-          <div class="chart__aside"></div>
-        </div>
+          <div class="chart__body"><span class="chart__title">顧客</span><span class="chart__status" id="customerStatus">読み込んでいます…</span></div>
+          <div class="chart__aside" id="customerAside"><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>
+        </a>
 
         <a class="chart broadcast" href="/reserve/admin/tools" id="chartBroadcast">
           <div class="chart__spine"><span class="chart__lug"></span><svg class="chart__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4a1.5 1.5 0 001.5 1.5H7l1 4h2l-1-4 8 3.2V6.3L9 9.5H5.5A1.5 1.5 0 004 11z"/><path d="M19.5 9.5a3.5 3.5 0 010 5"/></svg></div>
@@ -107,26 +108,31 @@ const pageTitle = `${ENV_LABEL}管理トップ | ${salonName}`;
       // 非要対応時に aside へ戻すシェブロン
       const CHEVRON = '<svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
 
-      // 承認待ち（listPending）と一斉送信残枠（getQuota）を並列取得。
+      // 承認待ち（listPending）・一斉送信残枠（getQuota）・顧客数（adminListCustomers）を並列取得。
       async function loadHub() {
-        let pending, quota;
+        let pending, quota, customers;
         try {
-          [pending, quota] = await Promise.all([
+          [pending, quota, customers] = await Promise.all([
             apiPost('listPending', null, { silent: true }),
             apiPost('getQuota', null, { silent: true }),
+            apiPost('adminListCustomers', null, { silent: true }),
           ]);
         } catch (_) {
           el('todayPendingN').textContent = '—';
           el('reserveStatus').textContent = '通信に失敗しました';
           el('broadcastStatus').textContent = '通信に失敗しました';
+          el('todayCustomerN').textContent = '—';
+          el('customerStatus').textContent = '通信に失敗しました';
           return;
         }
-        if ((pending && pending.error === 'forbidden') || (quota && quota.error === 'forbidden')) {
+        if ((pending && pending.error === 'forbidden') || (quota && quota.error === 'forbidden')
+          || (customers && customers.error === 'forbidden')) {
           handleForbidden();
           return;
         }
         renderPending(pending);
         renderQuota(quota);
+        renderCustomers(customers);
       }
 
       // 承認待ち件数 → 今日の帯＋予約カード（>0 で朱印点灯）
@@ -167,6 +173,20 @@ const pageTitle = `${ENV_LABEL}管理トップ | ${salonName}`;
           el('chartBroadcast').classList.remove('chart--attn');
           el('broadcastAside').innerHTML = CHEVRON;
         }
+      }
+
+      // 顧客数（adminListCustomers）→ 今日の帯＋顧客カードを実数化。
+      // 取得失敗時は「—」にフォールバック（カードはリンクのまま／作話しない）。
+      function renderCustomers(res) {
+        const ok = res && res.ok && Array.isArray(res.customers);
+        if (!ok) {
+          el('todayCustomerN').textContent = '—';
+          el('customerStatus').textContent = '顧客を取得できませんでした';
+          return;
+        }
+        const n = res.customers.length;
+        el('todayCustomerN').textContent = String(n);
+        el('customerStatus').innerHTML = '登録 <b>' + n + '</b>名';
       }
 
       // ---- ログアウト ----
