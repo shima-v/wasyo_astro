@@ -2,11 +2,12 @@
 // 管理トップ（ハブ）。P2 IA（ADR-0001 決定1）の入口。4区分（予約・顧客・一斉送信・設定）への
 // 導線＋「今日の帯」で要対応を一望する。カルテ棚ビジュアル（ADR-0001 決定3・mock-1-hub.html 準拠）。
 //
-// 実データは既存 API で賄う:
-//   ・承認待ち件数 = listPending / ・一斉送信 残枠 = getQuota / ・顧客数 = adminListCustomers を並列取得。
+// 実データは既存＋確定集約 API で賄う:
+//   ・承認待ち件数 = listPending / ・一斉送信 残枠 = getQuota / ・顧客数 = adminListCustomers
+//   ・今日の予約件数 = adminListConfirmed({scope:'today'}) を並列取得。
 //   ・pending>0 / quota>=80% の区分に朱印（chart--attn）を点灯。
 //   ・「顧客数」は台帳（adminListCustomers）から実数化。取得失敗時は「—」にフォールバック（作話しない）。
-//   ・「今日の予約件数」は供給 API 未実装のため「—」＋「準備中」のまま（確定一覧の供給後に実数化）。
+//   ・「今日の予約件数」は当日の確定イベント数（adminListConfirmed）で実数化。取得失敗時は「—」（作話しない）。
 //
 // 管理ページ本体はオンデマンド（prerender:false リテラル）。static 配信されると middleware の
 // サーバゲートを通らないため、必ずリテラル false にして Worker を通す（ADR-0002）。
@@ -44,15 +45,15 @@ const pageTitle = `${ENV_LABEL}管理トップ | ${salonName}`;
         <button type="button" class="linkish" id="logoutBtn">ログアウト</button>
       </div>
 
-      <!-- 今日の帯（一望の要約・数字はサンセリフ tabular）。承認待ちのみ実データ、他は準備中 -->
+      <!-- 今日の帯（一望の要約・数字はサンセリフ tabular）。承認待ち・今日の予約・顧客とも実データ -->
       <div class="today">
         <div class="today__cell" id="todayPendingCell">
           <div class="today__n" id="todayPendingN">…</div>
           <div class="today__lbl">承認待ち</div>
         </div>
-        <div class="today__cell">
-          <div class="today__n">—</div>
-          <div class="today__lbl">今日の予約<span class="today__soon">準備中</span></div>
+        <div class="today__cell" id="todayConfirmedCell">
+          <div class="today__n" id="todayConfirmedN">…</div>
+          <div class="today__lbl">今日の予約</div>
         </div>
         <div class="today__cell" id="todayCustomerCell">
           <div class="today__n" id="todayCustomerN">…</div>
@@ -108,14 +109,16 @@ const pageTitle = `${ENV_LABEL}管理トップ | ${salonName}`;
       // 非要対応時に aside へ戻すシェブロン
       const CHEVRON = '<svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
 
-      // 承認待ち（listPending）・一斉送信残枠（getQuota）・顧客数（adminListCustomers）を並列取得。
+      // 承認待ち（listPending）・一斉送信残枠（getQuota）・顧客数（adminListCustomers）・
+      // 今日の確定件数（adminListConfirmed）を並列取得。確定件数は count（数値）だけの軽量応答。
       async function loadHub() {
-        let pending, quota, customers;
+        let pending, quota, customers, confirmed;
         try {
-          [pending, quota, customers] = await Promise.all([
+          [pending, quota, customers, confirmed] = await Promise.all([
             apiPost('listPending', null, { silent: true }),
             apiPost('getQuota', null, { silent: true }),
             apiPost('adminListCustomers', null, { silent: true }),
+            apiPost('adminListConfirmed', { scope: 'today' }, { silent: true }),
           ]);
         } catch (_) {
           el('todayPendingN').textContent = '—';
@@ -123,16 +126,18 @@ const pageTitle = `${ENV_LABEL}管理トップ | ${salonName}`;
           el('broadcastStatus').textContent = '通信に失敗しました';
           el('todayCustomerN').textContent = '—';
           el('customerStatus').textContent = '通信に失敗しました';
+          el('todayConfirmedN').textContent = '—';
           return;
         }
         if ((pending && pending.error === 'forbidden') || (quota && quota.error === 'forbidden')
-          || (customers && customers.error === 'forbidden')) {
+          || (customers && customers.error === 'forbidden') || (confirmed && confirmed.error === 'forbidden')) {
           handleForbidden();
           return;
         }
         renderPending(pending);
         renderQuota(quota);
         renderCustomers(customers);
+        renderConfirmed(confirmed);
       }
 
       // 承認待ち件数 → 今日の帯＋予約カード（>0 で朱印点灯）
@@ -187,6 +192,16 @@ const pageTitle = `${ENV_LABEL}管理トップ | ${salonName}`;
         const n = res.customers.length;
         el('todayCustomerN').textContent = String(n);
         el('customerStatus').innerHTML = '登録 <b>' + n + '</b>名';
+      }
+
+      // 今日の確定件数（adminListConfirmed({scope:'today'}) の count）→ 今日の帯を実数化。
+      // 取得失敗・不正応答時は「—」にフォールバック（作話しない）。
+      function renderConfirmed(res) {
+        if (!res || !res.ok || typeof res.count !== 'number') {
+          el('todayConfirmedN').textContent = '—';
+          return;
+        }
+        el('todayConfirmedN').textContent = String(res.count);
       }
 
       // ---- ログアウト ----
