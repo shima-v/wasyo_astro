@@ -966,8 +966,9 @@ function ledgerUpsert_(props, visitDate) {
  * 列は ledgerUpsert_ と対応:
  *   col0 key / col1 type / col2 name / col3 firstVisit / col4 count / col5 lastVisit / col6 note
  * 連絡先は key から復元する（台帳には正規化済み電話＝数字のみが入る。ハイフン付きの整形はフロントで行う）。
- * 各顧客に台帳キー（col0）を追加フィールド key として返す＝顧客詳細の来店履歴で
- * adminListConfirmed_ の突合キーに使う（既存フィールド・挙動は不変の純追加）。
+ * 各顧客に台帳キー（col0）を hashKey_ で SHA-256 化した opaque な突合トークンを追加フィールド key として返す
+ * ＝顧客詳細の来店履歴で adminListConfirmed_ の突合に使う。生の識別子は突合トークンとして出さない
+ * （PII 最小化・既存フィールド・挙動は不変の純追加）。
  */
 function adminListCustomers_() {
   var sh = ledgerSheet_();
@@ -987,9 +988,10 @@ function adminListCustomers_() {
       firstVisit: ledgerDateStr_(row[3]),
       lastVisit: ledgerDateStr_(row[5]),
       tag: count <= 1 ? '新規' : '常連',
-      // 来店履歴の突合キー（adminListConfirmed_ の params.key＝台帳キー line:/phone:/email:）。
+      // 来店履歴の突合トークン（adminListConfirmed_ の params.key）。台帳キーを hashKey_ で SHA-256 化した
+      // opaque 値＝生の識別子（lineUserId・電話・メール）は突合トークンとして出さない（PII 最小化）。
       // クライアントは中身を解釈せずそのまま echo する（管理ゲート内・HTTPS・no-store）。
-      key: key,
+      key: hashKey_(key),
     };
     // 連絡先は key（type:value）の value 部から復元する。整形前の電話は台帳に無いので正規化数字を使う。
     var idx = key.indexOf(':');
@@ -1023,6 +1025,23 @@ function ledgerDateStr_(v) {
 var CONFIRMED_HISTORY_MONTHS = 12;
 
 /**
+ * 顧客突合トークン。台帳キー（line:/phone:/email:）を SHA-256 の hex 文字列にして返す。
+ * 生の識別子（lineUserId・電話・メール）をクライアントへ突合トークンとして出さないための一方向化
+ * （PII 最小化・本人判断で採用）。対象は管理ゲート内の owner 自身のデータで脅威モデルが小さいため、
+ * 素の SHA-256 hex で十分（salt/HMAC は付けない）。空文字は空文字のまま返す。
+ * ※adminListCustomers_（返す key）と adminListConfirmed_（イベント側の突合）で**同一関数**を使うこと。
+ */
+function hashKey_(rawKey) {
+  if (!rawKey) return '';
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, rawKey, Utilities.Charset.UTF_8);
+  var hex = '';
+  for (var i = 0; i < bytes.length; i++) {
+    hex += ('0' + (bytes[i] & 0xff).toString(16)).slice(-2);
+  }
+  return hex;
+}
+
+/**
  * 確定予約（status===CONFIRMED のカレンダーイベント）を read-only で集約する（P2 顧客管理／ハブ用）。
  * requireAdminToken_ で保護。シート書き込み・カレンダー変更・通知・外部 fetch は一切しない
  * （CalendarApp.getEvents と MENU 参照のみ）。2用途を引数で分岐し payload と計算コストを最小化する:
@@ -1030,8 +1049,8 @@ var CONFIRMED_HISTORY_MONTHS = 12;
  *   - params.key（顧客詳細用・来店履歴）: 指定顧客キーに一致する確定イベントだけを、過去
  *     CONFIRMED_HISTORY_MONTHS ヶ月〜今後の窓で読み、[{date,time,menuName}] を新しい順で返す
  *     （{ok:true, visits:[...]}）。他人の来店は混ぜない（PII 最小化）。
- * params.key は adminListCustomers_ が返す台帳キー（line:/phone:/email:）と同一で、各イベントの
- * ledgerKey_(getEventProps_(ev)) と突合する（adminListPending_ を雛形にした確定版）。
+ * params.key は adminListCustomers_ が返す opaque な突合トークン（台帳キーの SHA-256 hex）で、各イベントの
+ * hashKey_(ledgerKey_(getEventProps_(ev))) と突合する（生の識別子は突合トークンとして出さない・adminListPending_ を雛形にした確定版）。
  */
 function adminListConfirmed_(params) {
   params = params || {};
@@ -1055,7 +1074,8 @@ function adminListConfirmed_(params) {
   var to = addDays_(startOfDay_(new Date()), RULES.maxAdvanceDays + 1); // 今後の確定予約も含める
   var visits = cal.getEvents(from, to).filter(function (ev) {
     if (getEventProp_(ev, 'status') !== STATUS.CONFIRMED) return false;
-    return ledgerKey_(getEventProps_(ev)) === key; // その顧客の来店だけ（他人の履歴を混ぜない）
+    // イベント側の台帳キーも同じ hashKey_ でハッシュ化してから突合（params.key はハッシュ済みトークン）。
+    return hashKey_(ledgerKey_(getEventProps_(ev))) === key; // その顧客の来店だけ（他人の履歴を混ぜない）
   }).map(function (ev) {
     var p = getEventProps_(ev);
     var menu = MENU[p.menuId];

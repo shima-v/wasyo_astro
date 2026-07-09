@@ -21,10 +21,11 @@ read-only で集約する供給 API が要る＝本 PL。作業ブランチ: `de
   - `adminListConfirmed_(params)` を新設（確定集約セクション・`ledgerDateStr_` の直後）。
     `requireAdminToken_` 保護。`CalendarApp.getEvents` と `MENU` 参照のみ＝**書込・送信・外部 fetch なし**。
   - `params.scope==='today'` → `getEvents(startOfDay, +1日)` の confirmed を数え `{ok,count}` だけ返す（PII なし）。
-  - `params.key` → 過去 `CONFIRMED_HISTORY_MONTHS`（=12・定数）〜今後の窓で、`ledgerKey_(getEventProps_(ev))===key`
+  - `params.key` → 過去 `CONFIRMED_HISTORY_MONTHS`（=12・定数）〜今後の窓で、`hashKey_(ledgerKey_(getEventProps_(ev)))===key`
     の confirmed だけを `[{date,time,menuName}]` に写像し新しい順で返す。**その顧客の来店だけ**（他人を混ぜない）。
   - doPost に `case 'adminListConfirmed'`（`listPending` と同型・`requireAdminToken_` 保護）を追加。
-  - `adminListCustomers_` に来店履歴突合用の **追加フィールド `key`（台帳キー col0）** を返す純追加（既存フィールド・挙動は不変）。
+  - `adminListCustomers_` に来店履歴突合用の **追加フィールド `key`（台帳キーの SHA-256 hex＝opaque 突合トークン）**
+    を返す純追加（既存フィールド・挙動は不変）。ハッシュ助関数 `hashKey_` を新設し両 API で共用。
 - `src/worker/routes/action.js`（+1/-1）… `ALLOWED_ACTIONS` に `'adminListConfirmed'` を追加。他は不変。
 - `src/pages/reserve/admin/customers.astro`（+45/-3）… 詳細を開くたびに `adminListConfirmed({key})` を呼び、
   来店履歴プレースホルダを実データ（日付・時刻・メニュー名の新しい順リスト）に差し替える。0 件・失敗・403 を正直に処理。
@@ -35,38 +36,54 @@ read-only で集約する供給 API が要る＝本 PL。作業ブランチ: `de
 ## 設計判断（選択肢・理由）
 - **1 関数 2 用途（scope / key で分岐）**: ハブは件数だけ（PII なし・軽量）、詳細は当該顧客の明細だけ。
   用途ごとに payload と計算コストを最小化し、確定集約のロジックを 1 か所に集約する。
-- **顧客突合キー＝台帳キーをそのまま echo（PII 判断点／後述）**。指定キーに一致する確定イベントだけを
-  サーバ側でフィルタして返す＝**他人の来店履歴は payload に載せない**（PII 最小化）。
+- **顧客突合キー＝台帳キーの SHA-256 hex（opaque トークン）を echo（本人判断で採用／後述）**。指定トークンに
+  一致する確定イベントだけをサーバ側でフィルタして返す＝**他人の来店履歴は payload に載せない**（PII 最小化）。
+  生の識別子（lineUserId・電話・メール）は突合トークンとして出さない。
   「全確定予約を一括返却してクライアント名寄せ」方式は他人の履歴も載るため採らない。
 - **遡り期間 12 ヶ月（既定・定数 `CONFIRMED_HISTORY_MONTHS`）**: 常連の来歴を実用的に見せつつ窓を有限化。
   後で調整可。窓 = 過去 12 ヶ月〜今後（`RULES.maxAdvanceDays+1`）＝**今後の確定予約も履歴に含める**。
   → パフォーマンス懸念（窓が広い）が実機で出れば期間短縮または月別ページングを検討（**未確認・要実機観測**）。
 - **来店履歴は詳細を開くたびに取りに行く**: 一覧段階で明細 PII を持たない段階開示の思想を維持
   （前 PL の連絡先マスクと同じ流儀）。取得中に別詳細へ切り替わったら反映を破棄するレース対策を入れた。
-- **既存 GAS 関数は無改変（追加のみ）**: `adminListCustomers_` への `key` 追加も「行の挿入」だけで実現し、
-  `git diff gas/Code.gs` は **63 insertions・0 deletions**（既存行の削除・改変ゼロ）。
+- **既存 GAS 関数は無改変**: 初回 API コミットは純追加（63 insertions・0 deletions）。ハッシュ手戻りで
+  `adminListCustomers_` の `key` 生成（`hashKey_(key)`）と `adminListConfirmed_` の突合行は変わるが、これらは
+  いずれも当 PR で自分が足した新規コード。`createBookingCore_`/`adminListPending_`/`ledgerUpsert_`/`decide_` は
+  1 バイトも触っていない。
 
-## PII 判断点【要・本人確認事項】
-- 来店履歴の突合には、顧客詳細から確定イベントへ渡す **顧客キー**が要る。本 PL では
-  `adminListCustomers_` が各顧客に **台帳キー `key`（`line:<lineUserId>` / `phone:<正規化電話>` / `email:<小文字>`）**
-  を返し、フロントはそれを解釈せず `adminListConfirmed` にそのまま echo する方式を採った。
-- **クライアントに新規で出た識別子**: `phone:`/`email:` 型は既に一覧が返している連絡先の再パッケージ
-  （新規露出なし）。**`line:` 型の顧客のみ、`lineUserId`（LINE のユーザ識別子）がクライアントに新規で露出する**。
-  露出範囲は **管理ゲート内・HTTPS・no-store**（未認証者には middleware が本体 HTML を返さない）。
-- **line 顧客の扱い**: 台帳に連絡先（電話・メール）が無い LINE 連携顧客も、この `line:` キーで来店履歴を
-  引ける（履歴取得のために lineUserId を出す）。突合キーが無い顧客は履歴を引けない旨を UI で明示。
-- **クリーンな代替（提案・未採用）**: `lineUserId` を出さずに済ませるなら、GAS 側で台帳キーを
-  SHA-256 等の **opaque トークンにハッシュ化**して返し、`adminListConfirmed_` も同じハッシュで突合すれば
-  クライアントに生の識別子を一切出さずに済む（数行で実装可）。ただし本 PL の GAS 仕様が
-  `ledgerKey_(...)===params.key`（生キー突合）を明示していたため、独断で方式を変えず生キー echo で実装した。
-  **opaque トークン化に切り替えるか否かは設計・PII 分岐＝本人判断事項**として残す。
+## PII 判断点【本人判断で決着＝opaque ハッシュ化を採用】
+来店履歴の突合には、顧客詳細から確定イベントへ渡す**突合キー**が要る。当初は台帳キー
+（`line:<lineUserId>` / `phone:<正規化電話>` / `email:<小文字>`）を生のまま返し client が echo する
+実装で、**`line:` 型の顧客のみ `lineUserId` がクライアントに新規露出**する点を本人確認事項とした。
+
+**本人判断＝生の識別子を突合トークンとして出さない opaque ハッシュ化を採用**（PII 最小化）。追実装:
+- GAS に助関数 **`hashKey_(rawKey)`** を新設＝台帳キーを `Utilities.computeDigest(SHA_256, rawKey)` の
+  hex 文字列に一方向化（空文字は空文字）。ゲート内の owner 自身のデータで脅威モデルが小さいため素の
+  SHA-256 hex で十分（salt/HMAC なし）。
+- `adminListCustomers_` の返す `key` を **`hashKey_(台帳キー)`** に変更＝**生の識別子（lineUserId・電話・メール）は
+  突合トークンとして出さない**。表示用の `phone`/`email` フィールド（段階開示の正規表示）はそのまま。
+- `adminListConfirmed_`（`params.key` 突合）を **`hashKey_(ledgerKey_(getEventProps_(ev))) === key`** に変更
+  ＝イベント側も同じハッシュにしてから突合。**両 API で同一 `hashKey_` を使う**（一致必須）。`scope:'today'` 側は不変。
+- フロントは `c.key`（ハッシュ）をそのまま echo するだけ＝機能変更なし（コメントを「突合トークン」表記に修正）。
+- **実証**: node で SHA-256 hex を再現し、`line:`/`phone:`/`email:` の生値は 64 文字 hex に一方向化されて
+  payload に出ない・同一入力は決定的に一致することを確認（詳細は下の検証節）。
+- line 顧客も、この opaque トークンで来店履歴を引ける（生 lineUserId は出さない）。突合トークンが空の顧客は
+  履歴を引けない旨を UI で明示（作話しない）。
 
 ## 検証（ローカル・push 不要・GAS は叩いていない）
-- **既存 GAS 関数無改変**: `git diff --stat gas/Code.gs` = **63 insertions・0 deletions**（削除行ゼロ）。
-  `createBookingCore_`/`adminListPending_`/`ledgerUpsert_`/`decide_`/`adminListCustomers_` の既存挙動は不変。
+- **既存 GAS 関数無改変**: 初回 API コミットの `git diff --stat gas/Code.gs` = **63 insertions・0 deletions**。
+  ハッシュ手戻りコミットの diff も `createBookingCore_`/`adminListPending_`/`ledgerUpsert_`/`decide_` を
+  1 バイトも触らず、変更は自分が足した新規コード（`hashKey_` 新設・`adminListConfirmed_`/`adminListCustomers_` の
+  `key` の作り方）だけに限る（既存関数名は「雛形にした」旨のコメント参照のみ）。
+- **突合トークンのハッシュ化（実体）**: `git diff` で client に返る `key` が `key: key`（生）→ **`key: hashKey_(key)`**
+  に変わり、`adminListConfirmed_` の突合も `hashKey_(ledgerKey_(...)) === key` に変わったことを確認＝
+  payload に `line:`/`phone:`/`email:` の生値が突合トークンとして出ない。**両 API で同一 `hashKey_`** を使用
+  （`adminListCustomers_`: `key: hashKey_(key)` ／ `adminListConfirmed_`: `hashKey_(ledgerKey_(getEventProps_(ev)))`）。
+- **ハッシュの opaque 性・決定性（node 実証）**: SHA-256 hex を再現し、`line:U…`/`phone:0901…`/`email:…@…` は
+  いずれも 64 文字 hex に一方向化され原文字列を含まない・空文字は空文字・同一入力は決定的に一致することを確認。
 - **read-only 裏取り**: `adminListConfirmed_` 本体に `setValue`/`appendRow`/`setProperty`/`createEvent`/`setTag`/
-  `UrlFetchApp`/`MailApp`/`linePush_`/`notifyOwner_`/`postDiscord_` 等の書込・送信・fetch は**検出ゼロ**。
-  使用は `getEvents`/`MENU`/`getEventProp(s)_`/`ledgerKey_`/`fmt_`/`startOfDay_`/`addDays_`/`setMonth` のみ。
+  `UrlFetchApp`/`MailApp`/`linePush_`/`notifyOwner_`/`postDiscord_` 等の書込・送信・fetch は**検出ゼロ**（手戻り後も維持）。
+  使用は `getEvents`/`MENU`/`getEventProp(s)_`/`ledgerKey_`/`hashKey_`（`Utilities.computeDigest` のみ）/`fmt_`/
+  `startOfDay_`/`addDays_`/`setMonth`。`hashKey_` も Utilities の計算のみで副作用なし。
 - **GAS 構文**: `cp gas/Code.gs /tmp/x.js && node --check` → OK。
 - **`pnpm build` 成功**。配信種別が期待どおり:
   - `dist/client/reserve/admin/customers/index.html`・`admin/index.html` は **不在**（＝オンデマンド＝ゲート対象）。
@@ -79,8 +96,8 @@ read-only で集約する供給 API が要る＝本 PL。作業ブランチ: `de
   来店履歴取得・当日件数・0 件フォールバック・line 顧客の突合を実機確認）。
 
 ## 次 PL／残した事項
-- **実機 E2E**（dev push 後）: 来店履歴の実データ表示・当日件数・0 件/失敗フォールバック・line 顧客の突合。
-- **遡り期間・突合方式の再評価**: 12 ヶ月窓のパフォーマンス実測、opaque トークン化の要否（PII 判断点）。
+- **実機 E2E**（dev push 後）: 来店履歴の実データ表示・当日件数・0 件/失敗フォールバック・line 顧客の
+  opaque トークン突合（ハッシュ一致で正しく履歴が引けるか）。
+- **遡り期間の再評価**: 12 ヶ月窓のパフォーマンス実測（広ければ期間短縮/月別ページング）。
+- **突合方式は決着**: 本人判断で opaque ハッシュ化を採用済み（生の識別子は非露出）。
 - **本人GO事項（不可逆）**: `develop` の push・dev の clasp push/deploy・Workers Builds 反映。prod は対象外。
-</content>
-</invoke>

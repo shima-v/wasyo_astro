@@ -254,12 +254,13 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         el('listSection').hidden = false;
       }
 
-      // 来店履歴＝read-only の adminListConfirmed（顧客キー c.key でカレンダーの確定イベントを突合）。
-      // その顧客の来店だけが返る（他人の履歴は混ざらない＝GAS 側で突合済み）。0件・失敗は正直に示す。
+      // 来店履歴＝read-only の adminListConfirmed。c.key は台帳キーを GAS 側で SHA-256 化した opaque な
+      // 突合トークン（生の識別子は出ない）で、そのまま echo するだけ。GAS が同じハッシュでイベントを突合し、
+      // その顧客の来店だけを返す（他人の履歴は混ざらない）。0件・失敗は正直に示す。
       async function loadVisits(c) {
         const body = el('histBody');
         if (!body) return;
-        if (!c.key) { // 突合キーが無ければ履歴を引けない（作話しない）
+        if (!c.key) { // 突合トークンが無ければ履歴を引けない（作話しない）
           body.innerHTML = emptyHtml('来店履歴を表示できませんでした。');
           return;
         }
