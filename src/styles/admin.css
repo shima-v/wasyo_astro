@@ -95,6 +95,9 @@ a { color: var(--c-purple-dk); }
 }
 
 .sec { }
+/* 積み上げ表示の区分ページ（設定・一斉通知・予約管理）で、隣接セクションを罫線＋余白で分ける。
+   タブ切替をやめて縦積みにしたため、セクション同士のボタンが接して見える問題への恒久対処。 */
+.sec + .sec { margin-top: 1.75rem; padding-top: 1.5rem; border-top: 1px solid var(--a-line); }
 .sec-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .3rem; }
 
 .empty { color: var(--c-muted); font-size: .92rem; background: var(--c-bg); border: 1px solid var(--c-border); border-radius: 8px; padding: .8rem; }
