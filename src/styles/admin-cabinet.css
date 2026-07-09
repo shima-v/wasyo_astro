@@ -128,15 +128,27 @@ a.chart:hover { border-color: var(--k); transform: translateY(-1px); transition:
 /* 顧客一覧（電話マスク・行はボタン＝キーボード到達可） */
 .clist { background: var(--a-surface); border: 1px solid var(--a-line); border-radius: 12px; overflow: hidden; }
 .clist__row {
-  display: flex; align-items: center; gap: .7rem; width: 100%;
+  display: flex; flex-direction: column; align-items: stretch; gap: .3rem; width: 100%;
   padding: .7rem .9rem; border: none; border-bottom: 1px solid var(--a-line);
   background: var(--a-surface); color: inherit; font-family: inherit; text-align: left; cursor: pointer;
 }
 .clist__row:last-child { border-bottom: none; }
 .clist__row:hover { background: var(--k-customer-bg); }
+.clist__head { display: flex; align-items: center; gap: .5rem; }
 .clist__nm { font-family: var(--f-serif); font-size: 1rem; font-weight: 600; color: var(--a-ink); }
-.clist__ph { font-family: var(--f-sans); font-size: .82rem; color: var(--a-muted); font-variant-numeric: tabular-nums; margin-left: auto; letter-spacing: .04em; }
+/* 2段目：来店回数・最終来店・電話（数値はサンセリフ tabular） */
+.clist__sub { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; font-family: var(--f-sans); font-size: .76rem; color: var(--a-muted); font-variant-numeric: tabular-nums; }
+.clist__cnt b { color: var(--a-ink-soft); font-weight: 600; }
+.clist__last { letter-spacing: .02em; }
+.clist__dot { color: var(--a-line); }
+.clist__ph { font-family: var(--f-sans); font-size: .8rem; color: var(--a-muted); font-variant-numeric: tabular-nums; margin-left: auto; letter-spacing: .04em; }
 .clist__ph .stars { color: #C3B0C6; }
+
+/* 並び替えバー（最終来店／来店回数・押下でトグル） */
+.sort-bar { display: flex; align-items: center; gap: .4rem; margin: 0 0 .6rem; flex-wrap: wrap; }
+.sort-bar__lbl { font-family: var(--f-sans); font-size: .7rem; letter-spacing: .1em; color: var(--a-muted); }
+.sort-btn { font-family: var(--f-sans); font-size: .76rem; padding: .3rem .6rem; min-height: 32px; border: 1px solid var(--a-line); border-radius: 7px; background: var(--a-surface); color: var(--a-muted); cursor: pointer; font-variant-numeric: tabular-nums; }
+.sort-btn.is-active { border-color: var(--k-customer); background: var(--k-customer-bg); color: #4a3350; font-weight: 600; }
 
 /* タグ（新規＝古金／常連＝紫。※ .badge とは別系統） */
 .tag { font-family: var(--f-sans); font-size: .66rem; padding: .15rem .5rem; border-radius: 20px; letter-spacing: .04em; white-space: nowrap; }

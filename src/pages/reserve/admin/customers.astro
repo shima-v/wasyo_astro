@@ -53,6 +53,11 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           <button type="button" class="reserve-btn ghost sm" id="reloadBtn">再読み込み</button>
         </div>
         <p class="state-cap"><b>●</b> 一覧では電話は常にマスク（のぞき見対策）</p>
+        <div class="sort-bar" id="sortBar">
+          <span class="sort-bar__lbl">並び替え</span>
+          <button type="button" class="sort-btn is-active" data-key="lastVisit" data-label="最終来店">最終来店 ▼</button>
+          <button type="button" class="sort-btn" data-key="count" data-label="来店回数">来店回数</button>
+        </div>
         <div id="listArea">
           <div class="status loading"><span class="spinner" aria-hidden="true"></span><span>読み込んでいます…</span></div>
         </div>
@@ -89,7 +94,10 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
 
       const REMASK_MS = 20000; // 放置で自動再マスクまでの目安（20秒）
       let remaskTimer = null;
-      let customersData = [];
+      let customersData = [];   // GAS 取得の原本
+      let viewData = [];        // 並び替え後の表示用（data-i はこちらの添字）
+      let sortKey = 'lastVisit'; // 既定＝最終来店（GAS も同順で返す）
+      let sortDir = 'desc';
 
       // ---- 電話・メールの整形／マスク ----
       // 台帳の電話は正規化済み（数字のみ）。ハイフン付きの整形はここ（フロント）で行う。
@@ -119,6 +127,19 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         const tld = domain.lastIndexOf('.') >= 0 ? domain.slice(domain.lastIndexOf('.')) : '';
         return local.slice(0, 1) + '***@****' + tld;
       }
+      // 日付表示：GAS は yyyy-MM-dd で返す（ledgerDateStr_ で正規化済み）。念のため Date 文字列にも耐える。
+      function fmtDate(v) {
+        const s = String(v || '');
+        if (!s) return '';
+        const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) return m[1] + '/' + m[2] + '/' + m[3];
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) {
+          const p = (n) => String(n).padStart(2, '0');
+          return d.getFullYear() + '/' + p(d.getMonth() + 1) + '/' + p(d.getDate());
+        }
+        return s;
+      }
 
       // ============================================================
       // 顧客一覧
@@ -141,7 +162,37 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           return;
         }
         customersData = res.customers;
-        renderList(customersData);
+        applySortAndRender();
+      }
+
+      // 並び替え（最終来店＝yyyy-MM-dd 文字列比較／来店回数＝数値）。原本を壊さずコピーを並べる。
+      function sortCustomers(list) {
+        const arr = list.slice();
+        const dir = sortDir === 'asc' ? 1 : -1;
+        arr.sort((a, b) => {
+          let av, bv;
+          if (sortKey === 'count') { av = a.count || 0; bv = b.count || 0; }
+          else { av = a.lastVisit || ''; bv = b.lastVisit || ''; }
+          if (av < bv) return -1 * dir;
+          if (av > bv) return 1 * dir;
+          return 0;
+        });
+        return arr;
+      }
+      function applySortAndRender() {
+        viewData = sortCustomers(customersData);
+        renderList(viewData);
+        updateSortUI();
+      }
+      function updateSortUI() {
+        const bar = el('sortBar');
+        if (!bar) return;
+        bar.querySelectorAll('.sort-btn').forEach((b) => {
+          const active = b.getAttribute('data-key') === sortKey;
+          b.classList.toggle('is-active', active);
+          const arrow = active ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+          b.textContent = b.getAttribute('data-label') + arrow;
+        });
       }
 
       function renderList(list) {
@@ -153,13 +204,14 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         el('listArea').innerHTML = '<div class="clist">' + list.map((c, i) => {
           const tagCls = c.tag === '新規' ? 'first' : 'regular';
           const tag = '<span class="tag ' + tagCls + '">' + esc(c.tag) + '</span>';
-          // 電話は phone 型のみ・常にマスク。line/email 型は電話欄「—」。
-          const ph = (c.type === 'phone' && c.phone)
-            ? '<span class="clist__ph">' + maskPhoneCell(c.phone) + '</span>'
-            : '<span class="clist__ph">—</span>';
+          // 2段目：来店回数・最終来店・電話（phone 型のみ常にマスク／line・email 型は電話省略）。
+          const dot = '<span class="clist__dot">·</span>';
+          let sub = '<span class="clist__cnt">来店 <b>' + esc(c.count != null ? c.count : 0) + '</b> 回</span>'
+            + dot + '<span class="clist__last">最終 ' + esc(c.lastVisit ? fmtDate(c.lastVisit) : '—') + '</span>';
+          if (c.type === 'phone' && c.phone) sub += '<span class="clist__ph">' + maskPhoneCell(c.phone) + '</span>';
           return '<button type="button" class="clist__row" data-i="' + i + '">'
-            + '<span class="clist__nm">' + esc(c.name || '（お名前未登録）') + '</span>'
-            + tag + ph
+            + '<span class="clist__head"><span class="clist__nm">' + esc(c.name || '（お名前未登録）') + '</span>' + tag + '</span>'
+            + '<span class="clist__sub">' + sub + '</span>'
             + '</button>';
         }).join('') + '</div>';
       }
@@ -170,13 +222,23 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         openDetail(Number(row.getAttribute('data-i')));
       });
 
+      // 並び替えバー：同じキーは方向トグル、違うキーは降順から。
+      el('sortBar').addEventListener('click', (e) => {
+        const btn = e.target.closest('.sort-btn');
+        if (!btn) return;
+        const key = btn.getAttribute('data-key');
+        if (key === sortKey) sortDir = (sortDir === 'asc' ? 'desc' : 'asc');
+        else { sortKey = key; sortDir = 'desc'; }
+        applySortAndRender();
+      });
+
       // ============================================================
       // 詳細パネル（在ページ・PII 段階開示）
       // ============================================================
       function clearRemask() { if (remaskTimer) { clearTimeout(remaskTimer); remaskTimer = null; } }
 
       function openDetail(i) {
-        const c = customersData[i];
+        const c = viewData[i];
         if (!c) return;
         clearRemask();
         el('detailArea').innerHTML = detailHtml(c);
@@ -228,8 +290,8 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           +     '<div class="tags">' + tags + '</div></div>'
           +   contactField(c)
           +   metaField('来店回数', (c.count != null ? c.count + ' 回' : '—'))
-          +   metaField('初来店', c.firstVisit || '—')
-          +   metaField('最終来店', c.lastVisit || '—')
+          +   metaField('初来店', c.firstVisit ? fmtDate(c.firstVisit) : '—')
+          +   metaField('最終来店', c.lastVisit ? fmtDate(c.lastVisit) : '—')
           + '</div>'
           + '<div class="hist">'
           +   '<div class="hist__h">来店履歴 <span class="n">全 ' + esc(cnt) + ' 回</span></div>'
