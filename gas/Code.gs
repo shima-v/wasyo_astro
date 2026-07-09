@@ -171,6 +171,7 @@ function doPost(e) {
       case 'getSlotConfig': return json_(requireAdminToken_(body, adminGetSlotConfig_));
       case 'setSlotConfig': return json_(requireAdminToken_(body, function () { return adminSetSlotConfig_(body); }));
       case 'listPending': return json_(requireAdminToken_(body, adminListPending_));
+      case 'adminListCustomers': return json_(requireAdminToken_(body, adminListCustomers_));
       case 'getQuota': return json_(requireAdminToken_(body, adminGetQuota_));
       case 'adminDecision': return json_(requireAdminToken_(body, function () { return adminDecision_(body); }));
       case 'broadcastPreview': return json_(requireAdminToken_(body, function () { return adminBroadcastPreview_(body); }));
@@ -955,6 +956,48 @@ function ledgerUpsert_(props, visitDate) {
   } else {
     sh.appendRow([key, type, props.name || '', dateStr, 1, dateStr, '']);
   }
+}
+
+/**
+ * 顧客台帳（LEDGER_SHEET）を read-only で一覧化して返す（P2 顧客管理ページ用）。
+ * requireAdminToken_ で保護。シートへの書き込み・カレンダー変更・通知・PII の外部送出は一切しない。
+ * 台帳が未設定（LEDGER_SHEET_ID なし）なら空配列を返す（作話しない）。
+ * 列は ledgerUpsert_ と対応:
+ *   col0 key / col1 type / col2 name / col3 firstVisit / col4 count / col5 lastVisit / col6 note
+ * 連絡先は key から復元する（台帳には正規化済み電話＝数字のみが入る。ハイフン付きの整形はフロントで行う）。
+ */
+function adminListCustomers_() {
+  var sh = ledgerSheet_();
+  if (!sh) return { ok: true, customers: [] };
+  var values = sh.getDataRange().getValues();
+  var list = [];
+  for (var r = 1; r < values.length; r++) {
+    var row = values[r];
+    var key = String(row[0] || '');
+    if (!key) continue;
+    var type = String(row[1] || '');
+    var count = Number(row[4] || 0);
+    var c = {
+      name: String(row[2] || ''),
+      type: type,
+      count: count,
+      firstVisit: String(row[3] || ''),
+      lastVisit: String(row[5] || ''),
+      tag: count <= 1 ? '新規' : '常連',
+    };
+    // 連絡先は key（type:value）の value 部から復元する。整形前の電話は台帳に無いので正規化数字を使う。
+    var idx = key.indexOf(':');
+    var val = idx >= 0 ? key.slice(idx + 1) : '';
+    if (type === 'phone') c.phone = val;       // 正規化（数字のみ）。表示整形はフロント
+    else if (type === 'email') c.email = val;  // 小文字
+    // line 型は連絡先を持たない（phone/email なし）
+    list.push(c);
+  }
+  // 最終来店日の降順（yyyy-MM-dd の文字列比較で足りる。空は末尾）。
+  list.sort(function (a, b) {
+    return (b.lastVisit || '').localeCompare(a.lastVisit || '');
+  });
+  return { ok: true, customers: list };
 }
 
 // ============================================================
