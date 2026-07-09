@@ -981,8 +981,8 @@ function adminListCustomers_() {
       name: String(row[2] || ''),
       type: type,
       count: count,
-      firstVisit: String(row[3] || ''),
-      lastVisit: String(row[5] || ''),
+      firstVisit: ledgerDateStr_(row[3]),
+      lastVisit: ledgerDateStr_(row[5]),
       tag: count <= 1 ? '新規' : '常連',
     };
     // 連絡先は key（type:value）の value 部から復元する。整形前の電話は台帳に無いので正規化数字を使う。
@@ -998,6 +998,15 @@ function adminListCustomers_() {
     return (b.lastVisit || '').localeCompare(a.lastVisit || '');
   });
   return { ok: true, customers: list };
+}
+
+/**
+ * 台帳の日付セルは Sheets により Date 型で返ることがある（ledgerUpsert_ は yyyy-MM-dd 文字列で
+ * 書くが、Sheets が日付として解釈し直すため）。String(Date) の醜い表記を避け yyyy-MM-dd に正規化する。
+ */
+function ledgerDateStr_(v) {
+  if (v instanceof Date) return fmt_(v, 'yyyy-MM-dd');
+  return String(v || '');
 }
 
 // ============================================================
