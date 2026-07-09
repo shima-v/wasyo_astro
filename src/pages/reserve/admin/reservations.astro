@@ -234,7 +234,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       el('agentDate').addEventListener('change', updateDtChip);
       el('agentTime').addEventListener('change', updateDtChip);
 
-      // ペイロード組立・クライアント検証（次 PR の送信実装で使う。現在は送信ボタン disabled のため未接続）。
+      // ペイロード組立・クライアント検証（submitAgent が送信前に使う）。
       function agentPayload() {
         return {
           menuId: selectedMenu ? selectedMenu.id : '',
