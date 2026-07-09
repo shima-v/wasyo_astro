@@ -86,11 +86,15 @@ a.chart:hover { border-color: var(--k); transform: translateY(-1px); transition:
 .mchip.on { background: var(--k-customer-bg); border-color: var(--k-customer); color: #4a3350; box-shadow: inset 0 0 0 1px var(--k-customer); }
 .mchip.on .price { color: var(--a-gold-dp); }
 
-.dt-row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
-.dt-field {
-  font-family: var(--f-sans); font-size: 1rem; padding: .55rem .65rem; border: 1px solid var(--a-line);
-  border-radius: 8px; background: #fff; color: var(--a-ink); font-variant-numeric: tabular-nums; flex: 1; min-width: 0;
+/* 代理登録の日時ピッカーの状況テキスト（お客様 index の .slot-status と同趣旨。
+   カレンダー/時刻ポップアップの器は共有 reserve-calendar.css / TimeDialog.astro が担う）。 */
+.slot-status { font-size: .9rem; color: var(--a-muted); margin: .2rem 0 .75rem; }
+.slot-status.loading {
+  display: flex; align-items: center; gap: .55rem;
+  color: var(--c-purple-dk); font-weight: 600;
+  background: #FCF6FA; border: 1px solid var(--a-line); border-radius: 8px; padding: .65rem .8rem;
 }
+.slot-status.slot-empty { color: #8E2230; }
 .dt-chip { display: inline-flex; align-items: center; gap: .4rem; background: var(--a-paper); border: 1px solid var(--a-line); border-radius: 9px; padding: .4rem .75rem; font-family: var(--f-sans); font-size: .86rem; font-variant-numeric: tabular-nums; margin-top: .5rem; }
 .dt-chip .g { color: var(--a-gold-dp); }
 

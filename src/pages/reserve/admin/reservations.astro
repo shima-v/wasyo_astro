@@ -12,13 +12,15 @@
 // URL は Cookie Path=/reserve/admin 制約により /reserve/admin/ 配下固定（ADR-0001 決定1）。
 export const prerender = false;
 
-import { ENV_LABEL } from '../../../data/config.js';
+import { ENV_LABEL, RESERVE_API } from '../../../data/config.js';
 import { MENU, formatYen } from '../../../data/menu.js';
 import EnvBadge from '../../../components/EnvBadge.astro';
 import SubmitOverlay from '../../../components/SubmitOverlay.astro';
 import AdminHeader from '../../../components/AdminHeader.astro';
+import TimeDialog from '../../../components/TimeDialog.astro';
 import '../../../styles/admin.css';
 import '../../../styles/admin-cabinet.css';
+import '../../../styles/reserve-calendar.css';
 
 const _base = import.meta.env.BASE_URL;
 const base = _base.endsWith('/') ? _base : _base + '/';
@@ -39,6 +41,8 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
     <EnvBadge />
     <SubmitOverlay message="送信しています…" subtext="画面をそのままでお待ちください" />
     <AdminHeader base={base} salonName={salonName} title="予約管理" back="/reserve/admin" backLabel="管理トップ" />
+    <!-- 開始時刻を選ぶポップアップ（代理登録の日時ピッカーが使う）。共有部品 TimeDialog（お客様フローと共用） -->
+    <TimeDialog />
 
     <main class="wrap">
       <!-- 承認待ち一覧（admin.astro から移設・挙動不変） -->
@@ -60,7 +64,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
             <div class="fsec__lbl">メニュー <span class="req">必須</span></div>
             <div class="menu-chips" id="agentMenuChips">
               {MENU.map((m) => (
-                <button type="button" class="mchip" data-id={m.id} data-name={m.name} data-duration={m.durationMin}>
+                <button type="button" class="mchip" data-id={m.id} data-name={m.name} data-duration={m.durationMin} data-slot={m.slotMin}>
                   {m.name}<span class="price">{formatYen(m.price)} / {m.durationMin}分</span>
                 </button>
               ))}
@@ -69,10 +73,10 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
 
           <div class="fsec">
             <div class="fsec__lbl">日時 <span class="req">必須</span></div>
-            <div class="dt-row">
-              <input class="dt-field" type="date" id="agentDate" />
-              <input class="dt-field" type="time" id="agentTime" step="1800" />
-            </div>
+            <!-- お客様フローと同じ空き枠駆動ピッカー（共有部品 createDateTimePicker）。
+                 メニューを選ぶと slotMin で空き日を算出し、日付タップ→時刻ポップアップで開始時刻を選ぶ。 -->
+            <p class="slot-status" id="agentSlotStatus">メニューを選ぶと空き状況を表示します。</p>
+            <div id="agentDateList" class="date-list"></div>
             <div class="dt-chip" id="agentDtChip" hidden></div>
           </div>
 
@@ -109,15 +113,22 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
 
     <div id="toast"></div>
 
+    <!-- 日時ピッカーが availabilityRaw を取りに行く公開GET先（お客様ページと同一の PUBLIC_RESERVE_API・
+         GAS /exec の公開 doGet。秘密ではない）。管理 API（adminCreateBooking 等）は従来どおり Worker 経由。 -->
+    <script type="application/json" id="reserve-config" set:html={JSON.stringify({ RESERVE_API })}></script>
     <script>
       // 承認待ち＝既存 API（listPending/adminDecision）。代理登録＝adminCreateBooking（確定登録）。
       // 共有部品（admin-api.js / admin-ui.js）を再利用し重複実装しない。
+      // 日時入力はお客様フローと同じ空き枠駆動ピッカー（datetime-picker.js / availability.js）を再利用。
       import { createAdminApi } from '../../../lib/admin-api.js';
       import { esc, createToast, loadingHtml, emptyHtml } from '../../../lib/admin-ui.js';
+      import { createDateTimePicker } from '../../../lib/datetime-picker.js';
+      import { fetchAvailabilityRaw, computeDaysForSlot } from '../../../lib/availability.js';
 
       const el = (id) => document.getElementById(id);
       const { apiPost, handleForbidden } = createAdminApi();
       const toast = createToast(el);
+      const { RESERVE_API } = JSON.parse(document.getElementById('reserve-config').textContent);
 
       // ============================================================
       // 承認待ち一覧（admin.astro から一字一句移設・挙動不変）
@@ -203,7 +214,29 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       //   メニュー選択（トグル）／日時プレビュー／ペイロード組立＋クライアント検証／
       //   apiPost('adminCreateBooking', ...) 実送信までを実装。GAS 側で確定・受付制約検証・通知を行う。
       // ============================================================
-      let selectedMenu = null; // { id, name, duration }
+      let selectedMenu = null; // { id, name, duration, slotMin }
+      let rawCache = null;     // availabilityRaw の先読みキャッシュ（menuId 非依存・1回だけ取得）
+      const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
+
+      // 空き枠駆動の日時ピッカー（お客様フローと同じ共有部品 createDateTimePicker）。
+      // 器＝#agentDateList（カレンダー）＋ <TimeDialog />（時刻ポップアップ）。日付→時刻を選ぶと
+      // onSelect で確定プレビュー（dt-chip）を更新する。返す値は 'YYYY-MM-DD' / 'HH:MM'。
+      const picker = createDateTimePicker({
+        dateListEl: el('agentDateList'),
+        statusEl: el('agentSlotStatus'),
+        esc,
+        fmtDateLabel: (ymd) => {
+          const dt = new Date(ymd + 'T00:00');
+          return isNaN(dt.getTime()) ? ymd : ((dt.getMonth() + 1) + '/' + dt.getDate() + '（' + WEEK[dt.getDay()] + '）');
+        },
+        statusText: {
+          initial: 'メニューを選ぶと空き状況を表示します。',
+          ready: 'ご希望の日付を選んでください（● 印が空きありの日）。',
+          empty: 'この期間はネット予約の空きがありません（受付時間外・休業日を除く）。',
+        },
+        onDateChange: updateDtChip,
+        onSelect: updateDtChip,
+      });
 
       el('agentMenuChips').addEventListener('click', (e) => {
         const btn = e.target.closest('.mchip');
@@ -214,13 +247,42 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
           id: btn.getAttribute('data-id'),
           name: btn.getAttribute('data-name'),
           duration: Number(btn.getAttribute('data-duration')),
+          slotMin: Number(btn.getAttribute('data-slot')),
         };
         updateDtChip();
+        loadAgentAvailability();
       });
 
-      const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
+      // メニューの slotMin で空き日時を算出しピッカーへ流す。availabilityRaw は menuId 非依存の
+      // 公開 GET（お客様ページと同一の PUBLIC_RESERVE_API 直接取得）で1回だけ取得しキャッシュする。
+      async function loadAgentAvailability() {
+        if (!selectedMenu) return;
+        if (!RESERVE_API) {
+          picker.setStatus('予約システムが未設定です（PUBLIC_RESERVE_API）。', 'slot-empty');
+          el('agentDateList').innerHTML = '';
+          return;
+        }
+        picker.setLoading('空き状況を確認中…');
+        if (!rawCache) {
+          try {
+            rawCache = await fetchAvailabilityRaw(RESERVE_API);
+          } catch (_) {
+            rawCache = null;
+          }
+        }
+        if (!rawCache) {
+          picker.setStatus('空き状況を取得できませんでした。時間をおいて再度お試しください。', 'slot-empty');
+          el('agentDateList').innerHTML = '';
+          return;
+        }
+        const { days, holidays } = computeDaysForSlot(rawCache, selectedMenu.slotMin);
+        picker.setDays(days, holidays); // 選択（日時）はここでリセットされる
+        updateDtChip();                  // → プレビューも畳む
+      }
+
+      // 確定プレビュー（dt-chip）。ピッカーの選択（'YYYY-MM-DD'/'HH:MM'）＋選択メニューから組む。
       function updateDtChip() {
-        const d = el('agentDate').value, t = el('agentTime').value;
+        const { date: d, time: t } = picker.getSelection();
         const chip = el('agentDtChip');
         if (!d || !t) { chip.hidden = true; return; }
         const dt = new Date(d + 'T' + t);
@@ -231,15 +293,14 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
         chip.innerHTML = '<span class="g">◆</span>' + esc(md + '〜' + menuStr + ' で登録');
         chip.hidden = false;
       }
-      el('agentDate').addEventListener('change', updateDtChip);
-      el('agentTime').addEventListener('change', updateDtChip);
 
       // ペイロード組立・クライアント検証（submitAgent が送信前に使う）。
       function agentPayload() {
+        const { date, time } = picker.getSelection();
         return {
           menuId: selectedMenu ? selectedMenu.id : '',
-          date: el('agentDate').value,
-          time: el('agentTime').value,
+          date: date || '', // 'YYYY-MM-DD'（availabilityRaw 由来。GAS の期待形式）
+          time: time || '', // 'HH:MM'（開始候補。GAS の期待形式）
           name: el('agentName').value.trim(),
           phone: el('agentPhone').value.trim(),
           email: el('agentEmail').value.trim(),
@@ -271,7 +332,9 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       function resetAgentForm() {
         el('agentMenuChips').querySelectorAll('.mchip').forEach((b) => b.classList.remove('on'));
         selectedMenu = null;
-        ['agentDate', 'agentTime', 'agentName', 'agentPhone', 'agentEmail'].forEach((id) => { el(id).value = ''; });
+        // rawCache（availabilityRaw）は保持し、続けての再登録で再取得しない。
+        picker.reset(); // カレンダー・時刻候補・選択・状況テキストを初期化
+        ['agentName', 'agentPhone', 'agentEmail'].forEach((id) => { el(id).value = ''; });
         el('agentDtChip').hidden = true;
       }
 
