@@ -172,6 +172,7 @@ function doPost(e) {
       case 'setSlotConfig': return json_(requireAdminToken_(body, function () { return adminSetSlotConfig_(body); }));
       case 'listPending': return json_(requireAdminToken_(body, adminListPending_));
       case 'adminListCustomers': return json_(requireAdminToken_(body, adminListCustomers_));
+      case 'adminListConfirmed': return json_(requireAdminToken_(body, function () { return adminListConfirmed_(body); }));
       case 'getQuota': return json_(requireAdminToken_(body, adminGetQuota_));
       case 'adminDecision': return json_(requireAdminToken_(body, function () { return adminDecision_(body); }));
       case 'broadcastPreview': return json_(requireAdminToken_(body, function () { return adminBroadcastPreview_(body); }));
@@ -965,6 +966,8 @@ function ledgerUpsert_(props, visitDate) {
  * 列は ledgerUpsert_ と対応:
  *   col0 key / col1 type / col2 name / col3 firstVisit / col4 count / col5 lastVisit / col6 note
  * 連絡先は key から復元する（台帳には正規化済み電話＝数字のみが入る。ハイフン付きの整形はフロントで行う）。
+ * 各顧客に台帳キー（col0）を追加フィールド key として返す＝顧客詳細の来店履歴で
+ * adminListConfirmed_ の突合キーに使う（既存フィールド・挙動は不変の純追加）。
  */
 function adminListCustomers_() {
   var sh = ledgerSheet_();
@@ -984,6 +987,9 @@ function adminListCustomers_() {
       firstVisit: ledgerDateStr_(row[3]),
       lastVisit: ledgerDateStr_(row[5]),
       tag: count <= 1 ? '新規' : '常連',
+      // 来店履歴の突合キー（adminListConfirmed_ の params.key＝台帳キー line:/phone:/email:）。
+      // クライアントは中身を解釈せずそのまま echo する（管理ゲート内・HTTPS・no-store）。
+      key: key,
     };
     // 連絡先は key（type:value）の value 部から復元する。整形前の電話は台帳に無いので正規化数字を使う。
     var idx = key.indexOf(':');
@@ -1007,6 +1013,63 @@ function adminListCustomers_() {
 function ledgerDateStr_(v) {
   if (v instanceof Date) return fmt_(v, 'yyyy-MM-dd');
   return String(v || '');
+}
+
+// ============================================================
+// 確定予約の集約（P2・read-only）
+// ============================================================
+
+// 来店履歴の遡り期間（月）。既定 12ヶ月・後で調整可（定数）。窓が広くなり過ぎれば要見直し。
+var CONFIRMED_HISTORY_MONTHS = 12;
+
+/**
+ * 確定予約（status===CONFIRMED のカレンダーイベント）を read-only で集約する（P2 顧客管理／ハブ用）。
+ * requireAdminToken_ で保護。シート書き込み・カレンダー変更・通知・外部 fetch は一切しない
+ * （CalendarApp.getEvents と MENU 参照のみ）。2用途を引数で分岐し payload と計算コストを最小化する:
+ *   - params.scope==='today'（ハブ用）: 当日の確定件数だけを返す（{ok:true, count:N}）。顧客 PII は載せない軽量応答。
+ *   - params.key（顧客詳細用・来店履歴）: 指定顧客キーに一致する確定イベントだけを、過去
+ *     CONFIRMED_HISTORY_MONTHS ヶ月〜今後の窓で読み、[{date,time,menuName}] を新しい順で返す
+ *     （{ok:true, visits:[...]}）。他人の来店は混ぜない（PII 最小化）。
+ * params.key は adminListCustomers_ が返す台帳キー（line:/phone:/email:）と同一で、各イベントの
+ * ledgerKey_(getEventProps_(ev)) と突合する（adminListPending_ を雛形にした確定版）。
+ */
+function adminListConfirmed_(params) {
+  params = params || {};
+  var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
+
+  // 用途1: 今日の確定件数（ハブ用・PII なし・当日枠のみ）。件数（数値）だけ返す。
+  if (params.scope === 'today') {
+    var dayStart = startOfDay_(new Date());
+    var dayEnd = addDays_(dayStart, 1);
+    var count = cal.getEvents(dayStart, dayEnd).filter(function (ev) {
+      return getEventProp_(ev, 'status') === STATUS.CONFIRMED;
+    }).length;
+    return { ok: true, count: count };
+  }
+
+  // 用途2: 顧客詳細の来店履歴（指定キーに一致する確定イベントのみ）。
+  var key = params.key || '';
+  if (!key) return { ok: true, visits: [] };
+  var from = startOfDay_(new Date());
+  from.setMonth(from.getMonth() - CONFIRMED_HISTORY_MONTHS); // 過去 N ヶ月まで遡る
+  var to = addDays_(startOfDay_(new Date()), RULES.maxAdvanceDays + 1); // 今後の確定予約も含める
+  var visits = cal.getEvents(from, to).filter(function (ev) {
+    if (getEventProp_(ev, 'status') !== STATUS.CONFIRMED) return false;
+    return ledgerKey_(getEventProps_(ev)) === key; // その顧客の来店だけ（他人の履歴を混ぜない）
+  }).map(function (ev) {
+    var p = getEventProps_(ev);
+    var menu = MENU[p.menuId];
+    return {
+      date: fmt_(ev.getStartTime(), 'yyyy-MM-dd'),
+      time: fmt_(ev.getStartTime(), 'HH:mm'),
+      menuName: menu ? menu.name : p.menuId,
+    };
+  });
+  // 新しい順（yyyy-MM-dd + HH:mm の文字列を連結した降順で足りる）。
+  visits.sort(function (a, b) {
+    return (b.date + b.time).localeCompare(a.date + a.time);
+  });
+  return { ok: true, visits: visits };
 }
 
 // ============================================================
