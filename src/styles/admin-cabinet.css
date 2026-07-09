@@ -112,3 +112,67 @@ a.chart:hover { border-color: var(--k); transform: translateY(-1px); transition:
 .submit svg { width: 18px; height: 18px; color: var(--a-gold); }
 .submit:disabled { cursor: default; opacity: .5; box-shadow: none; }
 .submit-note { font-family: var(--f-sans); font-size: .7rem; color: var(--a-muted); text-align: center; margin-top: .6rem; }
+
+/* ============ 顧客管理（一覧＋在ページ詳細・PII 段階開示／mock-2b-list.html・mock-2-customer.html） ============
+   .wrap（max-width:640・左右 padding 済み）内に収めるため、モックの外側横 margin/padding は 0 にした
+   （色・書体・余白リズムはモックの権威値のまま）。 */
+
+/* 状態キャプション（●＋説明。朱＝マスク／緑＝開示中） */
+.state-cap { font-family: var(--f-sans); font-size: .68rem; letter-spacing: .14em; color: var(--a-muted); margin: 0 0 .5rem; display: flex; align-items: center; gap: .5rem; }
+.state-cap b { color: var(--a-seal); font-weight: 700; }
+.state-cap.ok b { color: var(--k-settings); }
+
+/* 一覧見出しの件数（サンセリフ tabular） */
+.section-count { font-family: var(--f-sans); font-size: .78rem; color: var(--a-muted); margin-left: .5rem; font-variant-numeric: tabular-nums; }
+
+/* 顧客一覧（電話マスク・行はボタン＝キーボード到達可） */
+.clist { background: var(--a-surface); border: 1px solid var(--a-line); border-radius: 12px; overflow: hidden; }
+.clist__row {
+  display: flex; align-items: center; gap: .7rem; width: 100%;
+  padding: .7rem .9rem; border: none; border-bottom: 1px solid var(--a-line);
+  background: var(--a-surface); color: inherit; font-family: inherit; text-align: left; cursor: pointer;
+}
+.clist__row:last-child { border-bottom: none; }
+.clist__row:hover { background: var(--k-customer-bg); }
+.clist__nm { font-family: var(--f-serif); font-size: 1rem; font-weight: 600; color: var(--a-ink); }
+.clist__ph { font-family: var(--f-sans); font-size: .82rem; color: var(--a-muted); font-variant-numeric: tabular-nums; margin-left: auto; letter-spacing: .04em; }
+.clist__ph .stars { color: #C3B0C6; }
+
+/* タグ（新規＝古金／常連＝紫。※ .badge とは別系統） */
+.tag { font-family: var(--f-sans); font-size: .66rem; padding: .15rem .5rem; border-radius: 20px; letter-spacing: .04em; white-space: nowrap; }
+.tag.first { background: #F2EBD9; color: #8a6d1a; border: 1px solid rgba(176,141,60,.3); }
+.tag.regular { background: var(--k-customer-bg); color: #6a4a68; border: 1px solid rgba(139,96,128,.3); }
+.tag.male { background: #E9EEF3; color: #3a4a7a; border: 1px solid rgba(78,110,142,.3); }
+
+/* 顧客カルテ（詳細） */
+.krt { background: var(--a-surface); border: 1px solid var(--a-line); border-radius: 12px; overflow: hidden; margin-bottom: 1rem; }
+.krt__top { padding: .9rem 1rem .8rem; border-bottom: 1px solid var(--a-line); display: flex; align-items: flex-start; gap: .6rem; }
+.krt__name { font-family: var(--f-serif); font-size: 1.3rem; font-weight: 700; letter-spacing: .05em; line-height: 1.35; color: var(--a-ink); }
+.tags { display: flex; gap: .35rem; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+
+.field { padding: .75rem 1rem; border-bottom: 1px solid var(--a-line); }
+.field:last-child { border-bottom: none; }
+.field__lbl { font-family: var(--f-sans); font-size: .68rem; letter-spacing: .16em; color: var(--a-muted); margin-bottom: .3rem; }
+.field__val { font-family: var(--f-sans); font-size: 1rem; color: var(--a-ink); font-variant-numeric: tabular-nums; }
+.field__note { font-family: var(--f-sans); font-size: .84rem; color: var(--a-muted); }
+
+/* PII 段階開示（既定マスク→[表示]→[コピー]＋自動再マスク） */
+.pii-row { display: flex; align-items: center; gap: .6rem; }
+.pii { font-family: var(--f-sans); font-size: 1.12rem; letter-spacing: .06em; font-variant-numeric: tabular-nums; color: var(--a-ink); word-break: break-all; }
+.pii.masked { color: var(--a-ink-soft); }
+.pii .stars { color: #B9A6BC; letter-spacing: .12em; }
+.pii-actions { margin-left: auto; display: flex; gap: .4rem; flex: none; }
+.mini-btn {
+  font-family: var(--f-sans); font-size: .76rem; letter-spacing: .04em; cursor: pointer;
+  background: #fff; color: var(--a-cabinet); border: 1px solid var(--a-gold); border-radius: 7px;
+  padding: .34rem .7rem; display: inline-flex; align-items: center; gap: .3rem; min-height: 34px;
+}
+.mini-btn svg { width: 14px; height: 14px; }
+.mini-btn.copy { border-color: var(--a-line); color: var(--a-muted); }
+.reveal-note { font-family: var(--f-sans); font-size: .68rem; color: var(--a-gold-dp); margin-top: .35rem; display: flex; align-items: center; gap: .3rem; }
+.reveal-note svg { width: 12px; height: 12px; flex: none; }
+
+/* 来店履歴（明細は準備中＝空箱を .empty で正直に出す） */
+.hist { background: var(--a-surface); border: 1px solid var(--a-line); border-radius: 12px; padding: .9rem 1rem 1rem; }
+.hist__h { font-family: var(--f-serif); font-size: .98rem; font-weight: 600; margin-bottom: .7rem; padding-bottom: .45rem; border-bottom: 1px solid var(--a-line); display: flex; align-items: center; gap: .5rem; color: var(--a-ink); }
+.hist__h .n { font-family: var(--f-sans); font-size: .72rem; color: var(--a-muted); margin-left: auto; font-variant-numeric: tabular-nums; }
