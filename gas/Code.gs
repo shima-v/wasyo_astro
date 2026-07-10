@@ -667,6 +667,12 @@ function adminCreateBooking_(b) {
       '\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(res.token));
   }
 
+  // 監査ログ（顧客PIIに関わる代理予約の証跡）。既存顧客を一覧から選んだ（pickedKey あり）か手入力かを op で区別する。
+  // 操作者は生トークンを残さず tokenFp_（HMAC指紋）で、対象電話は auditPush_ 内の maskId_ が末尾4桁のみに落とす。
+  // auditPush_ は try/catch 済み・LEDGER 未設定なら no-op＝監査失敗が予約本体（上で確定・通知済み）を巻き込まないよう、
+  // 副作用なしで最後に呼ぶだけにする。
+  auditPush_(tokenFp_(b.adminToken), b.pickedKey ? 'proxyBook:picked' : 'proxyBook:manual', b.phone, res.ok ? 'ok' : 'ng');
+
   return res;
 }
 
