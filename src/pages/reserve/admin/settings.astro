@@ -33,6 +33,12 @@ const pageTitle = `${ENV_LABEL}設定 | ${salonName}`;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex" />
     <title>{pageTitle}</title>
+    <style>
+      /* 通知設定のトグル並び。既存 .opt（checkbox）をレーンとして縦積みする最小スタイル。 */
+      .notify-lane { display: flex; flex-direction: column; gap: .4rem; margin: .3rem 0 .8rem; }
+      /* 必須（変更不可）レーンは淡色で「切れない」ことを明示する。 */
+      .notify-required { opacity: .55; }
+    </style>
   </head>
   <body>
     <EnvBadge />
@@ -99,6 +105,41 @@ const pageTitle = `${ENV_LABEL}設定 | ${salonName}`;
           <input type="date" id="slotDateInput" />
           <input type="time" id="slotTimeInput" step="1800" />
           <button class="reserve-btn ghost sm" id="addClosedSlot" type="button">枠を閉じる</button>
+        </div>
+      </section>
+
+      <!-- 通知設定（任意通知の送信ON/OFF） -->
+      <section class="sec" id="sec-notifyconfig">
+        <div class="sec-head">
+          <h2 class="section-title">通知設定</h2>
+          <button class="reserve-btn sm" id="saveNotify" type="button">保存</button>
+        </div>
+        <p class="lead-muted">種別ごとに通知の送信ON/OFFを切り替えます（既定はすべてON＝送信）。保存するまで反映されません。</p>
+
+        <h3 class="sub-title">お客様への通知</h3>
+        <div class="notify-lane">
+          <label class="opt"><input type="checkbox" data-notify-key="customerReceipt" checked /> 仮予約受付の控え</label>
+          <label class="opt"><input type="checkbox" data-notify-key="customerCancel" checked /> キャンセルの控え</label>
+          <label class="opt"><input type="checkbox" data-notify-key="customerChange" checked /> 日時変更の控え</label>
+          <label class="opt"><input type="checkbox" data-notify-key="reminder" checked /> 前日リマインド</label>
+          <label class="opt"><input type="checkbox" data-notify-key="followup" checked /> 来店後フォロー</label>
+        </div>
+
+        <h3 class="sub-title">お店（オーナー）への通知</h3>
+        <div class="notify-lane">
+          <label class="opt"><input type="checkbox" data-notify-key="ownerCancel" checked /> 顧客キャンセルの通知</label>
+          <label class="opt"><input type="checkbox" data-notify-key="ownerProxy" checked /> 代理登録の報告</label>
+          <label class="opt"><input type="checkbox" data-notify-key="ownerDigest" checked /> 日次ダイジェスト</label>
+          <label class="opt"><input type="checkbox" data-notify-key="ownerQuotaWarn" checked /> LINE無料枠80%警告</label>
+        </div>
+
+        <h3 class="sub-title">常時送信（変更不可）</h3>
+        <p class="lead-muted small">予約の進行に必須の通知です。これらは常に送信され、OFFにできません。</p>
+        <div class="notify-lane notify-required">
+          <label class="opt"><input type="checkbox" checked disabled /> 予約確定通知（お客様）</label>
+          <label class="opt"><input type="checkbox" checked disabled /> 予約却下通知（お客様）</label>
+          <label class="opt"><input type="checkbox" checked disabled /> 新規仮予約〈承認待ち〉（お店）</label>
+          <label class="opt"><input type="checkbox" checked disabled /> 日時変更・再承認（お店）</label>
         </div>
       </section>
 
@@ -292,6 +333,50 @@ const pageTitle = `${ENV_LABEL}設定 | ${salonName}`;
       });
 
       // ============================================================
+      // 通知設定（任意通知の送信ON/OFF）
+      // ============================================================
+      // config は { key: boolean } の単純 JSON（PII は持たない）。
+      // GAS 側 notifyOn_ は「未設定/true→送る・明示 false のみ抑止」＝既定ON。
+      // チェックON=true（＝送る）・OFF=false（＝抑止）をそのまま保存する。
+      let notifyConfig = {};
+
+      async function loadNotifyConfig() {
+        let res;
+        try {
+          res = await apiPost('getNotifyConfig', null, { silent: true });
+        } catch (_) { renderNotifyConfig(); return; }
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        if (res && res.ok && res.config) notifyConfig = res.config;
+        renderNotifyConfig();
+      }
+
+      // 任意9キーの checkbox に config を反映（未設定/true→checked＝既定ON）。
+      function renderNotifyConfig() {
+        document.querySelectorAll('[data-notify-key]').forEach((cb) => {
+          const key = cb.getAttribute('data-notify-key');
+          cb.checked = notifyConfig[key] !== false;
+        });
+      }
+
+      // 保存：任意9キーのON/OFFを boolean で送る（必須群は disabled で data-notify-key を持たない＝対象外）。
+      el('saveNotify').addEventListener('click', async () => {
+        const btn = el('saveNotify'); btn.disabled = true;
+        const config = {};
+        document.querySelectorAll('[data-notify-key]').forEach((cb) => {
+          config[cb.getAttribute('data-notify-key')] = cb.checked;
+        });
+        let res;
+        try {
+          res = await apiPost('setNotifyConfig', { config });
+        } catch (_) {
+          btn.disabled = false; toast('通信エラー。時間をおいて再度お試しください。'); return;
+        }
+        btn.disabled = false;
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        toast(res && res.ok ? '保存しました' : '保存に失敗: ' + ((res && res.error) || '不明'));
+      });
+
+      // ============================================================
       // オーナー通知 接続テスト
       // ============================================================
       el('ownerTest').addEventListener('click', async () => {
@@ -330,6 +415,7 @@ const pageTitle = `${ENV_LABEL}設定 | ${salonName}`;
       // サーバゲート済み（middleware が Cookie を検証して通した）前提。
       // 積み上げレイアウトでは受付枠設定が常に見えるため、タブ時の遅延ロードを init で即時化する。
       loadConfig();
+      loadNotifyConfig();
     </script>
   </body>
 </html>
