@@ -170,6 +170,8 @@ function doPost(e) {
       // これにより管理操作も公開デプロイ①（executeAs=オーナー）で完結し、管理デプロイ②を不要にする布石。
       case 'getSlotConfig': return json_(requireAdminToken_(body, adminGetSlotConfig_));
       case 'setSlotConfig': return json_(requireAdminToken_(body, function () { return adminSetSlotConfig_(body); }));
+      case 'getNotifyConfig': return json_(requireAdminToken_(body, adminGetNotifyConfig_));
+      case 'setNotifyConfig': return json_(requireAdminToken_(body, function () { return adminSetNotifyConfig_(body); }));
       case 'listPending': return json_(requireAdminToken_(body, adminListPending_));
       case 'adminListCustomers': return json_(requireAdminToken_(body, adminListCustomers_));
       case 'adminListConfirmed': return json_(requireAdminToken_(body, function () { return adminListConfirmed_(body); }));
@@ -603,7 +605,7 @@ function createBookingCore_(b, opts) {
     notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst);
   }
   // 顧客への自動通知（代理予約は notifyCustomer:false で無効化し、確定控えを自前で送る）
-  if (notifyCustomerFlag) {
+  if (notifyCustomerFlag && notifyOn_('customerReceipt')) {
     notifyCustomer_(b, '【仮予約を受付ました】\n' + bookingSummary_(menu, start, eff, isFirst) +
       '\nサロンの確認後、確定のご連絡をいたします。\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(token));
   }
@@ -651,7 +653,7 @@ function adminCreateBooking_(b) {
 
   // オーナー通知（Discord優先→LINEフォールバック＝notifyOwner_）。確定済みなので承認/辞退リンクは付けない。
   // 顧客 PII を LINE 履歴に生で残さない既存方針は Discord 優先で踏襲する。
-  notifyOwner_('【代理で"確定"予約を登録しました】\n' +
+  if (notifyOn_('ownerProxy')) notifyOwner_('【代理で"確定"予約を登録しました】\n' +
     'お名前: ' + b.name + (res.isFirstTime ? '（新規）' : '（常連）') + '\n' +
     '電話: ' + (b.phone || '（未登録）') + '\n' +
     bookingSummary_(menu, start, eff, res.isFirstTime));
@@ -758,9 +760,9 @@ function cancelBooking_(b) {
   var menu = MENU[props.menuId] || { name: props.menuId };
   var start = found.event.getStartTime(); // 通知に載せる日時は deleteEvent の前に退避する
   found.event.deleteEvent();
-  notifyOwner_('【お客様がキャンセルしました】\n' + props.name + ' 様 / ' + menu.name +
+  if (notifyOn_('ownerCancel')) notifyOwner_('【お客様がキャンセルしました】\n' + props.name + ' 様 / ' + menu.name +
     '\n日時: ' + fmt_(start, 'M/d(E) HH:mm') + '（' + (props.status === STATUS.CONFIRMED ? '確定' : '仮予約') + '）');
-  notifyCustomerProps_(props, '【ご予約をキャンセルしました】\nまたのご利用をお待ちしております。');
+  if (notifyOn_('customerCancel')) notifyCustomerProps_(props, '【ご予約をキャンセルしました】\nまたのご利用をお待ちしております。');
   return { ok: true };
 }
 
@@ -806,7 +808,7 @@ function changeBooking_(b) {
     '新日時: ' + fmt_(start, 'M/d(E) HH:mm') +
     (props.note ? '\n要望: ' + props.note : '');
   notifyOwnerPendingApproval_(changeDetail, props.token, { altLabel: '日時変更の承認/辞退' });
-  notifyCustomerProps_(props, '【日時変更を受付ました】\n' + bookingSummary_(menu, start, eff, props.isFirstTime === 'true') + '\nサロンの確認後、確定のご連絡をいたします。');
+  if (notifyOn_('customerChange')) notifyCustomerProps_(props, '【日時変更を受付ました】\n' + bookingSummary_(menu, start, eff, props.isFirstTime === 'true') + '\nサロンの確認後、確定のご連絡をいたします。');
   return { ok: true, status: STATUS.PENDING };
 }
 
@@ -890,6 +892,14 @@ function adminGetSlotConfig_() { return { ok: true, config: readSlotConfig_() };
 function adminSetSlotConfig_(b) {
   var cfg = b.config || {};
   PropertiesService.getScriptProperties().setProperty('SLOT_CONFIG', JSON.stringify(cfg));
+  return { ok: true };
+}
+
+function adminGetNotifyConfig_() { return { ok: true, config: readNotifyConfig_() }; }
+
+function adminSetNotifyConfig_(b) {
+  var cfg = b.config || {};
+  PropertiesService.getScriptProperties().setProperty('NOTIFY_CONFIG', JSON.stringify(cfg));
   return { ok: true };
 }
 
@@ -1668,12 +1678,14 @@ function sendReminders() {
     var props = getEventProps_(ev);
     var menu = MENU[props.menuId] || { name: props.menuId };
     var eff = { durationMin: displayDurationMin_(props, ev), price: Number(props.price || 0) };
-    notifyCustomerProps_(props,
-      '【ご予約前日のお知らせ】\n明日のご予約です。お気をつけてお越しください。\n' +
-      bookingSummary_(menu, ev.getStartTime(), eff, props.isFirstTime === 'true') +
-      '\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(props.token),
-      'reminder');
-    ev.setTag('reminded', 'true');
+    if (notifyOn_('reminder')) {
+      notifyCustomerProps_(props,
+        '【ご予約前日のお知らせ】\n明日のご予約です。お気をつけてお越しください。\n' +
+        bookingSummary_(menu, ev.getStartTime(), eff, props.isFirstTime === 'true') +
+        '\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(props.token),
+        'reminder');
+      ev.setTag('reminded', 'true'); // 送ったときだけ処理済みに（OFF→ON再開が直感どおりになる）
+    }
   });
 }
 
@@ -1690,11 +1702,13 @@ function sendFollowUps() {
     if (getEventProp_(ev, 'status') !== STATUS.CONFIRMED) return;
     if (getEventProp_(ev, 'followedUp') === 'true') return;
     var props = getEventProps_(ev);
-    notifyCustomerProps_(props,
-      '【ご来店ありがとうございました】\n先日はサロン和笑〜Violane〜をご利用いただき、ありがとうございました。\n' +
-      'お身体の調子はいかがでしょうか。またのご来店を心よりお待ちしております。',
-      'followup');
-    ev.setTag('followedUp', 'true');
+    if (notifyOn_('followup')) {
+      notifyCustomerProps_(props,
+        '【ご来店ありがとうございました】\n先日はサロン和笑〜Violane〜をご利用いただき、ありがとうございました。\n' +
+        'お身体の調子はいかがでしょうか。またのご来店を心よりお待ちしております。',
+        'followup');
+      ev.setTag('followedUp', 'true'); // 送ったときだけ処理済みに（OFF→ON再開が直感どおりになる）
+    }
   });
 }
 
@@ -1729,7 +1743,7 @@ function sendOwnerDailyDigest() {
   lines.push(pending.length ? pending.join('\n') : '・未確定の仮予約はありません');
   // 未確定があるときだけ、承認/辞退に進める予約管理画面へ誘導する
   if (pending.length) lines.push('\n▼ 承認/辞退はこちら（予約管理画面）\n' + adminUrl_());
-  notifyOwner_(lines.join('\n'));
+  if (notifyOn_('ownerDigest')) notifyOwner_(lines.join('\n'));
 }
 
 // ---- 無料枠（Messaging API push）の監視 ----
@@ -1969,8 +1983,11 @@ function checkQuota() {
   if (used < limit * 0.8) return;
   var ym = fmt_(new Date(), 'yyyy-MM');
   if (prop_('QUOTA_WARNED_YYYYMM') === ym) return; // 今月は警告済み
-  notifyOwner_('【LINE無料枠の警告】\n今月の送信数が ' + used + '/' + limit + ' 通に達しました（80%超）。\n上限を超えると追加メッセージは送信されません。');
-  PropertiesService.getScriptProperties().setProperty('QUOTA_WARNED_YYYYMM', ym);
+  // 警告送信と月フラグをまとめてゲート＝送ったときだけ警告済みにする（OFF中は月フラグを立てず、ON復帰で再警告できる）。
+  if (notifyOn_('ownerQuotaWarn')) {
+    notifyOwner_('【LINE無料枠の警告】\n今月の送信数が ' + used + '/' + limit + ' 通に達しました（80%超）。\n上限を超えると追加メッセージは送信されません。');
+    PropertiesService.getScriptProperties().setProperty('QUOTA_WARNED_YYYYMM', ym);
+  }
 }
 
 // ============================================================
@@ -2025,6 +2042,17 @@ function slotMin_(menu) {
 
 function readSlotConfig_() {
   try { return JSON.parse(prop_('SLOT_CONFIG') || '{}'); } catch (_) { return {}; }
+}
+
+/** 通知トグルの設定ストア（専用キー NOTIFY_CONFIG・SLOT_CONFIG とは別枠）。失敗時 {}。 */
+function readNotifyConfig_() {
+  try { return JSON.parse(prop_('NOTIFY_CONFIG') || '{}'); } catch (_) { return {}; }
+}
+
+/** 任意通知の送信可否。未設定/true は送る・明示 false のみ抑止（既定ON＝未設定時は現行挙動を厳密維持）。 */
+function notifyOn_(key) {
+  var c = readNotifyConfig_();
+  return c[key] !== false;
 }
 
 function manageUrl_(token) {
