@@ -56,7 +56,7 @@
 .cal-day.avail.active { background: var(--c-purple); color: #fff; border-color: var(--c-purple); }
 .cal-day .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--c-accent); }
 .cal-day.avail.active .dot { background: #fff; }
-/* 項目3: 空き枠ヒートマップ（◎空き多い＝濃い / ○残りわずか＝薄い / ✕お休み） */
+/* 項目3: 空き枠ヒートマップ（◎空き多い＝濃い / ○残りわずか＝薄い / ✕空きなし・お休み） */
 .cal-day.avail.heat-hi { background: #F3DEEC; }
 .cal-day.avail.heat-mid { background: #FDF7FB; }
 .heat-mark { font-size: .62rem; line-height: 1; color: var(--c-purple-lt); }

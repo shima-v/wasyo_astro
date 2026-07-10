@@ -97,7 +97,7 @@ export function renderAvailabilityCalendar({
       const heatCls = ' ' + cls;
       html += `<button type="button" class="cal-cell cal-day avail${heatCls}${active}${dowCls}" data-date="${ymd}" title="空き ${cnt} 枠">${day}<span class="heat-mark" aria-hidden="true">${mark}</span></button>`;
     } else {
-      // 非 avail: 祝日は祝日名、それ以外の休業・受付外・満は ✕（凡例「✕ お休み」と整合）
+      // 非 avail: 祝日は祝日名、それ以外の休業・受付外・満は ✕（凡例「✕ 空きなし・お休み」と整合）
       const hol = holidays[ymd];
       if (hol) {
         html += `<span class="cal-cell cal-day disabled holiday${dowCls}" title="${esc(hol)}">${day}<small class="hol-name">${esc(hol)}</small></span>`;
@@ -107,7 +107,7 @@ export function renderAvailabilityCalendar({
     }
   }
   html += '</div>';
-  html += '<p class="cal-legend"><span>◎ 空きが多い</span><span>○ 残りわずか</span><span>✕ お休み</span></p>';
+  html += '<p class="cal-legend"><span>◎ 空きが多い</span><span>○ 残りわずか</span><span>✕ 空きなし・お休み</span></p>';
   mount.innerHTML = html;
   const prev = mount.querySelector('#calPrev');
   const next = mount.querySelector('#calNext');
