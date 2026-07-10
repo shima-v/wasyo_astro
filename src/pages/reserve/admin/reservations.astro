@@ -43,6 +43,19 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
     <AdminHeader base={base} salonName={salonName} title="予約管理" back="/reserve/admin" backLabel="管理トップ" />
     <!-- 開始時刻を選ぶポップアップ（代理登録の日時ピッカーが使う）。共有部品 TimeDialog（お客様フローと共用） -->
     <TimeDialog />
+    <!-- 顧客一覧から選ぶモーダル（TimeDialog と同じネイティブ <dialog> 様式）。
+         お名前で絞り込み→行タップで氏名・電話・メールを autofill。一覧では電話は常にマスク（実値は並べない）。 -->
+    <dialog id="custDialog" class="cust-dialog" aria-label="顧客一覧から選ぶ">
+      <div class="cust-dialog-head">
+        <strong>顧客一覧から選ぶ</strong>
+        <button type="button" class="hours-close" id="custDialogClose" aria-label="閉じる">×</button>
+      </div>
+      <div class="cust-dialog-search">
+        <input class="tin" type="search" id="custSearch" placeholder="お名前で絞り込み" autocomplete="off" />
+        <p class="cust-dialog-note"><b>●</b> 一覧では電話は常にマスク（のぞき見対策）</p>
+      </div>
+      <div id="custDialogBody" class="cust-dialog-body"></div>
+    </dialog>
 
     <main class="wrap">
       <!-- 承認待ち一覧（admin.astro から移設・挙動不変） -->
@@ -81,8 +94,13 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
           </div>
 
           <div class="fsec">
-            <div class="fsec__lbl">お名前 <span class="req">必須</span></div>
+            <div class="fsec__lbl">お名前 <span class="req">必須</span>
+              <!-- 顧客台帳から選んで氏名・電話・メールを autofill する（一覧では電話は常にマスク） -->
+              <button type="button" class="pick-btn" id="pickCustomerBtn">顧客一覧から選ぶ</button>
+            </div>
             <input class="tin" type="text" id="agentName" autocomplete="off" />
+            <!-- 選択中の表示（○○さんを選択中／解除）。解除で手入力に戻す -->
+            <div class="picked-chip" id="pickedChip" hidden></div>
           </div>
 
           <div class="fsec">
@@ -216,6 +234,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       // ============================================================
       let selectedMenu = null; // { id, name, duration, slotMin }
       let rawCache = null;     // availabilityRaw の先読みキャッシュ（menuId 非依存・1回だけ取得）
+      let pickedKey = null;    // 顧客一覧から選んだ顧客の opaque key（手入力＝null）。送信時に pickedKey として echo
       const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
 
       // 空き枠駆動の日時ピッカー（お客様フローと同じ共有部品 createDateTimePicker）。
@@ -297,7 +316,7 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       // ペイロード組立・クライアント検証（submitAgent が送信前に使う）。
       function agentPayload() {
         const { date, time } = picker.getSelection();
-        return {
+        const p = {
           menuId: selectedMenu ? selectedMenu.id : '',
           date: date || '', // 'YYYY-MM-DD'（availabilityRaw 由来。GAS の期待形式）
           time: time || '', // 'HH:MM'（開始候補。GAS の期待形式）
@@ -305,6 +324,10 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
           phone: el('agentPhone').value.trim(),
           email: el('agentEmail').value.trim(),
         };
+        // 顧客一覧から選んだときだけ、一覧が返した opaque な突合トークン（key）を echo で添える。
+        // 手入力のみなら付けない（生の電話・識別子は載せない＝GAS 側の監査 proxyBook:picked/:manual の区別に使う）。
+        if (pickedKey) p.pickedKey = pickedKey;
+        return p;
       }
       function validateAgent() {
         const p = agentPayload();
@@ -336,6 +359,10 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
         picker.reset(); // カレンダー・時刻候補・選択・状況テキストを初期化
         ['agentName', 'agentPhone', 'agentEmail'].forEach((id) => { el(id).value = ''; });
         el('agentDtChip').hidden = true;
+        // 顧客選択の控えも解除する（次の登録に前の選択を引きずらない）。
+        pickedKey = null;
+        el('pickedChip').hidden = true;
+        el('pickedChip').innerHTML = '';
       }
 
       async function submitAgent() {
@@ -361,9 +388,186 @@ const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
       }
       el('agentSubmit').addEventListener('click', submitAgent);
 
+      // ============================================================
+      // 顧客一覧から選ぶ（代理登録の氏名・電話・メールを台帳から autofill）
+      //   read-only の adminListCustomers（customers.astro と同じ素材）をモーダルに出し、行タップで
+      //   #agentName / #agentPhone / #agentEmail を埋める。一覧では電話は常にマスク（実値を並べない＝
+      //   のぞき見対策）。選んだときだけ opaque な突合トークン key を pickedKey に控え、送信ペイロードへ
+      //   echo する（GAS 側の監査 proxyBook:picked / :manual の区別に使う）。
+      // ============================================================
+      const custDlg = el('custDialog');
+      let custData = []; // adminListCustomers の原本（モーダルを開くたび取得）
+
+      // 台帳の電話は正規化済み（数字のみ）。一覧セル用マスク（customers.astro:maskPhoneCell と同等）。
+      function maskPhoneCell(d) {
+        const s = String(d || '').replace(/[^0-9]/g, '');
+        if (s.length >= 7) return esc(s.slice(0, 3)) + '-<span class="stars">****</span>-' + esc(s.slice(-4));
+        return '<span class="stars">****</span>';
+      }
+      // 最終来店日の表示（GAS は yyyy-MM-dd で返す。customers.astro:fmtDate の簡略版）。
+      function fmtDate(v) {
+        const s = String(v || '');
+        const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        return m ? m[1] + '/' + m[2] + '/' + m[3] : s;
+      }
+
+      async function loadCustList() {
+        const body = el('custDialogBody');
+        body.innerHTML = loadingHtml('顧客一覧を読み込んでいます…');
+        let res;
+        try {
+          res = await apiPost('adminListCustomers', null, { silent: true });
+        } catch (_) {
+          body.innerHTML = emptyHtml('通信に失敗しました。時間をおいて再度お試しください。', { warn: true });
+          return;
+        }
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        if (!res || !res.ok || !Array.isArray(res.customers)) {
+          body.innerHTML = emptyHtml('顧客台帳を取得できませんでした。', { warn: true });
+          return;
+        }
+        custData = res.customers;
+        renderCustList(filterCust(el('custSearch').value));
+      }
+
+      // 名前の部分一致で絞り込む（空なら全件）。原本 custData は壊さない。
+      function filterCust(q) {
+        const kw = String(q || '').trim().toLowerCase();
+        if (!kw) return custData.slice();
+        return custData.filter((c) => String(c.name || '').toLowerCase().indexOf(kw) >= 0);
+      }
+
+      function renderCustList(list) {
+        const body = el('custDialogBody');
+        if (!custData.length) {
+          body.innerHTML = emptyHtml('登録された顧客がまだありません（確定予約が入ると台帳に記録されます）。');
+          return;
+        }
+        if (!list.length) {
+          body.innerHTML = emptyHtml('該当するお客様が見つかりません。');
+          return;
+        }
+        body.innerHTML = '<div class="clist">' + list.map((c) => {
+          const tagCls = c.tag === '新規' ? 'first' : 'regular';
+          const tag = '<span class="tag ' + tagCls + '">' + esc(c.tag) + '</span>';
+          const dot = '<span class="clist__dot">·</span>';
+          let sub = '<span class="clist__last">最終 ' + esc(c.lastVisit ? fmtDate(c.lastVisit) : '—') + '</span>' + dot;
+          // 電話は一覧では常にマスク（実値は並べない）。メール型・LINE 等の連絡先なしはラベルで明示する。
+          if (c.type === 'phone' && c.phone) sub += '<span class="clist__ph">' + maskPhoneCell(c.phone) + '</span>';
+          else if (c.type === 'email' && c.email) sub += '<span class="clist__ph clist__noph">メール</span>';
+          else sub += '<span class="clist__ph clist__noph">連絡先なし</span>';
+          return '<button type="button" class="clist__row" data-key="' + esc(c.key) + '">'
+            + '<span class="clist__head"><span class="clist__nm">' + esc(c.name || '（お名前未登録）') + '</span>' + tag + '</span>'
+            + '<span class="clist__sub">' + sub + '</span>'
+            + '</button>';
+        }).join('') + '</div>';
+      }
+
+      // 行タップ＝その顧客を選択。氏名・電話（実値・LINE 客は空）・メール（あれば）を autofill する。
+      function pickCustomer(c) {
+        if (!c) return;
+        el('agentName').value = c.name || '';
+        el('agentPhone').value = (c.type === 'phone' && c.phone) ? c.phone : '';
+        el('agentEmail').value = (c.type === 'email' && c.email) ? c.email : '';
+        pickedKey = c.key || null; // 送信時に echo（生の電話・識別子は載せない＝一覧が返す opaque key のみ）
+        renderPickedChip(c);
+        closeCustDialog();
+      }
+
+      // 選択中の表示（○○さんを選択中／解除）。電話が空（LINE 客）なら手入力を促す。
+      function renderPickedChip(c) {
+        const chip = el('pickedChip');
+        const noPhone = !(c.type === 'phone' && c.phone);
+        chip.innerHTML = '<span class="picked-name">' + esc(c.name || '（お名前未登録）') + '</span>さんを選択中'
+          + (noPhone ? '<span class="picked-note">電話は手入力してください</span>' : '')
+          + '<button type="button" class="picked-clear" id="pickedClear">解除</button>';
+        chip.hidden = false;
+      }
+
+      // 選択解除＝手入力に戻す。控えていた key を捨て、autofill した氏名・電話・メールも空にする
+      // （選択中の PII を残したまま監査だけ :manual に落ちる齟齬を避ける）。
+      function clearPicked() {
+        pickedKey = null;
+        el('pickedChip').hidden = true;
+        el('pickedChip').innerHTML = '';
+        ['agentName', 'agentPhone', 'agentEmail'].forEach((id) => { el(id).value = ''; });
+      }
+
+      function openCustDialog() {
+        if (!custDlg) return;
+        el('custSearch').value = '';
+        if (typeof custDlg.showModal === 'function') custDlg.showModal(); else custDlg.setAttribute('open', '');
+        loadCustList();
+      }
+      function closeCustDialog() {
+        if (!custDlg) return;
+        if (typeof custDlg.close === 'function') custDlg.close(); else custDlg.removeAttribute('open');
+      }
+
+      el('pickCustomerBtn').addEventListener('click', openCustDialog);
+      el('custDialogClose').addEventListener('click', closeCustDialog);
+      // 背景（::backdrop）クリックで閉じる（TimeDialog と同じ流儀）。Esc は dialog 既定で閉じる。
+      if (custDlg) custDlg.addEventListener('click', (e) => { if (e.target === custDlg) closeCustDialog(); });
+      el('custSearch').addEventListener('input', (e) => renderCustList(filterCust(e.target.value)));
+      el('custDialogBody').addEventListener('click', (e) => {
+        const row = e.target.closest('.clist__row');
+        if (!row) return;
+        const key = row.getAttribute('data-key');
+        pickCustomer(custData.find((c) => c.key === key));
+      });
+      el('pickedChip').addEventListener('click', (e) => {
+        if (e.target.closest('#pickedClear')) clearPicked();
+      });
+
       // ---- 起動 ----
       // サーバゲート済み（middleware が Cookie を検証して通した）前提。承認待ちを読み込む。
       loadPending();
     </script>
+
+    <style is:global>
+      /* 「顧客一覧から選ぶ」ボタン（お名前ラベルの右側に寄せる。mini-btn と同じ書き味） */
+      .pick-btn {
+        margin-left: auto; font-family: var(--f-sans); font-size: .72rem; letter-spacing: .04em; cursor: pointer;
+        background: #fff; color: var(--a-cabinet); border: 1px solid var(--a-gold); border-radius: 7px;
+        padding: .3rem .65rem; min-height: 32px;
+      }
+      .pick-btn:hover { background: #FCF6FA; }
+
+      /* 選択中の表示（○○さんを選択中／解除）。顧客色の淡い帯で「台帳の人を選んでいる」ことを示す */
+      .picked-chip {
+        display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .55rem;
+        font-family: var(--f-sans); font-size: .82rem; color: var(--a-ink);
+        background: var(--k-customer-bg); border: 1px solid var(--k-customer); border-radius: 8px; padding: .45rem .7rem;
+      }
+      .picked-chip .picked-name { font-weight: 600; color: #4a3350; }
+      .picked-chip .picked-note { font-size: .72rem; color: var(--a-seal); }
+      .picked-chip .picked-clear {
+        margin-left: auto; cursor: pointer; background: none; border: none; color: var(--a-cabinet);
+        font-family: var(--f-sans); font-size: .76rem; text-decoration: underline; padding: .2rem .3rem; min-height: 32px;
+      }
+
+      /* 顧客一覧モーダル（TimeDialog の .time-dialog と同じ枠組み） */
+      .cust-dialog {
+        border: 1px solid var(--a-line); border-radius: 12px;
+        padding: 0; margin: auto; max-width: 460px; width: calc(100% - 2rem);
+        color: var(--a-ink); background: var(--a-surface);
+      }
+      .cust-dialog::backdrop { background: rgba(44, 31, 58, .38); }
+      .cust-dialog-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: .8rem 1rem .4rem; font-family: var(--f-serif);
+      }
+      .cust-dialog-head strong { font-size: 1rem; }
+      .cust-dialog-search { padding: .2rem 1rem .5rem; }
+      .cust-dialog-note {
+        font-family: var(--f-sans); font-size: .68rem; letter-spacing: .1em; color: var(--a-muted);
+        margin: .45rem 0 0; display: flex; align-items: center; gap: .4rem;
+      }
+      .cust-dialog-note b { color: var(--a-seal); }
+      .cust-dialog-body { padding: 0 1rem 1rem; max-height: 60vh; overflow-y: auto; }
+
+      /* 連絡先なし・メールのラベル（一覧セルの電話位置に置く注記。数字ではないので tabular を戻す） */
+      .clist__noph { color: var(--a-muted); font-variant-numeric: normal; letter-spacing: .04em; }
+    </style>
   </body>
 </html>
