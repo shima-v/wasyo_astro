@@ -1,3 +1,6 @@
 allowBuilds:
   esbuild: true
   sharp: true
+  # Cloudflare Workers ランタイム。@astrojs/cloudflare（dev フロント）の
+  # ローカル実行（wrangler dev / astro dev）に必要なため build script を許可する。
+  workerd: true

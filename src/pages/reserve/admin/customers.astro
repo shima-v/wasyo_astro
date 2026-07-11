@@ -1,0 +1,391 @@
+---
+// 顧客管理ページ（/reserve/admin/customers）。P2 IA（ADR-0001 決定1）の「顧客管理」区分。
+// 顧客台帳シート（LEDGER_SHEET）だけを素材にした「台帳ベース MVP」:
+//   ・一覧＝氏名／タグ（新規 or 常連）／電話は常にマスク。行タップで同一ページ内の詳細パネルを開く。
+//   ・詳細＝連絡先を PII 段階開示（既定マスク→[表示]で開示＋[コピー]＋放置で自動再マスク＝ADR-0001 決定3）。
+//   ・来店履歴の「明細（日付＋メニュー）」は詳細を開くたびに read-only の adminListConfirmed（顧客キーで
+//     突合したカレンダーの確定イベント）で取得して表示する。0件・失敗は正直に示す（作話しない）。
+//
+// 詳細は URL に顧客キーを載せず「在ページのパネル」で開く（のぞき見／Cookie Path 両面で有利）。
+// データは read-only の GAS `adminListCustomers`（Worker 経由・requireAdminToken_ 保護）だけで賄う。
+//
+// 管理ページ本体はオンデマンド（prerender:false リテラル）。static 配信されると middleware の
+// サーバゲートを通らないため、必ずリテラル false にして Worker を通す（ADR-0002）。
+// URL は Cookie Path=/reserve/admin 制約により /reserve/admin/ 配下固定（ADR-0001 決定1）。
+export const prerender = false;
+
+import { ENV_LABEL } from '../../../data/config.js';
+import EnvBadge from '../../../components/EnvBadge.astro';
+import SubmitOverlay from '../../../components/SubmitOverlay.astro';
+import AdminHeader from '../../../components/AdminHeader.astro';
+import '../../../styles/admin.css';
+import '../../../styles/admin-cabinet.css';
+
+const _base = import.meta.env.BASE_URL;
+const base = _base.endsWith('/') ? _base : _base + '/';
+const salonName = 'サロン和笑〜Violane〜';
+const tel = '090-9095-6034';
+const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <EnvBadge />
+    <SubmitOverlay message="送信しています…" subtext="画面をそのままでお待ちください" />
+    <AdminHeader base={base} salonName={salonName} title="顧客管理" back="/reserve/admin" backLabel="管理トップ" />
+
+    <main class="wrap">
+      <div class="panel-bar">
+        <button type="button" class="linkish" id="logoutBtn">ログアウト</button>
+      </div>
+
+      <!-- 顧客一覧（電話は常にマスク）。行タップで在ページの詳細パネルへ -->
+      <section id="listSection">
+        <div class="sec-head">
+          <h2 class="section-title">顧客一覧<span class="section-count" id="listCount"></span></h2>
+          <button type="button" class="reserve-btn ghost sm" id="reloadBtn">再読み込み</button>
+        </div>
+        <p class="state-cap"><b>●</b> 一覧では電話は常にマスク（のぞき見対策）</p>
+        <div class="sort-bar" id="sortBar">
+          <span class="sort-bar__lbl">並び替え</span>
+          <button type="button" class="sort-btn is-active" data-key="lastVisit" data-label="最終来店">最終来店 ▼</button>
+          <button type="button" class="sort-btn" data-key="count" data-label="来店回数">来店回数</button>
+        </div>
+        <div id="listArea">
+          <div class="status loading"><span class="spinner" aria-hidden="true"></span><span>読み込んでいます…</span></div>
+        </div>
+      </section>
+
+      <!-- 詳細パネル（在ページ・顧客キーは URL に出さない）。行タップで描画・表示 -->
+      <section id="detailSection" hidden>
+        <div id="detailArea"></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>{salonName}</p>
+      <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
+    </footer>
+
+    <div id="toast"></div>
+
+    <script>
+      // 顧客一覧＝read-only の adminListCustomers（Worker 経由・Cookie セッションで認可）。
+      // 認証はサーバゲート（middleware）に一本化済み。このページは認証済みでのみ配信される。
+      // PII 段階開示（一覧マスク／詳細は表示→コピー→自動再マスク）は ADR-0001 決定3 準拠。
+      import { createAdminApi } from '../../../lib/admin-api.js';
+      import { esc, createToast, loadingHtml, emptyHtml } from '../../../lib/admin-ui.js';
+
+      const el = (id) => document.getElementById(id);
+      const { apiPost, logout, handleForbidden } = createAdminApi();
+      const toast = createToast(el);
+
+      // アイコン（mock-2-customer.html 準拠）。目＝表示／四角＝コピー／時計＝自動再マスクの注記。
+      const EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg>';
+      const COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M5.5 15.5H5a1.5 1.5 0 01-1.5-1.5V5A1.5 1.5 0 015 3.5h9A1.5 1.5 0 0115.5 5v.5"/></svg>';
+      const CLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>';
+
+      const REMASK_MS = 20000; // 放置で自動再マスクまでの目安（20秒）
+      let remaskTimer = null;
+      let customersData = [];   // GAS 取得の原本
+      let viewData = [];        // 並び替え後の表示用（data-i はこちらの添字）
+      let sortKey = 'lastVisit'; // 既定＝最終来店（GAS も同順で返す）
+      let sortDir = 'desc';
+
+      // ---- 電話・メールの整形／マスク ----
+      // 台帳の電話は正規化済み（数字のみ）。ハイフン付きの整形はここ（フロント）で行う。
+      // 桁が想定外なら整形せずそのまま返す（作話しない）。
+      function fmtPhone(d) {
+        const s = String(d || '').replace(/[^0-9]/g, '');
+        if (s.length === 11) return s.slice(0, 3) + '-' + s.slice(3, 7) + '-' + s.slice(7);
+        return s;
+      }
+      function maskPhone(d) {
+        const s = String(d || '').replace(/[^0-9]/g, '');
+        if (s.length >= 7) return s.slice(0, 3) + '-****-' + s.slice(-4);
+        return '****';
+      }
+      // 一覧セル用（**** を金みの stars で見せる。中身は数字のみ由来で安全だが esc は明示）。
+      function maskPhoneCell(d) {
+        const s = String(d || '').replace(/[^0-9]/g, '');
+        if (s.length >= 7) return esc(s.slice(0, 3)) + '-<span class="stars">****</span>-' + esc(s.slice(-4));
+        return '<span class="stars">****</span>';
+      }
+      function maskEmail(e) {
+        const s = String(e || '');
+        const at = s.indexOf('@');
+        if (at < 1) return '****';
+        const local = s.slice(0, at);
+        const domain = s.slice(at + 1);
+        const tld = domain.lastIndexOf('.') >= 0 ? domain.slice(domain.lastIndexOf('.')) : '';
+        return local.slice(0, 1) + '***@****' + tld;
+      }
+      // 日付表示：GAS は yyyy-MM-dd で返す（ledgerDateStr_ で正規化済み）。念のため Date 文字列にも耐える。
+      function fmtDate(v) {
+        const s = String(v || '');
+        if (!s) return '';
+        const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) return m[1] + '/' + m[2] + '/' + m[3];
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) {
+          const p = (n) => String(n).padStart(2, '0');
+          return d.getFullYear() + '/' + p(d.getMonth() + 1) + '/' + p(d.getDate());
+        }
+        return s;
+      }
+
+      // ============================================================
+      // 顧客一覧
+      // ============================================================
+      async function loadCustomers() {
+        el('listArea').innerHTML = loadingHtml();
+        el('detailSection').hidden = true;
+        el('listSection').hidden = false;
+        clearRemask();
+        let res;
+        try {
+          res = await apiPost('adminListCustomers', null, { silent: true });
+        } catch (_) {
+          el('listArea').innerHTML = emptyHtml('通信に失敗しました。時間をおいて再度お試しください。', { warn: true });
+          return;
+        }
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        if (!res || !res.ok || !Array.isArray(res.customers)) {
+          el('listArea').innerHTML = emptyHtml('顧客台帳を取得できませんでした。', { warn: true });
+          return;
+        }
+        customersData = res.customers;
+        applySortAndRender();
+      }
+
+      // 並び替え（最終来店＝yyyy-MM-dd 文字列比較／来店回数＝数値）。原本を壊さずコピーを並べる。
+      function sortCustomers(list) {
+        const arr = list.slice();
+        const dir = sortDir === 'asc' ? 1 : -1;
+        arr.sort((a, b) => {
+          let av, bv;
+          if (sortKey === 'count') { av = a.count || 0; bv = b.count || 0; }
+          else { av = a.lastVisit || ''; bv = b.lastVisit || ''; }
+          if (av < bv) return -1 * dir;
+          if (av > bv) return 1 * dir;
+          return 0;
+        });
+        return arr;
+      }
+      function applySortAndRender() {
+        viewData = sortCustomers(customersData);
+        renderList(viewData);
+        updateSortUI();
+      }
+      function updateSortUI() {
+        const bar = el('sortBar');
+        if (!bar) return;
+        bar.querySelectorAll('.sort-btn').forEach((b) => {
+          const active = b.getAttribute('data-key') === sortKey;
+          b.classList.toggle('is-active', active);
+          const arrow = active ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+          b.textContent = b.getAttribute('data-label') + arrow;
+        });
+      }
+
+      function renderList(list) {
+        el('listCount').textContent = list.length ? '（' + list.length + '名）' : '';
+        if (!list.length) {
+          el('listArea').innerHTML = emptyHtml('登録された顧客がまだありません（確定予約が入ると台帳に記録されます）。');
+          return;
+        }
+        el('listArea').innerHTML = '<div class="clist">' + list.map((c, i) => {
+          const tagCls = c.tag === '新規' ? 'first' : 'regular';
+          const tag = '<span class="tag ' + tagCls + '">' + esc(c.tag) + '</span>';
+          // 2段目：来店回数・最終来店・電話（phone 型のみ常にマスク／line・email 型は電話省略）。
+          const dot = '<span class="clist__dot">·</span>';
+          let sub = '<span class="clist__cnt">来店 <b>' + esc(c.count != null ? c.count : 0) + '</b> 回</span>'
+            + dot + '<span class="clist__last">最終 ' + esc(c.lastVisit ? fmtDate(c.lastVisit) : '—') + '</span>';
+          if (c.type === 'phone' && c.phone) sub += '<span class="clist__ph">' + maskPhoneCell(c.phone) + '</span>';
+          return '<button type="button" class="clist__row" data-i="' + i + '">'
+            + '<span class="clist__head"><span class="clist__nm">' + esc(c.name || '（お名前未登録）') + '</span>' + tag + '</span>'
+            + '<span class="clist__sub">' + sub + '</span>'
+            + '</button>';
+        }).join('') + '</div>';
+      }
+
+      el('listArea').addEventListener('click', (e) => {
+        const row = e.target.closest('.clist__row');
+        if (!row) return;
+        openDetail(Number(row.getAttribute('data-i')));
+      });
+
+      // 並び替えバー：同じキーは方向トグル、違うキーは降順から。
+      el('sortBar').addEventListener('click', (e) => {
+        const btn = e.target.closest('.sort-btn');
+        if (!btn) return;
+        const key = btn.getAttribute('data-key');
+        if (key === sortKey) sortDir = (sortDir === 'asc' ? 'desc' : 'asc');
+        else { sortKey = key; sortDir = 'desc'; }
+        applySortAndRender();
+      });
+
+      // ============================================================
+      // 詳細パネル（在ページ・PII 段階開示）
+      // ============================================================
+      function clearRemask() { if (remaskTimer) { clearTimeout(remaskTimer); remaskTimer = null; } }
+
+      function openDetail(i) {
+        const c = viewData[i];
+        if (!c) return;
+        clearRemask();
+        el('detailArea').innerHTML = detailHtml(c);
+        el('listSection').hidden = true;
+        el('detailSection').hidden = false;
+        window.scrollTo({ top: 0, behavior: 'auto' });
+        wireDetail();
+        loadVisits(c); // 来店履歴は詳細を開くたびに取りに行く（一覧段階で明細 PII を持たない＝段階開示）
+      }
+      function closeDetail() {
+        clearRemask();
+        el('detailSection').hidden = true;
+        el('listSection').hidden = false;
+      }
+
+      // 来店履歴＝read-only の adminListConfirmed。c.key は台帳キーを GAS 側で SHA-256 化した opaque な
+      // 突合トークン（生の識別子は出ない）で、そのまま echo するだけ。GAS が同じハッシュでイベントを突合し、
+      // その顧客の来店だけを返す（他人の履歴は混ざらない）。0件・失敗は正直に示す。
+      async function loadVisits(c) {
+        const body = el('histBody');
+        if (!body) return;
+        if (!c.key) { // 突合トークンが無ければ履歴を引けない（作話しない）
+          body.innerHTML = emptyHtml('来店履歴を表示できませんでした。');
+          return;
+        }
+        let res;
+        try {
+          res = await apiPost('adminListConfirmed', { key: c.key }, { silent: true });
+        } catch (_) {
+          if (el('histBody') !== body) return; // 取得中に別の詳細へ切り替わっていたら破棄
+          body.innerHTML = emptyHtml('来店履歴の取得に失敗しました。', { warn: true });
+          return;
+        }
+        if (el('histBody') !== body) return; // レース対策：開いている詳細が変わっていたら反映しない
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        if (!res || !res.ok || !Array.isArray(res.visits)) {
+          body.innerHTML = emptyHtml('来店履歴を取得できませんでした。', { warn: true });
+          return;
+        }
+        renderVisits(body, res.visits);
+      }
+
+      function renderVisits(body, visits) {
+        if (!visits.length) {
+          body.innerHTML = emptyHtml('来店履歴がまだありません。');
+          return;
+        }
+        body.innerHTML = '<ul class="hist__list">' + visits.map((v) => {
+          const d = esc(fmtDate(v.date));
+          const t = v.time ? '<span class="hist__time">' + esc(v.time) + '</span>' : '';
+          return '<li class="hist__item">'
+            + '<span class="hist__date">' + d + t + '</span>'
+            + '<span class="hist__menu">' + esc(v.menuName || '') + '</span>'
+            + '</li>';
+        }).join('') + '</ul>';
+      }
+
+      // 連絡先フィールド（phone→電話番号 / email→メール / line→台帳に連絡先なしを明示）。
+      function contactField(c) {
+        if (c.type === 'phone' && c.phone) return piiField('電話番号', maskPhone(c.phone), fmtPhone(c.phone));
+        if (c.type === 'email' && c.email) return piiField('メール', maskEmail(c.email), c.email);
+        return '<div class="field"><div class="field__lbl">連絡先</div>'
+          + '<div class="field__note">LINE連携のお客様です（電話・メールは台帳にありません）。</div></div>';
+      }
+      // 既定マスク→[表示]で開示＋[コピー]表示＋放置で自動再マスク（ADR-0001 決定3）。
+      function piiField(label, masked, full) {
+        return '<div class="field">'
+          + '<div class="field__lbl">' + esc(label) + '</div>'
+          + '<div class="pii-row">'
+          +   '<span class="pii masked" data-full="' + esc(full) + '" data-mask="' + esc(masked) + '">' + esc(masked) + '</span>'
+          +   '<span class="pii-actions">'
+          +     '<button type="button" class="mini-btn reveal">' + EYE + '表示</button>'
+          +     '<button type="button" class="mini-btn copy" hidden>' + COPY + 'コピー</button>'
+          +   '</span>'
+          + '</div>'
+          + '<div class="reveal-note" hidden>' + CLOCK + '操作がなければ自動で再びマスクします</div>'
+          + '</div>';
+      }
+      function metaField(label, val) {
+        return '<div class="field"><div class="field__lbl">' + esc(label) + '</div>'
+          + '<div class="field__val">' + esc(val) + '</div></div>';
+      }
+      function detailHtml(c) {
+        const tagCls = c.tag === '新規' ? 'first' : 'regular';
+        const tags = '<span class="tag ' + tagCls + '">' + esc(c.tag) + '</span>';
+        const cnt = (c.count != null ? String(c.count) : '—');
+        return ''
+          + '<div class="panel-bar"><button type="button" class="linkish" id="detailBack">‹ 一覧へ戻る</button></div>'
+          + '<p class="state-cap"><b>●</b> 連絡先は既定でマスク（必要なときだけ表示・放置で自動再マスク）</p>'
+          + '<div class="krt">'
+          +   '<div class="krt__top"><div><div class="krt__name">' + esc(c.name || '（お名前未登録）') + '</div></div>'
+          +     '<div class="tags">' + tags + '</div></div>'
+          +   contactField(c)
+          +   metaField('来店回数', (c.count != null ? c.count + ' 回' : '—'))
+          +   metaField('初来店', c.firstVisit ? fmtDate(c.firstVisit) : '—')
+          +   metaField('最終来店', c.lastVisit ? fmtDate(c.lastVisit) : '—')
+          + '</div>'
+          + '<div class="hist">'
+          +   '<div class="hist__h">来店履歴 <span class="n">全 ' + esc(cnt) + ' 回</span></div>'
+          +   '<div id="histBody">' + loadingHtml('来店履歴を読み込んでいます…') + '</div>'
+          + '</div>';
+      }
+
+      function wireDetail() {
+        const area = el('detailArea');
+        const back = area.querySelector('#detailBack');
+        if (back) back.addEventListener('click', closeDetail);
+        const row = area.querySelector('.pii-row');
+        if (!row) return; // line 型（連絡先なし）は開示操作なし
+        const pii = row.querySelector('.pii');
+        const revealBtn = row.querySelector('.reveal');
+        const copyBtn = row.querySelector('.copy');
+        const note = row.parentElement.querySelector('.reveal-note');
+
+        function remask() {
+          pii.textContent = pii.getAttribute('data-mask');
+          pii.classList.add('masked');
+          revealBtn.hidden = false; copyBtn.hidden = true; note.hidden = true;
+          remaskTimer = null;
+        }
+        revealBtn.addEventListener('click', () => {
+          pii.textContent = pii.getAttribute('data-full');
+          pii.classList.remove('masked');
+          revealBtn.hidden = true; copyBtn.hidden = false; note.hidden = false;
+          clearRemask();
+          remaskTimer = setTimeout(remask, REMASK_MS); // 放置で自動再マスク
+        });
+        copyBtn.addEventListener('click', () => {
+          const full = pii.getAttribute('data-full');
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(full).then(() => toast('コピーしました')).catch(() => toast('コピーできませんでした'));
+          } else {
+            toast('コピーに対応していない環境です');
+          }
+        });
+      }
+
+      // ---- ログアウト / 再読み込み ----
+      el('logoutBtn').addEventListener('click', async () => {
+        await logout();
+        location.href = '/reserve/admin/login/';
+      });
+      el('reloadBtn').addEventListener('click', loadCustomers);
+
+      // ---- 起動 ----
+      // サーバゲート済み（middleware が Cookie を検証して通した）前提。顧客台帳を読み込む。
+      loadCustomers();
+    </script>
+  </body>
+</html>

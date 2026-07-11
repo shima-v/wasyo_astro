@@ -137,15 +137,19 @@ function doGet(e) {
         return json_({ ok: false, error: 'unknown_action' });
     }
   } catch (err) {
-    return json_({ ok: false, error: String(err) });
+    // 例外の詳細（スタック・内部識別子）はクライアントに返さずログ側にとどめる（情報漏えい防止）。
+    console.error('doGet failed: ' + err + ((err && err.stack) ? '\n' + err.stack : ''));
+    return json_({ ok: false, error: 'server_error' });
   }
 }
 
 function doPost(e) {
+  var raw = (e && e.postData && e.postData.contents) || '{}';
   var body = {};
-  try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); } catch (_) {}
-  // LINE Webhook（events を含む POST）: 通知先ID（グループ/ルーム/ユーザー）を捕捉する設定用ハンドラ
-  if (body.events) return handleLineWebhook_(body);
+  try { body = JSON.parse(raw); } catch (_) {}
+  // LINE Webhook（events を含む POST）: 通知先ID（グループ/ルーム/ユーザー）を捕捉する設定用ハンドラ。
+  // 署名検証に本文（raw）が要るためそのまま渡す。X-Line-Signature の取得可否は handleLineWebhook_ 側で扱う。
+  if (body.events) return handleLineWebhook_(body, raw, lineSignature_(e));
   var action = body.action || '';
   try {
     switch (action) {
@@ -166,7 +170,11 @@ function doPost(e) {
       // これにより管理操作も公開デプロイ①（executeAs=オーナー）で完結し、管理デプロイ②を不要にする布石。
       case 'getSlotConfig': return json_(requireAdminToken_(body, adminGetSlotConfig_));
       case 'setSlotConfig': return json_(requireAdminToken_(body, function () { return adminSetSlotConfig_(body); }));
+      case 'getNotifyConfig': return json_(requireAdminToken_(body, adminGetNotifyConfig_));
+      case 'setNotifyConfig': return json_(requireAdminToken_(body, function () { return adminSetNotifyConfig_(body); }));
       case 'listPending': return json_(requireAdminToken_(body, adminListPending_));
+      case 'adminListCustomers': return json_(requireAdminToken_(body, adminListCustomers_));
+      case 'adminListConfirmed': return json_(requireAdminToken_(body, function () { return adminListConfirmed_(body); }));
       case 'getQuota': return json_(requireAdminToken_(body, adminGetQuota_));
       case 'adminDecision': return json_(requireAdminToken_(body, function () { return adminDecision_(body); }));
       case 'broadcastPreview': return json_(requireAdminToken_(body, function () { return adminBroadcastPreview_(body); }));
@@ -174,12 +182,16 @@ function doPost(e) {
       case 'broadcastTest': return json_(requireAdminToken_(body, function () { return adminBroadcastTest_(body); }));
       case 'setTempSchedule': return json_(requireAdminToken_(body, function () { return adminSetTempSchedule_(body); }));
       case 'ownerChannelTest': return json_(requireAdminToken_(body, adminOwnerChannelTest_));
+      // 代理登録（電話/来店で受けた予約を"確定"で代理登録）。bearer 保護必須。
+      case 'adminCreateBooking': return json_(requireAdminToken_(body, function () { return adminCreateBooking_(body); }));
       // デプロイ通知（deploy.yml / gas/deploy.sh から叩く）。DEPLOY_NOTIFY_TOKEN で保護（管理トークンとは別系統）。
       case 'deployNotify': return json_(requireDeployToken_(body, function () { return notifyDeploy_(body); }));
       default: return json_({ ok: false, error: 'unknown_action' });
     }
   } catch (err) {
-    return json_({ ok: false, error: String(err) });
+    // 例外の詳細（スタック・内部識別子）はクライアントに返さずログ側にとどめる（情報漏えい防止）。
+    console.error('doPost failed: ' + err + ((err && err.stack) ? '\n' + err.stack : ''));
+    return json_({ ok: false, error: 'server_error' });
   }
 }
 
@@ -189,8 +201,30 @@ function doPost(e) {
  * 手順: ①公式アカウントでグループ参加を許可 ②ボットを対象グループに招待
  *       ③グループで誰かが発言 → ここで source を捕捉し Script Property
  *       `LINE_LAST_SOURCE`（例: group:Cxxxx）へ保存 → その値を `LINE_OWNER_USER_ID` に設定。
+ *
+ * 【セキュリティ】この POST は匿名到達可能なため、詐称された events で Script Property
+ * `LINE_LAST_SOURCE` を書き換えられないよう、LINE の署名検証を必須にする（検証できないなら書き込まない）。
+ * 正規の LINE Webhook はヘッダ X-Line-Signature に「チャネルシークレットで本文を HMAC-SHA256 → base64」した値を載せる。
+ *
+ * 【GAS の制約・重要】GAS Web App の doPost(e) は HTTP リクエストヘッダを一切参照できない
+ * （e に headers が無い）。したがって純 GAS 単体では X-Line-Signature を取得できず、本関数は
+ * 事実上つねに「検証不能 → 無処理（fail-closed）」になる。実運用で Webhook 捕捉を使うには、
+ * 段階2で導入する Cloudflare Worker を前段に置き、Worker がヘッダの署名を検証してから
+ * GAS_ADMIN_SECRET 付きで転送する構成（Worker はヘッダを読める）に載せ替える。
+ * その際は Worker が検証済み署名を lineSignature_(e) が拾える形（body 等）で引き渡すよう拡張する。
  */
-function handleLineWebhook_(body) {
+function handleLineWebhook_(body, rawBody, signature) {
+  var secret = prop_('LINE_CHANNEL_SECRET');
+  // secret 未設定なら検証不能 → 安全側に倒して書き込まない（fail-closed）。
+  if (!secret) {
+    console.warn('handleLineWebhook_: LINE_CHANNEL_SECRET 未設定のため検証不可・無処理で返す');
+    return json_({ ok: true, skipped: 'unverified' });
+  }
+  // 署名が取得できない／一致しない場合も書き込まない。
+  if (!verifyLineSignature_(rawBody || '', signature || '', secret)) {
+    console.warn('handleLineWebhook_: 署名検証に失敗（または署名を取得できない）ため無処理で返す');
+    return json_({ ok: true, skipped: 'unverified' });
+  }
   (body.events || []).forEach(function (ev) {
     var s = (ev && ev.source) || {};
     var id = s.groupId || s.roomId || s.userId || '';
@@ -198,6 +232,35 @@ function handleLineWebhook_(body) {
     if (id) PropertiesService.getScriptProperties().setProperty('LINE_LAST_SOURCE', (s.type || '?') + ':' + id);
   });
   return json_({ ok: true });
+}
+
+/**
+ * doPost の event から X-Line-Signature を取り出す（取得できなければ空文字）。
+ * ※GAS Web App はリクエストヘッダを公開しないため純 GAS ではつねに空になる。
+ *   段階2で Worker を前段に置いた場合に、検証済み署名を body 経由で受け取れるよう
+ *   フォールバック（body._lineSignature）だけ用意しておく（Worker 連携時に活用）。
+ */
+function lineSignature_(e) {
+  try {
+    if (e && e.postData && e.postData.contents) {
+      var b = JSON.parse(e.postData.contents);
+      if (b && b._lineSignature) return String(b._lineSignature);
+    }
+  } catch (_) {}
+  return '';
+}
+
+/**
+ * LINE Messaging API Webhook の署名検証。
+ * X-Line-Signature は「チャネルシークレットを鍵に、リクエスト本文そのものを HMAC-SHA256 した値の base64」。
+ * 同じ手順で再計算し、定数時間（constEq_）で突き合わせる。一致すれば LINE からの正規リクエストと判断できる。
+ * ※LINE の署名は標準 base64（webSafe ではない）。
+ */
+function verifyLineSignature_(rawBody, signature, secret) {
+  if (!secret || !signature) return false;
+  var mac = Utilities.computeHmacSha256Signature(rawBody, secret);
+  var expected = Utilities.base64Encode(mac);
+  return constEq_(expected, signature);
 }
 
 function json_(obj) {
@@ -437,20 +500,54 @@ function isClosedSlot_(dateStr, hhmm, config) {
 // 予約作成（仮予約）
 // ============================================================
 
-function createBooking_(b) {
+/**
+ * 予約作成の既定 opts。createBooking_（お客様の通常予約）が渡す値で、
+ * この既定は抽出前の createBooking_ の挙動を 100% 再現する。
+ * 将来の代理予約（adminCreateBooking_）は opts を差し替えて分岐する土台。
+ */
+var DEFAULT_CREATE_OPTS = {
+  requireContact: true,      // 連絡手段（contactMethod / email / line）の必須チェック
+  requireReferrer: true,     // 男性は紹介者必須のチェック
+  confirm: false,            // false=【仮】/ORANGE/pending・台帳更新は承認時。true=生成時点で確定
+  bypassWindow: false,       // false=リードタイム・受付上限・営業日/開始時刻/休枠を検証
+  notifyOwnerPending: true,  // 仮予約のオーナー通知を送る
+};
+
+/**
+ * 予約作成の本体。opts で挙動を分岐できるが、既定 opts（= DEFAULT_CREATE_OPTS 相当）
+ * は現行 createBooking_ を 100% 再現する。
+ * 【重要】ダブルブッキング防止（overlapsBusy_）は opts に関係なく常に実施する。
+ * @param {Object} b 予約入力
+ * @param {Object} [opts] 分岐フラグ（省略時は全既定＝現行挙動）
+ */
+function createBookingCore_(b, opts) {
+  opts = opts || {};
+  var requireContact = opts.requireContact !== false;    // 既定 true
+  var requireReferrer = opts.requireReferrer !== false;  // 既定 true
+  var confirm = opts.confirm === true;                   // 既定 false
+  var bypassWindow = opts.bypassWindow === true;         // 既定 false
+  var notifyOwnerPending = opts.notifyOwnerPending !== false; // 既定 true
+  var notifyCustomerFlag = opts.notifyCustomer !== false; // 既定 true（代理予約は自前で控えを送るため false で渡す）
+
   var menu = MENU[b.menuId];
   if (!menu) return { ok: false, error: 'invalid_menu' };
-  if (!b.name || !b.contactMethod) return { ok: false, error: 'missing_required' };
-  if (b.contactMethod === 'email' && !b.email) return { ok: false, error: 'missing_email' };
-  if (b.contactMethod === 'line' && !b.lineUserId && !b.email) return { ok: false, error: 'missing_contact' };
-  if (b.gender === 'male' && !b.referrer) return { ok: false, error: 'referrer_required' };
+  if (requireContact) {
+    if (!b.name || !b.contactMethod) return { ok: false, error: 'missing_required' };
+    if (b.contactMethod === 'email' && !b.email) return { ok: false, error: 'missing_email' };
+    if (b.contactMethod === 'line' && !b.lineUserId && !b.email) return { ok: false, error: 'missing_contact' };
+  }
+  if (requireReferrer) {
+    if (b.gender === 'male' && !b.referrer) return { ok: false, error: 'referrer_required' };
+  }
   if (!b.date || !b.time) return { ok: false, error: 'missing_slot' };
 
   // リードタイム・受付上限の検証
   var start = atTime_(parseDate_(b.date), b.time);
   var today = startOfDay_(new Date());
-  if (start < addDays_(today, RULES.leadTimeDays)) return { ok: false, error: 'too_soon' };
-  if (start > addDays_(today, RULES.maxAdvanceDays + 1)) return { ok: false, error: 'too_far' };
+  if (!bypassWindow) {
+    if (start < addDays_(today, RULES.leadTimeDays)) return { ok: false, error: 'too_soon' };
+    if (start > addDays_(today, RULES.maxAdvanceDays + 1)) return { ok: false, error: 'too_far' };
+  }
 
   // 新規/常連判定 → 初回料金確定
   var ledgerKey = ledgerKey_(b);
@@ -462,49 +559,121 @@ function createBooking_(b) {
   var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
   if (!cal) return { ok: false, error: 'calendar_not_configured' };
 
+  var status = confirm ? STATUS.CONFIRMED : STATUS.PENDING;
+
   var lock = LockService.getScriptLock();
   lock.waitLock(15000);
-  var token, ev;
+  var token, ev, evProps;
   try {
-    // 直前再検証（受付日・開始時刻・休枠・重複）。フロント値は信用しない。
-    var config = readSlotConfig_();
-    var holidaySet = holidayDateSet_(start, start);
-    if (!isOpenDay_(start, config, holidaySet) ||
-        !isValidStart_(start, b.time, config, holidaySet) ||
-        isClosedSlot_(b.date, b.time, config)) {
-      return { ok: false, error: 'slot_closed' };
+    // 直前再検証（受付日・開始時刻・休枠）。フロント値は信用しない。
+    if (!bypassWindow) {
+      var config = readSlotConfig_();
+      var holidaySet = holidayDateSet_(start, start);
+      if (!isOpenDay_(start, config, holidaySet) ||
+          !isValidStart_(start, b.time, config, holidaySet) ||
+          isClosedSlot_(b.date, b.time, config)) {
+        return { ok: false, error: 'slot_closed' };
+      }
     }
+    // ダブルブッキング防止（重複）は opts に関係なく常に実施する。
     var busy = busySpansForDay_(cal, start, null);
     if (overlapsBusy_(start, end, busy)) return { ok: false, error: 'slot_taken' };
 
     token = Utilities.getUuid();
-    ev = cal.createEvent('【仮】' + menu.name + ' / ' + b.name, start, end);
-    setEventProps_(ev, {
-      token: token, status: STATUS.PENDING, menuId: b.menuId,
+    ev = cal.createEvent((confirm ? '【確定】' : '【仮】') + menu.name + ' / ' + b.name, start, end);
+    evProps = {
+      token: token, status: status, menuId: b.menuId,
       name: b.name, phone: b.phone || '', email: b.email || '',
       gender: b.gender || '', referrer: b.referrer || '',
       lineUserId: b.lineUserId || '', isFirstTime: String(isFirst),
       price: String(eff.price), durationMin: String(eff.durationMin), slotMin: String(slot),
       note: b.note || '',
-    });
-    try { ev.setColor(CalendarApp.EventColor.ORANGE); } catch (_) {}
+    };
+    setEventProps_(ev, evProps);
+    try { ev.setColor(confirm ? CalendarApp.EventColor.GREEN : CalendarApp.EventColor.ORANGE); } catch (_) {}
     // カレンダー説明欄に管理者向けリンクを入れる（オーナーが予約を開いて操作できる導線）。
     // 説明欄には PII（連絡先）を生書きしない。載せるのは署名付きリンクのみ。
     try { ev.setDescription(adminEventDescription_(token)); } catch (_) {}
+    // 生成時点で確定扱いのときのみ、この場で台帳を更新（既定は承認時 decide_ で更新）。
+    if (confirm) ledgerUpsert_(evProps, start);
   } finally {
     lock.releaseLock();
   }
 
   // 通知
-  notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst);
-  notifyCustomer_(b, '【仮予約を受付ました】\n' + bookingSummary_(menu, start, eff, isFirst) +
-    '\nサロンの確認後、確定のご連絡をいたします。\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(token));
+  if (notifyOwnerPending) {
+    notifyOwnerNewBooking_(token, b, menu, start, end, eff, isFirst);
+  }
+  // 顧客への自動通知（代理予約は notifyCustomer:false で無効化し、確定控えを自前で送る）
+  if (notifyCustomerFlag && notifyOn_('customerReceipt')) {
+    notifyCustomer_(b, '【仮予約を受付ました】\n' + bookingSummary_(menu, start, eff, isFirst) +
+      '\nサロンの確認後、確定のご連絡をいたします。\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(token));
+  }
 
   return {
-    ok: true, token: token, status: STATUS.PENDING,
+    ok: true, token: token, status: status,
     isFirstTime: isFirst, durationMin: eff.durationMin, price: eff.price,
     manageUrl: manageUrl_(token),
   };
+}
+
+/** お客様の通常予約。既定 opts（現行挙動）で本体を呼ぶ薄いラッパ。 */
+function createBooking_(b) {
+  return createBookingCore_(b, DEFAULT_CREATE_OPTS);
+}
+
+/**
+ * 代理登録。管理者が電話・来店で受けた予約を代わりに"確定"で登録する。
+ * front /reserve/admin/reservations → Worker → doPost 'adminCreateBooking'（bearer 保護）。
+ * 【設計3点（本人ロック済み）】
+ *   1. 即確定  : confirm:true（生成時点で CONFIRMED・【確定】・GREEN・台帳即時 upsert）。
+ *   2. 同一受付制約: bypassWindow:false（リードタイム・受付上限・営業日/開始時刻/休枠を通常客同様に検証）。
+ *   3. 控えはメール入力時だけ: email があれば顧客へ確定控えメール。空なら顧客へは送らずオーナーへは必ず通知。
+ * 代理は連絡手段/性別/紹介者を集めないため core の requireContact/requireReferrer は外し、
+ * 組み込み通知（notifyOwnerPending/notifyCustomer）も両方オフにして、確定用の通知を自前で出す。
+ */
+function adminCreateBooking_(b) {
+  b = b || {};
+  // core は menu/date/time を検証する。代理では連絡手段チェックを外す分、name/phone をここで必須化する。
+  if (!b.name || !b.phone) return { ok: false, error: 'missing_required' };
+
+  var res = createBookingCore_(b, {
+    requireContact: false,    // 連絡手段（contactMethod/email/line）は代理では集めない
+    requireReferrer: false,   // 男性の紹介者チェックも代理では課さない
+    confirm: true,            // 生成時点で確定（【確定】/GREEN/台帳即時 upsert）
+    bypassWindow: false,      // 受付制約は通常客と同じ（特別扱いしない）
+    notifyOwnerPending: false, // 「承認待ち」通知は出さない（確定済みのため）
+    notifyCustomer: false,     // 顧客への自動通知はオフ。確定控えを下で自前送信
+  });
+  if (!res.ok) return res;
+
+  var menu = MENU[b.menuId] || { name: b.menuId };
+  var start = atTime_(parseDate_(b.date), b.time);
+  var eff = { durationMin: res.durationMin, price: res.price };
+
+  // オーナー通知（Discord優先→LINEフォールバック＝notifyOwner_）。確定済みなので承認/辞退リンクは付けない。
+  // 顧客 PII を LINE 履歴に生で残さない既存方針は Discord 優先で踏襲する。
+  if (notifyOn_('ownerProxy')) notifyOwner_('【代理で"確定"予約を登録しました】\n' +
+    'お名前: ' + b.name + (res.isFirstTime ? '（新規）' : '（常連）') + '\n' +
+    '電話: ' + (b.phone || '（未登録）') + '\n' +
+    bookingSummary_(menu, start, eff, res.isFirstTime));
+
+  // 顧客控え（メール入力時だけ）。代理では lineUserId を集めないためメール限定。
+  if (b.email) {
+    sendMail_(b.email, 'サロン和笑〜Violane〜 ご予約',
+      '【ご予約が確定しました】\n' +
+      bookingSummary_(menu, start, eff, res.isFirstTime) +
+      '\nご来店をお待ちしております。' +
+      '\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(res.token));
+  }
+
+  // 監査ログ（顧客PIIに関わる代理予約の証跡）。既存顧客を一覧から選んだ（pickedKey あり）か手入力かを op で区別する。
+  // 操作者は生トークンを残さず tokenFp_（HMAC指紋）で、対象電話は auditPush_ 内の maskId_ が末尾4桁のみに落とす。
+  // auditPush_ は try/catch 済み・LEDGER 未設定なら no-op＝監査失敗が予約本体（上で確定・通知済み）を巻き込まないよう、
+  // 副作用なしで最後に呼ぶだけにする。
+  auditPush_(tokenFp_(b.adminToken), b.pickedKey ? 'proxyBook:picked' : 'proxyBook:manual', b.phone, res.ok ? 'ok' : 'ng');
+
+  return res;
 }
 
 // ============================================================
@@ -597,9 +766,9 @@ function cancelBooking_(b) {
   var menu = MENU[props.menuId] || { name: props.menuId };
   var start = found.event.getStartTime(); // 通知に載せる日時は deleteEvent の前に退避する
   found.event.deleteEvent();
-  notifyOwner_('【お客様がキャンセルしました】\n' + props.name + ' 様 / ' + menu.name +
+  if (notifyOn_('ownerCancel')) notifyOwner_('【お客様がキャンセルしました】\n' + props.name + ' 様 / ' + menu.name +
     '\n日時: ' + fmt_(start, 'M/d(E) HH:mm') + '（' + (props.status === STATUS.CONFIRMED ? '確定' : '仮予約') + '）');
-  notifyCustomerProps_(props, '【ご予約をキャンセルしました】\nまたのご利用をお待ちしております。');
+  if (notifyOn_('customerCancel')) notifyCustomerProps_(props, '【ご予約をキャンセルしました】\nまたのご利用をお待ちしております。');
   return { ok: true };
 }
 
@@ -645,7 +814,7 @@ function changeBooking_(b) {
     '新日時: ' + fmt_(start, 'M/d(E) HH:mm') +
     (props.note ? '\n要望: ' + props.note : '');
   notifyOwnerPendingApproval_(changeDetail, props.token, { altLabel: '日時変更の承認/辞退' });
-  notifyCustomerProps_(props, '【日時変更を受付ました】\n' + bookingSummary_(menu, start, eff, props.isFirstTime === 'true') + '\nサロンの確認後、確定のご連絡をいたします。');
+  if (notifyOn_('customerChange')) notifyCustomerProps_(props, '【日時変更を受付ました】\n' + bookingSummary_(menu, start, eff, props.isFirstTime === 'true') + '\nサロンの確認後、確定のご連絡をいたします。');
   return { ok: true, status: STATUS.PENDING };
 }
 
@@ -678,7 +847,27 @@ function getBookingByToken_(token) {
 function requireAdminToken_(body, fn) {
   var tokens = (prop_('ADMIN_TOKENS') || '').split(',').map(function (s) { return s.trim(); }).filter(String);
   var given = (body && body.adminToken) || '';
-  if (!given || tokens.indexOf(given) < 0) return { ok: false, error: 'forbidden' };
+  // 定数時間比較で全件を走査する（一致しても break しない＝どのトークンに当たったかも時間差で漏らさない）。
+  var matched = false;
+  for (var i = 0; i < tokens.length; i++) {
+    if (constEq_(tokens[i], given)) matched = true;
+  }
+  if (!given || !matched) return { ok: false, error: 'forbidden' };
+  return fn();
+}
+
+/**
+ * Worker だけが持つ共有秘密 `GAS_ADMIN_SECRET`（Script Property）を検証するラッパ。
+ * 段階2で管理系の GAS 呼び出しを Cloudflare Worker 経由に集約したのち、顧客系・代理予約の
+ * 新エンドポイント（P4/P5）を「Worker からの呼び出しに限る」ために使う土台。
+ * GAS Web App は HTTP ヘッダを読めないため、Worker は POST body の `workerSecret` として送る。
+ * 照合は定数時間比較（constEq_）。未設定・不一致・空は forbidden。
+ * ※段階1では関数の新設のみ（まだ呼び出し側には配線しない）。値は Script Properties のみ・リポには書かない。
+ */
+function requireWorkerSecret_(body, fn) {
+  var expected = prop_('GAS_ADMIN_SECRET');
+  var given = (body && body.workerSecret) || '';
+  if (!expected || !given || !constEq_(expected, given)) return { ok: false, error: 'forbidden' };
   return fn();
 }
 
@@ -709,6 +898,14 @@ function adminGetSlotConfig_() { return { ok: true, config: readSlotConfig_() };
 function adminSetSlotConfig_(b) {
   var cfg = b.config || {};
   PropertiesService.getScriptProperties().setProperty('SLOT_CONFIG', JSON.stringify(cfg));
+  return { ok: true };
+}
+
+function adminGetNotifyConfig_() { return { ok: true, config: readNotifyConfig_() }; }
+
+function adminSetNotifyConfig_(b) {
+  var cfg = b.config || {};
+  PropertiesService.getScriptProperties().setProperty('NOTIFY_CONFIG', JSON.stringify(cfg));
   return { ok: true };
 }
 
@@ -776,6 +973,139 @@ function ledgerUpsert_(props, visitDate) {
   } else {
     sh.appendRow([key, type, props.name || '', dateStr, 1, dateStr, '']);
   }
+}
+
+/**
+ * 顧客台帳（LEDGER_SHEET）を read-only で一覧化して返す（P2 顧客管理ページ用）。
+ * requireAdminToken_ で保護。シートへの書き込み・カレンダー変更・通知・PII の外部送出は一切しない。
+ * 台帳が未設定（LEDGER_SHEET_ID なし）なら空配列を返す（作話しない）。
+ * 列は ledgerUpsert_ と対応:
+ *   col0 key / col1 type / col2 name / col3 firstVisit / col4 count / col5 lastVisit / col6 note
+ * 連絡先は key から復元する（台帳には正規化済み電話＝数字のみが入る。ハイフン付きの整形はフロントで行う）。
+ * 各顧客に台帳キー（col0）を hashKey_ で SHA-256 化した opaque な突合トークンを追加フィールド key として返す
+ * ＝顧客詳細の来店履歴で adminListConfirmed_ の突合に使う。生の識別子は突合トークンとして出さない
+ * （PII 最小化・既存フィールド・挙動は不変の純追加）。
+ */
+function adminListCustomers_() {
+  var sh = ledgerSheet_();
+  if (!sh) return { ok: true, customers: [] };
+  var values = sh.getDataRange().getValues();
+  var list = [];
+  for (var r = 1; r < values.length; r++) {
+    var row = values[r];
+    var key = String(row[0] || '');
+    if (!key) continue;
+    var type = String(row[1] || '');
+    var count = Number(row[4] || 0);
+    var c = {
+      name: String(row[2] || ''),
+      type: type,
+      count: count,
+      firstVisit: ledgerDateStr_(row[3]),
+      lastVisit: ledgerDateStr_(row[5]),
+      tag: count <= 1 ? '新規' : '常連',
+      // 来店履歴の突合トークン（adminListConfirmed_ の params.key）。台帳キーを hashKey_ で SHA-256 化した
+      // opaque 値＝生の識別子（lineUserId・電話・メール）は突合トークンとして出さない（PII 最小化）。
+      // クライアントは中身を解釈せずそのまま echo する（管理ゲート内・HTTPS・no-store）。
+      key: hashKey_(key),
+    };
+    // 連絡先は key（type:value）の value 部から復元する。整形前の電話は台帳に無いので正規化数字を使う。
+    var idx = key.indexOf(':');
+    var val = idx >= 0 ? key.slice(idx + 1) : '';
+    if (type === 'phone') c.phone = val;       // 正規化（数字のみ）。表示整形はフロント
+    else if (type === 'email') c.email = val;  // 小文字
+    // line 型は連絡先を持たない（phone/email なし）
+    list.push(c);
+  }
+  // 最終来店日の降順（yyyy-MM-dd の文字列比較で足りる。空は末尾）。
+  list.sort(function (a, b) {
+    return (b.lastVisit || '').localeCompare(a.lastVisit || '');
+  });
+  return { ok: true, customers: list };
+}
+
+/**
+ * 台帳の日付セルは Sheets により Date 型で返ることがある（ledgerUpsert_ は yyyy-MM-dd 文字列で
+ * 書くが、Sheets が日付として解釈し直すため）。String(Date) の醜い表記を避け yyyy-MM-dd に正規化する。
+ */
+function ledgerDateStr_(v) {
+  if (v instanceof Date) return fmt_(v, 'yyyy-MM-dd');
+  return String(v || '');
+}
+
+// ============================================================
+// 確定予約の集約（P2・read-only）
+// ============================================================
+
+// 来店履歴の遡り期間（月）。既定 12ヶ月・後で調整可（定数）。窓が広くなり過ぎれば要見直し。
+var CONFIRMED_HISTORY_MONTHS = 12;
+
+/**
+ * 顧客突合トークン。台帳キー（line:/phone:/email:）を SHA-256 の hex 文字列にして返す。
+ * 生の識別子（lineUserId・電話・メール）をクライアントへ突合トークンとして出さないための一方向化
+ * （PII 最小化・本人判断で採用）。対象は管理ゲート内の owner 自身のデータで脅威モデルが小さいため、
+ * 素の SHA-256 hex で十分（salt/HMAC は付けない）。空文字は空文字のまま返す。
+ * ※adminListCustomers_（返す key）と adminListConfirmed_（イベント側の突合）で**同一関数**を使うこと。
+ */
+function hashKey_(rawKey) {
+  if (!rawKey) return '';
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, rawKey, Utilities.Charset.UTF_8);
+  var hex = '';
+  for (var i = 0; i < bytes.length; i++) {
+    hex += ('0' + (bytes[i] & 0xff).toString(16)).slice(-2);
+  }
+  return hex;
+}
+
+/**
+ * 確定予約（status===CONFIRMED のカレンダーイベント）を read-only で集約する（P2 顧客管理／ハブ用）。
+ * requireAdminToken_ で保護。シート書き込み・カレンダー変更・通知・外部 fetch は一切しない
+ * （CalendarApp.getEvents と MENU 参照のみ）。2用途を引数で分岐し payload と計算コストを最小化する:
+ *   - params.scope==='today'（ハブ用）: 当日の確定件数だけを返す（{ok:true, count:N}）。顧客 PII は載せない軽量応答。
+ *   - params.key（顧客詳細用・来店履歴）: 指定顧客キーに一致する確定イベントだけを、過去
+ *     CONFIRMED_HISTORY_MONTHS ヶ月〜今後の窓で読み、[{date,time,menuName}] を新しい順で返す
+ *     （{ok:true, visits:[...]}）。他人の来店は混ぜない（PII 最小化）。
+ * params.key は adminListCustomers_ が返す opaque な突合トークン（台帳キーの SHA-256 hex）で、各イベントの
+ * hashKey_(ledgerKey_(getEventProps_(ev))) と突合する（生の識別子は突合トークンとして出さない・adminListPending_ を雛形にした確定版）。
+ */
+function adminListConfirmed_(params) {
+  params = params || {};
+  var cal = CalendarApp.getCalendarById(prop_('CALENDAR_ID'));
+
+  // 用途1: 今日の確定件数（ハブ用・PII なし・当日枠のみ）。件数（数値）だけ返す。
+  if (params.scope === 'today') {
+    var dayStart = startOfDay_(new Date());
+    var dayEnd = addDays_(dayStart, 1);
+    var count = cal.getEvents(dayStart, dayEnd).filter(function (ev) {
+      return getEventProp_(ev, 'status') === STATUS.CONFIRMED;
+    }).length;
+    return { ok: true, count: count };
+  }
+
+  // 用途2: 顧客詳細の来店履歴（指定キーに一致する確定イベントのみ）。
+  var key = params.key || '';
+  if (!key) return { ok: true, visits: [] };
+  var from = startOfDay_(new Date());
+  from.setMonth(from.getMonth() - CONFIRMED_HISTORY_MONTHS); // 過去 N ヶ月まで遡る
+  var to = addDays_(startOfDay_(new Date()), RULES.maxAdvanceDays + 1); // 今後の確定予約も含める
+  var visits = cal.getEvents(from, to).filter(function (ev) {
+    if (getEventProp_(ev, 'status') !== STATUS.CONFIRMED) return false;
+    // イベント側の台帳キーも同じ hashKey_ でハッシュ化してから突合（params.key はハッシュ済みトークン）。
+    return hashKey_(ledgerKey_(getEventProps_(ev))) === key; // その顧客の来店だけ（他人の履歴を混ぜない）
+  }).map(function (ev) {
+    var p = getEventProps_(ev);
+    var menu = MENU[p.menuId];
+    return {
+      date: fmt_(ev.getStartTime(), 'yyyy-MM-dd'),
+      time: fmt_(ev.getStartTime(), 'HH:mm'),
+      menuName: menu ? menu.name : p.menuId,
+    };
+  });
+  // 新しい順（yyyy-MM-dd + HH:mm の文字列を連結した降順で足りる）。
+  visits.sort(function (a, b) {
+    return (b.date + b.time).localeCompare(a.date + a.time);
+  });
+  return { ok: true, visits: visits };
 }
 
 // ============================================================
@@ -989,7 +1319,8 @@ function ownerLineFallbackNote_() {
 function requireDeployToken_(body, fn) {
   var expected = prop_('DEPLOY_NOTIFY_TOKEN');
   var given = (body && body.deployToken) || '';
-  if (!expected || given !== expected) return { ok: false, error: 'forbidden' };
+  // 秘密の直接 === 比較を避け、定数時間比較（double-HMAC）に統一する。
+  if (!expected || !given || !constEq_(expected, given)) return { ok: false, error: 'forbidden' };
   return fn();
 }
 
@@ -1166,6 +1497,38 @@ function maskId_(s) {
 }
 
 /**
+ * 監査ログ基盤。顧客台帳ブックの「監査ログ」シートへ1行追記する（logPush_ と同じ流儀）。
+ * 顧客PII（全顧客閲覧・伏字解除・カルテ・代理予約）に関わる操作の証跡を残すための土台。
+ * 列: 日時 / 操作者 / 操作 / 対象(マスク) / 結果。
+ *   - operator: 操作者識別子。**生トークンは絶対に渡さない**。呼び出し側で tokenFp_()（HMAC指紋）や
+ *               'via:line' 等のラベルに変換してから渡す。
+ *   - op: 操作種別（view | unmask | karteView | karteEdit | proxyBook）。
+ *   - target: 顧客キー等。maskId_ でさらに末尾4桁のみに落として記録する。
+ *   - result: ok | ng | forbidden 等の結果。
+ * ※段階1では関数の新設のみ。実際の呼び出しは顧客系・代理予約を載せる P4/P5 で配線する。
+ */
+function auditPush_(operator, op, target, result) {
+  try {
+    var id = prop_('LEDGER_SHEET_ID');
+    if (!id) return;
+    var ss = SpreadsheetApp.openById(id);
+    var sh = ss.getSheetByName('監査ログ');
+    if (!sh) {
+      sh = ss.insertSheet('監査ログ');
+      sh.appendRow(['日時', '操作者', '操作', '対象(マスク)', '結果']);
+    }
+    sh.appendRow([fmt_(new Date(), 'yyyy-MM-dd HH:mm:ss'), String(operator || ''), String(op || ''), maskId_(target), String(result || '')]);
+  } catch (err) { console.error('auditPush_ failed: ' + err); }
+}
+
+/**
+ * 監査ログの操作者識別子に使う「トークン指紋」。生トークンを残さないため、
+ * HMAC（sign_）に通した非可逆・安定なダイジェストの先頭のみを返す。
+ * 同一トークンなら同一指紋になるので、操作者の突き合わせには十分機能する。
+ */
+function tokenFp_(t) { return t ? 'fp:' + sign_(String(t)).slice(0, 12) : ''; }
+
+/**
  * LINE Login（Web OAuth）の認可コードを userId・表示名に交換する。
  * フロントが authorize で得た code を渡してくる（POST {action:'lineLogin', code, redirectUri}）。
  *  1) code → token 交換（要 channel id/secret。秘密情報は Script Properties から取得しコードに保持しない）
@@ -1321,12 +1684,14 @@ function sendReminders() {
     var props = getEventProps_(ev);
     var menu = MENU[props.menuId] || { name: props.menuId };
     var eff = { durationMin: displayDurationMin_(props, ev), price: Number(props.price || 0) };
-    notifyCustomerProps_(props,
-      '【ご予約前日のお知らせ】\n明日のご予約です。お気をつけてお越しください。\n' +
-      bookingSummary_(menu, ev.getStartTime(), eff, props.isFirstTime === 'true') +
-      '\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(props.token),
-      'reminder');
-    ev.setTag('reminded', 'true');
+    if (notifyOn_('reminder')) {
+      notifyCustomerProps_(props,
+        '【ご予約前日のお知らせ】\n明日のご予約です。お気をつけてお越しください。\n' +
+        bookingSummary_(menu, ev.getStartTime(), eff, props.isFirstTime === 'true') +
+        '\n\n▼ ご予約の確認・変更・キャンセル\n' + manageUrl_(props.token),
+        'reminder');
+      ev.setTag('reminded', 'true'); // 送ったときだけ処理済みに（OFF→ON再開が直感どおりになる）
+    }
   });
 }
 
@@ -1343,11 +1708,13 @@ function sendFollowUps() {
     if (getEventProp_(ev, 'status') !== STATUS.CONFIRMED) return;
     if (getEventProp_(ev, 'followedUp') === 'true') return;
     var props = getEventProps_(ev);
-    notifyCustomerProps_(props,
-      '【ご来店ありがとうございました】\n先日はサロン和笑〜Violane〜をご利用いただき、ありがとうございました。\n' +
-      'お身体の調子はいかがでしょうか。またのご来店を心よりお待ちしております。',
-      'followup');
-    ev.setTag('followedUp', 'true');
+    if (notifyOn_('followup')) {
+      notifyCustomerProps_(props,
+        '【ご来店ありがとうございました】\n先日はサロン和笑〜Violane〜をご利用いただき、ありがとうございました。\n' +
+        'お身体の調子はいかがでしょうか。またのご来店を心よりお待ちしております。',
+        'followup');
+      ev.setTag('followedUp', 'true'); // 送ったときだけ処理済みに（OFF→ON再開が直感どおりになる）
+    }
   });
 }
 
@@ -1382,7 +1749,7 @@ function sendOwnerDailyDigest() {
   lines.push(pending.length ? pending.join('\n') : '・未確定の仮予約はありません');
   // 未確定があるときだけ、承認/辞退に進める予約管理画面へ誘導する
   if (pending.length) lines.push('\n▼ 承認/辞退はこちら（予約管理画面）\n' + adminUrl_());
-  notifyOwner_(lines.join('\n'));
+  if (notifyOn_('ownerDigest')) notifyOwner_(lines.join('\n'));
 }
 
 // ---- 無料枠（Messaging API push）の監視 ----
@@ -1622,8 +1989,11 @@ function checkQuota() {
   if (used < limit * 0.8) return;
   var ym = fmt_(new Date(), 'yyyy-MM');
   if (prop_('QUOTA_WARNED_YYYYMM') === ym) return; // 今月は警告済み
-  notifyOwner_('【LINE無料枠の警告】\n今月の送信数が ' + used + '/' + limit + ' 通に達しました（80%超）。\n上限を超えると追加メッセージは送信されません。');
-  PropertiesService.getScriptProperties().setProperty('QUOTA_WARNED_YYYYMM', ym);
+  // 警告送信と月フラグをまとめてゲート＝送ったときだけ警告済みにする（OFF中は月フラグを立てず、ON復帰で再警告できる）。
+  if (notifyOn_('ownerQuotaWarn')) {
+    notifyOwner_('【LINE無料枠の警告】\n今月の送信数が ' + used + '/' + limit + ' 通に達しました（80%超）。\n上限を超えると追加メッセージは送信されません。');
+    PropertiesService.getScriptProperties().setProperty('QUOTA_WARNED_YYYYMM', ym);
+  }
 }
 
 // ============================================================
@@ -1680,6 +2050,17 @@ function readSlotConfig_() {
   try { return JSON.parse(prop_('SLOT_CONFIG') || '{}'); } catch (_) { return {}; }
 }
 
+/** 通知トグルの設定ストア（専用キー NOTIFY_CONFIG・SLOT_CONFIG とは別枠）。失敗時 {}。 */
+function readNotifyConfig_() {
+  try { return JSON.parse(prop_('NOTIFY_CONFIG') || '{}'); } catch (_) { return {}; }
+}
+
+/** 任意通知の送信可否。未設定/true は送る・明示 false のみ抑止（既定ON＝未設定時は現行挙動を厳密維持）。 */
+function notifyOn_(key) {
+  var c = readNotifyConfig_();
+  return c[key] !== false;
+}
+
 function manageUrl_(token) {
   var base = prop_('FRONT_BASE_URL').replace(/\/$/, '');
   return base + '/reserve/manage/?token=' + token;
@@ -1730,7 +2111,26 @@ function sign_(data) {
   var raw = Utilities.computeHmacSha256Signature(data, prop_('HMAC_SECRET'));
   return Utilities.base64EncodeWebSafe(raw);
 }
-function verifySig_(data, sig) { return sig && sign_(data) === sig; }
+
+/**
+ * 定数時間比較（double-HMAC）。
+ * 生の秘密同士を `===` / `indexOf` で比べると「先頭から何文字一致したか」で処理時間が変わり、
+ * タイミング攻撃で秘密を1文字ずつ推測される足がかりになる。そこで双方を一旦 sign_()
+ * （HMAC-SHA256 → 固定長 base64url）に通し、得られた同一長ダイジェスト同士をバイト単位で
+ * 差分積算して比較する（一致・不一致にかかわらず全長を走査＝早期 return しない）。
+ * sign_ の出力は攻撃者に予測不能なため、比較の分岐時間から元の秘密は復元できない。
+ */
+function constEq_(a, b) {
+  var ha = sign_(String(a == null ? '' : a));
+  var hb = sign_(String(b == null ? '' : b));
+  if (ha.length !== hb.length) return false; // sign_ は常に同一長（32byte → base64url 43文字）
+  var diff = 0;
+  for (var i = 0; i < ha.length; i++) diff |= (ha.charCodeAt(i) ^ hb.charCodeAt(i));
+  return diff === 0;
+}
+
+// capability 署名の検証。期待署名 sign_(data) と提示署名 sig を定数時間（double-HMAC）で比較する。
+function verifySig_(data, sig) { return !!sig && constEq_(sign_(data), sig); }
 
 // 日付ユーティリティ（スクリプトTZ=Asia/Tokyo 前提）
 function fmt_(d, pat) { return Utilities.formatDate(d, TZ, pat); }

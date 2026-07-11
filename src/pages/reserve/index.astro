@@ -383,8 +383,9 @@ const grouped = groupOrder.map((g) => ({
       // 共有部品（src/lib）を import するため bundled module 化。サーバ値は上の JSON から読む。
       // define:vars は import 不可（inline classic 化する）ため使わない。
       import { showSubmitOverlay, hideSubmitOverlay } from '../../lib/submit-overlay.js';
-      import { heatMark } from '../../lib/heatmap.js';
       import { openTimeDialog as openTimeDlg, renderTimeButtons } from '../../lib/time-dialog.js';
+      import { fetchAvailabilityRaw, computeDaysForSlot } from '../../lib/availability.js';
+      import { renderAvailabilityCalendar } from '../../lib/datetime-picker.js';
 
       const { RESERVE_API, BOOKING_RULES, LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_REDIRECT, LIFF_ID, tel } = JSON.parse(document.getElementById('reserve-config').textContent);
 
@@ -934,10 +935,7 @@ const grouped = groupOrder.map((g) => ({
         if (!RESERVE_API) return; // 未設定は loadAvailability 側で案内
         rawFetching = true;
         try {
-          const res = await fetch(`${RESERVE_API}?action=availabilityRaw`);
-          const data = await res.json();
-          if (!data.ok) throw new Error(data.error || 'error');
-          state.raw = { days: data.days || [], holidays: data.holidays || {} };
+          state.raw = await fetchAvailabilityRaw(RESERVE_API);
         } catch (e) {
           state.raw = null; // 失敗は次回の loadAvailability でリトライ余地を残す
         } finally {
@@ -948,25 +946,13 @@ const grouped = groupOrder.map((g) => ({
       }
 
       // 先読み素材(state.raw)から slotMin を当てはめて state.days を導出する（fetch なし）。
-      // 各日の candidate 開始 t について [tMin, tMin+slotMin] が busy レンジと重ならなければ空き。
+      // 計算本体は lib/availability.js の computeDaysForSlot（純粋関数）。ここは state への反映のみ。
+      // raw 未取得時は state.holidays を触らない（従来挙動を維持）。
       function buildDaysForSlot_(slotMin) {
-        const raw = state.raw;
-        if (!raw) { state.days = []; return; }
-        const days = [];
-        for (const d of raw.days) {
-          const times = [];
-          for (const hhmm of d.candidates) {
-            const [hh, mm] = hhmm.split(':').map(Number);
-            const tStart = hh * 60 + mm;
-            const tEnd = tStart + slotMin;
-            // 重なり判定: tStart < bEnd && bStart < tEnd（半開区間）
-            const clash = d.busy.some(([bStart, bEnd]) => tStart < bEnd && bStart < tEnd);
-            if (!clash) times.push(hhmm);
-          }
-          if (times.length) days.push({ date: d.date, times });
-        }
+        if (!state.raw) { state.days = []; return; }
+        const { days, holidays } = computeDaysForSlot(state.raw, slotMin);
         state.days = days;
-        state.holidays = raw.holidays || {}; // { 'yyyy-MM-dd': '祝日名' }（カレンダー表示用）
+        state.holidays = holidays; // { 'yyyy-MM-dd': '祝日名' }（カレンダー表示用）
       }
 
       // 選択中メニューの slotMin でクライアント計算し日付を描画する（先読み前提・追加 fetch なし）。
@@ -1037,57 +1023,25 @@ const grouped = groupOrder.map((g) => ({
         renderCalendar();
       }
 
-      function ymIndex(ymd) { const [y, m] = ymd.split('-').map(Number); return y * 12 + (m - 1); }
-      function stepMonth(c, delta) { const d = new Date(c.y, c.m + delta, 1); return { y: d.getFullYear(), m: d.getMonth() }; }
-
+      // カレンダー描画は共有部品 renderAvailabilityCalendar に委譲（挙動不変の抽出）。
+      // 生成 HTML・クラス・前月/次月/日付クリックの配線は従来と同一。ここは state 反映と
+      // ②→③ ステップ遷移などお客様フロー固有の副作用（onDayClick）だけを担う。
       function renderCalendar() {
-        const dl = $('#dateList');
-        // 各日の空き枠数マップ（date -> times.length）。ヒートマップの濃淡・記号に使う。
-        const countByDate = new Map(state.days.map((d) => [d.date, d.times.length]));
-        const { y, m } = calMonth;
-        const firstDow = new Date(y, m, 1).getDay();
-        const daysInMonth = new Date(y, m + 1, 0).getDate();
-        const cur = y * 12 + m;
-        const canPrev = cur > ymIndex(state.calMin);
-        const canNext = cur < ymIndex(state.calMax);
-        let html =
-          '<div class="cal-head">' +
-          `<button type="button" class="cal-nav" id="calPrev" ${canPrev ? '' : 'disabled'} aria-label="前の月">‹</button>` +
-          `<span class="cal-title">${y}年${m + 1}月</span>` +
-          `<button type="button" class="cal-nav" id="calNext" ${canNext ? '' : 'disabled'} aria-label="次の月">›</button>` +
-          '</div><div class="cal-grid">' +
-          WD.map((w, i) => `<span class="cal-wd${i === 0 ? ' sun' : ''}${i === 6 ? ' sat' : ''}">${w}</span>`).join('');
-        for (let i = 0; i < firstDow; i++) html += '<span class="cal-cell empty"></span>';
-        for (let day = 1; day <= daysInMonth; day++) {
-          const ymd = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-          const dow = new Date(y, m, day).getDay();
-          const dowCls = dow === 0 ? ' sun' : dow === 6 ? ' sat' : '';
-          if (state.availSet.has(ymd)) {
-            const active = state.date === ymd ? ' active' : '';
-            // 空き枠数で濃淡＋記号を出し分け（◎=空き多い / ○=残りわずか）
-            const cnt = countByDate.get(ymd) || 0;
-            // 共有ロジック heatMark で ◎/○ と heat-hi/heat-mid を得る（HEAT_HI_MIN は引数で渡す）
-            const { mark, cls } = heatMark(cnt, { hiMin: HEAT_HI_MIN });
-            const heatCls = ' ' + cls;
-            html += `<button type="button" class="cal-cell cal-day avail${heatCls}${active}${dowCls}" data-date="${ymd}" title="空き ${cnt} 枠">${day}<span class="heat-mark" aria-hidden="true">${mark}</span></button>`;
-          } else {
-            const hol = state.holidays[ymd];
-            if (hol) {
-              html += `<span class="cal-cell cal-day disabled holiday${dowCls}" title="${esc(hol)}">${day}<small class="hol-name">${esc(hol)}</small></span>`;
-            } else {
-              html += `<span class="cal-cell cal-day disabled${dowCls}">${day}<span class="cal-x" aria-hidden="true">✕</span></span>`;
-            }
-          }
-        }
-        html += '</div>';
-        html += '<p class="cal-legend"><span>◎ 空きが多い</span><span>○ 残りわずか</span><span>✕ お休み</span></p>';
-        dl.innerHTML = html;
-        const prev = $('#calPrev'), next = $('#calNext');
-        if (prev) prev.onclick = () => { calMonth = stepMonth(calMonth, -1); renderCalendar(); };
-        if (next) next.onclick = () => { calMonth = stepMonth(calMonth, 1); renderCalendar(); };
-        dl.querySelectorAll('.cal-day.avail').forEach((b) => {
-          b.addEventListener('click', () => {
-            state.date = b.dataset.date;
+        renderAvailabilityCalendar({
+          mount: $('#dateList'),
+          days: state.days,
+          holidays: state.holidays,
+          availSet: state.availSet,
+          calMin: state.calMin,
+          calMax: state.calMax,
+          calMonth,
+          selectedDate: state.date,
+          weekdays: WD,
+          heatHiMin: HEAT_HI_MIN,
+          esc,
+          onNav: (nm) => { calMonth = nm; renderCalendar(); },
+          onDayClick: (ymd) => {
+            state.date = ymd;
             state.time = null;
             // 時刻を選び直すまで③へは進めない（②に留め、次へを無効化）
             state.maxReached = 2;
@@ -1095,7 +1049,7 @@ const grouped = groupOrder.map((g) => ({
             updateSummary();
             refreshNavBars();
             openTimeDialog();
-          });
+          },
         });
       }
 

@@ -1,0 +1,573 @@
+---
+// 予約管理ページ（/reserve/admin/reservations）。P2 IA（ADR-0001 決定1）の「予約管理」区分。
+// 承認待ち一覧（admin.astro から移設・listPending/adminDecision＝既存API）と、
+// 代理登録フォーム（mock-3-agent.html 準拠）を1画面に載せる。
+//
+// 代理登録は apiPost('adminCreateBooking', ...)（GAS adminCreateBooking_・確定登録）に配線済み。
+// 生成時点で確定（confirm）＆通常客と同じ受付制約（bypassWindow なし）。控えはメール入力時のみ顧客へ、
+// お店へは常に通知する。※実 GAS 往復の疎通確認は clasp push（本人GO）後に行う。
+//
+// 管理ページ本体はオンデマンド（prerender:false リテラル）。static 配信されると middleware の
+// サーバゲートを通らないため、必ずリテラル false にして Worker を通す（ADR-0002）。
+// URL は Cookie Path=/reserve/admin 制約により /reserve/admin/ 配下固定（ADR-0001 決定1）。
+export const prerender = false;
+
+import { ENV_LABEL, RESERVE_API } from '../../../data/config.js';
+import { MENU, formatYen } from '../../../data/menu.js';
+import EnvBadge from '../../../components/EnvBadge.astro';
+import SubmitOverlay from '../../../components/SubmitOverlay.astro';
+import AdminHeader from '../../../components/AdminHeader.astro';
+import TimeDialog from '../../../components/TimeDialog.astro';
+import '../../../styles/admin.css';
+import '../../../styles/admin-cabinet.css';
+import '../../../styles/reserve-calendar.css';
+
+const _base = import.meta.env.BASE_URL;
+const base = _base.endsWith('/') ? _base : _base + '/';
+const salonName = 'サロン和笑〜Violane〜';
+const tel = '090-9095-6034';
+const pageTitle = `${ENV_LABEL}予約管理 | ${salonName}`;
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <EnvBadge />
+    <SubmitOverlay message="送信しています…" subtext="画面をそのままでお待ちください" />
+    <AdminHeader base={base} salonName={salonName} title="予約管理" back="/reserve/admin" backLabel="管理トップ" />
+    <!-- 開始時刻を選ぶポップアップ（代理登録の日時ピッカーが使う）。共有部品 TimeDialog（お客様フローと共用） -->
+    <TimeDialog />
+    <!-- 顧客一覧から選ぶモーダル（TimeDialog と同じネイティブ <dialog> 様式）。
+         お名前で絞り込み→行タップで氏名・電話・メールを autofill。一覧では電話は常にマスク（実値は並べない）。 -->
+    <dialog id="custDialog" class="cust-dialog" aria-label="顧客一覧から選ぶ">
+      <div class="cust-dialog-head">
+        <strong>顧客一覧から選ぶ</strong>
+        <button type="button" class="hours-close" id="custDialogClose" aria-label="閉じる">×</button>
+      </div>
+      <div class="cust-dialog-search">
+        <input class="tin" type="search" id="custSearch" placeholder="お名前で絞り込み" autocomplete="off" />
+        <p class="cust-dialog-note"><b>●</b> 一覧では電話は常にマスク（のぞき見対策）</p>
+      </div>
+      <div id="custDialogBody" class="cust-dialog-body"></div>
+    </dialog>
+
+    <main class="wrap">
+      <!-- 承認待ち一覧（admin.astro から移設・挙動不変） -->
+      <section class="sec" id="sec-pending">
+        <div class="sec-head">
+          <h2 class="section-title">承認待ちの仮予約</h2>
+          <button type="button" class="reserve-btn ghost sm" id="reloadPending">再読み込み</button>
+        </div>
+        <div id="pendingArea"><div class="status loading"><span class="spinner" aria-hidden="true"></span><span>読み込んでいます…</span></div></div>
+      </section>
+
+      <!-- 代理登録（電話・来店で受けた予約を代わりに"確定"で入れる） -->
+      <section class="sec" id="sec-agent">
+        <h2 class="section-title">代理で予約を入れる</h2>
+        <p class="form-lead">電話や来店で受けた予約を、この1画面でそのまま登録します。</p>
+
+        <div class="fcard">
+          <div class="fsec">
+            <div class="fsec__lbl">メニュー <span class="req">必須</span></div>
+            <div class="menu-chips" id="agentMenuChips">
+              {MENU.map((m) => (
+                <button type="button" class="mchip" data-id={m.id} data-name={m.name} data-duration={m.durationMin} data-slot={m.slotMin}>
+                  {m.name}<span class="price">{formatYen(m.price)} / {m.durationMin}分</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div class="fsec">
+            <div class="fsec__lbl">日時 <span class="req">必須</span></div>
+            <!-- お客様フローと同じ空き枠駆動ピッカー（共有部品 createDateTimePicker）。
+                 メニューを選ぶと slotMin で空き日を算出し、日付タップ→時刻ポップアップで開始時刻を選ぶ。 -->
+            <p class="slot-status" id="agentSlotStatus">メニューを選ぶと空き状況を表示します。</p>
+            <div id="agentDateList" class="date-list"></div>
+            <div class="dt-chip" id="agentDtChip" hidden></div>
+          </div>
+
+          <div class="fsec">
+            <div class="fsec__lbl">お名前 <span class="req">必須</span>
+              <!-- 顧客台帳から選んで氏名・電話・メールを autofill する（一覧では電話は常にマスク） -->
+              <button type="button" class="pick-btn" id="pickCustomerBtn">顧客一覧から選ぶ</button>
+            </div>
+            <input class="tin" type="text" id="agentName" autocomplete="off" />
+            <!-- 選択中の表示（○○さんを選択中／解除）。解除で手入力に戻す -->
+            <div class="picked-chip" id="pickedChip" hidden></div>
+          </div>
+
+          <div class="fsec">
+            <div class="fsec__lbl">電話番号 <span class="req">必須</span></div>
+            <input class="tin tel" type="tel" id="agentPhone" autocomplete="off" inputmode="tel" />
+          </div>
+
+          <div class="fsec">
+            <div class="fsec__lbl">メール <span class="opt">任意</span></div>
+            <input class="tin" type="email" id="agentEmail" autocomplete="off" placeholder="控えメールが要るときだけ" />
+          </div>
+        </div>
+
+        <div class="submit-wrap">
+          <button class="submit" id="agentSubmit" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+            この内容で予約を入れる
+          </button>
+          <p class="submit-note">確定で登録します。メールを入れた場合はお客様へ確定控えを送信し、お店へは必ず通知します。</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>{salonName}</p>
+      <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
+    </footer>
+
+    <div id="toast"></div>
+
+    <!-- 日時ピッカーが availabilityRaw を取りに行く公開GET先（お客様ページと同一の PUBLIC_RESERVE_API・
+         GAS /exec の公開 doGet。秘密ではない）。管理 API（adminCreateBooking 等）は従来どおり Worker 経由。 -->
+    <script type="application/json" id="reserve-config" set:html={JSON.stringify({ RESERVE_API })}></script>
+    <script>
+      // 承認待ち＝既存 API（listPending/adminDecision）。代理登録＝adminCreateBooking（確定登録）。
+      // 共有部品（admin-api.js / admin-ui.js）を再利用し重複実装しない。
+      // 日時入力はお客様フローと同じ空き枠駆動ピッカー（datetime-picker.js / availability.js）を再利用。
+      import { createAdminApi } from '../../../lib/admin-api.js';
+      import { esc, createToast, loadingHtml, emptyHtml } from '../../../lib/admin-ui.js';
+      import { createDateTimePicker } from '../../../lib/datetime-picker.js';
+      import { fetchAvailabilityRaw, computeDaysForSlot } from '../../../lib/availability.js';
+
+      const el = (id) => document.getElementById(id);
+      const { apiPost, handleForbidden } = createAdminApi();
+      const toast = createToast(el);
+      const { RESERVE_API } = JSON.parse(document.getElementById('reserve-config').textContent);
+
+      // ============================================================
+      // 承認待ち一覧（admin.astro から一字一句移設・挙動不変）
+      // ============================================================
+      async function loadPending() {
+        el('pendingArea').innerHTML = loadingHtml();
+        let res;
+        try {
+          res = await apiPost('listPending', null, { silent: true });
+        } catch (_) {
+          el('pendingArea').innerHTML = emptyHtml('通信に失敗しました。時間をおいて再度お試しください。');
+          return;
+        }
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        renderPending(res);
+      }
+
+      function renderPending(res) {
+        const area = el('pendingArea');
+        if (!res || !res.ok) { area.innerHTML = emptyHtml('取得に失敗しました。'); return; }
+        const list = res.pending || [];
+        if (!list.length) { area.innerHTML = emptyHtml('承認待ちの仮予約はありません。'); return; }
+        area.innerHTML = list.map((p) => {
+          const badges = (p.isFirstTime ? '<span class="badge first">新規</span>' : '')
+            + (p.gender === 'male' ? '<span class="badge male">男性</span>' : '');
+          const contact = [p.phone, p.email].filter(Boolean).map(esc).join(' / ');
+          return '<div class="pcard" data-token="' + esc(p.token) + '">'
+            + '<div class="pcard-title">' + esc(p.name) + ' 様' + badges + '</div>'
+            + '<dl class="detail-dl">'
+            + '<dt>メニュー</dt><dd>' + esc(p.menuName) + '</dd>'
+            + '<dt>日時</dt><dd>' + esc(p.date) + ' ' + esc(p.time) + '</dd>'
+            + (p.gender === 'male' ? '<dt>紹介者</dt><dd>' + esc(p.referrer || '（未記入）') + '</dd>' : '')
+            + (contact ? '<dt>連絡先</dt><dd>' + contact + '</dd>' : '')
+            + (p.note ? '<dt>ご要望</dt><dd>' + esc(p.note) + '</dd>' : '')
+            + '</dl>'
+            + '<textarea class="cust-msg" rows="2" placeholder="お客様へのメッセージ（任意・承認/辞退の通知に添えます）"></textarea>'
+            + '<div class="actions row">'
+            + '<button class="reserve-btn sm" type="button" data-act="approve">承認して確定</button>'
+            + '<button class="reserve-btn sm decline" type="button" data-act="decline">辞退</button>'
+            + '</div></div>';
+        }).join('');
+      }
+
+      async function decide(token, approve, btn) {
+        const card = btn.closest('.pcard');
+        const msgEl = card.querySelector('.cust-msg');
+        const message = msgEl ? msgEl.value : '';
+        const btns = card.querySelectorAll('button');
+        btns.forEach((b) => { b.disabled = true; });
+        let res;
+        try {
+          res = await apiPost('adminDecision', { token, approve, message });
+        } catch (_) {
+          toast('通信エラー。時間をおいて再度お試しください。');
+          btns.forEach((b) => { b.disabled = false; });
+          return;
+        }
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        if (res && res.ok) {
+          toast(approve ? '確定しました（お客様へ通知済み）' : '辞退しました（お客様へ通知済み）');
+          card.parentNode.removeChild(card);
+          if (!el('pendingArea').querySelector('.pcard')) {
+            el('pendingArea').innerHTML = emptyHtml('承認待ちの仮予約はありません。');
+          }
+        } else {
+          toast('失敗: ' + ((res && res.error) || '不明なエラー'));
+          btns.forEach((b) => { b.disabled = false; });
+        }
+      }
+
+      el('pendingArea').addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-act]');
+        if (!btn) return;
+        const token = btn.closest('.pcard').getAttribute('data-token');
+        const approve = btn.getAttribute('data-act') === 'approve';
+        if (!approve && !confirm('この仮予約を辞退します。お客様へ通知されます。よろしいですか？')) return;
+        decide(token, approve, btn);
+      });
+      el('reloadPending').addEventListener('click', loadPending);
+
+      // ============================================================
+      // 代理登録（確定登録）
+      //   メニュー選択（トグル）／日時プレビュー／ペイロード組立＋クライアント検証／
+      //   apiPost('adminCreateBooking', ...) 実送信までを実装。GAS 側で確定・受付制約検証・通知を行う。
+      // ============================================================
+      let selectedMenu = null; // { id, name, duration, slotMin }
+      let rawCache = null;     // availabilityRaw の先読みキャッシュ（menuId 非依存・1回だけ取得）
+      let pickedKey = null;    // 顧客一覧から選んだ顧客の opaque key（手入力＝null）。送信時に pickedKey として echo
+      const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
+
+      // 空き枠駆動の日時ピッカー（お客様フローと同じ共有部品 createDateTimePicker）。
+      // 器＝#agentDateList（カレンダー）＋ <TimeDialog />（時刻ポップアップ）。日付→時刻を選ぶと
+      // onSelect で確定プレビュー（dt-chip）を更新する。返す値は 'YYYY-MM-DD' / 'HH:MM'。
+      const picker = createDateTimePicker({
+        dateListEl: el('agentDateList'),
+        statusEl: el('agentSlotStatus'),
+        esc,
+        fmtDateLabel: (ymd) => {
+          const dt = new Date(ymd + 'T00:00');
+          return isNaN(dt.getTime()) ? ymd : ((dt.getMonth() + 1) + '/' + dt.getDate() + '（' + WEEK[dt.getDay()] + '）');
+        },
+        statusText: {
+          initial: 'メニューを選ぶと空き状況を表示します。',
+          ready: 'ご希望の日付を選んでください（● 印が空きありの日）。',
+          empty: 'この期間はネット予約の空きがありません（受付時間外・休業日を除く）。',
+        },
+        onDateChange: updateDtChip,
+        onSelect: updateDtChip,
+      });
+
+      el('agentMenuChips').addEventListener('click', (e) => {
+        const btn = e.target.closest('.mchip');
+        if (!btn) return;
+        el('agentMenuChips').querySelectorAll('.mchip').forEach((b) => b.classList.remove('on'));
+        btn.classList.add('on');
+        selectedMenu = {
+          id: btn.getAttribute('data-id'),
+          name: btn.getAttribute('data-name'),
+          duration: Number(btn.getAttribute('data-duration')),
+          slotMin: Number(btn.getAttribute('data-slot')),
+        };
+        updateDtChip();
+        loadAgentAvailability();
+      });
+
+      // メニューの slotMin で空き日時を算出しピッカーへ流す。availabilityRaw は menuId 非依存の
+      // 公開 GET（お客様ページと同一の PUBLIC_RESERVE_API 直接取得）で1回だけ取得しキャッシュする。
+      async function loadAgentAvailability() {
+        if (!selectedMenu) return;
+        if (!RESERVE_API) {
+          picker.setStatus('予約システムが未設定です（PUBLIC_RESERVE_API）。', 'slot-empty');
+          el('agentDateList').innerHTML = '';
+          return;
+        }
+        picker.setLoading('空き状況を確認中…');
+        if (!rawCache) {
+          try {
+            rawCache = await fetchAvailabilityRaw(RESERVE_API);
+          } catch (_) {
+            rawCache = null;
+          }
+        }
+        if (!rawCache) {
+          picker.setStatus('空き状況を取得できませんでした。時間をおいて再度お試しください。', 'slot-empty');
+          el('agentDateList').innerHTML = '';
+          return;
+        }
+        const { days, holidays } = computeDaysForSlot(rawCache, selectedMenu.slotMin);
+        picker.setDays(days, holidays); // 選択（日時）はここでリセットされる
+        updateDtChip();                  // → プレビューも畳む
+      }
+
+      // 確定プレビュー（dt-chip）。ピッカーの選択（'YYYY-MM-DD'/'HH:MM'）＋選択メニューから組む。
+      function updateDtChip() {
+        const { date: d, time: t } = picker.getSelection();
+        const chip = el('agentDtChip');
+        if (!d || !t) { chip.hidden = true; return; }
+        const dt = new Date(d + 'T' + t);
+        const md = isNaN(dt.getTime())
+          ? (d + ' ' + t)
+          : ((dt.getMonth() + 1) + '/' + dt.getDate() + '（' + WEEK[dt.getDay()] + '） ' + t);
+        const menuStr = selectedMenu ? ' ・ ' + selectedMenu.name + '（約' + selectedMenu.duration + '分）' : '';
+        chip.innerHTML = '<span class="g">◆</span>' + esc(md + '〜' + menuStr + ' で登録');
+        chip.hidden = false;
+      }
+
+      // ペイロード組立・クライアント検証（submitAgent が送信前に使う）。
+      function agentPayload() {
+        const { date, time } = picker.getSelection();
+        const p = {
+          menuId: selectedMenu ? selectedMenu.id : '',
+          date: date || '', // 'YYYY-MM-DD'（availabilityRaw 由来。GAS の期待形式）
+          time: time || '', // 'HH:MM'（開始候補。GAS の期待形式）
+          name: el('agentName').value.trim(),
+          phone: el('agentPhone').value.trim(),
+          email: el('agentEmail').value.trim(),
+        };
+        // 顧客一覧から選んだときだけ、一覧が返した opaque な突合トークン（key）を echo で添える。
+        // 手入力のみなら付けない（生の電話・識別子は載せない＝GAS 側の監査 proxyBook:picked/:manual の区別に使う）。
+        if (pickedKey) p.pickedKey = pickedKey;
+        return p;
+      }
+      function validateAgent() {
+        const p = agentPayload();
+        if (!p.menuId) { toast('メニューを選んでください'); return false; }
+        if (!p.date || !p.time) { toast('日時を入力してください'); return false; }
+        if (!p.name) { toast('お名前を入力してください'); return false; }
+        if (!p.phone) { toast('電話番号を入力してください'); return false; }
+        return true;
+      }
+      // 送信＝GAS adminCreateBooking_（確定登録）。二重送信は apiPost の runExclusive オーバーレイが防ぐ。
+      // GAS の error コードを日本語化して toast する（未知コードはそのまま添えて可視化）。
+      const AGENT_ERRORS = {
+        missing_required: '必須項目（お名前・電話番号）が未入力です。',
+        missing_slot: '日時を入力してください。',
+        invalid_menu: 'メニューの選択が正しくありません。',
+        too_soon: '受付開始前の日時です。予約できる日時を選んでください。',
+        too_far: '受付範囲より先の日時です。予約できる日時を選んでください。',
+        slot_closed: 'その日時は受付時間外（休枠・営業時間外）です。',
+        slot_taken: 'その時間帯はすでに予約が入っています。',
+        calendar_not_configured: 'カレンダー設定が未完了です。オーナーへご確認ください。',
+        server_unconfigured: 'サーバ設定が未完了です。オーナーへご確認ください。',
+        server_error: 'サーバでエラーが発生しました。時間をおいて再度お試しください。',
+      };
+
+      function resetAgentForm() {
+        el('agentMenuChips').querySelectorAll('.mchip').forEach((b) => b.classList.remove('on'));
+        selectedMenu = null;
+        // rawCache（availabilityRaw）は保持し、続けての再登録で再取得しない。
+        picker.reset(); // カレンダー・時刻候補・選択・状況テキストを初期化
+        ['agentName', 'agentPhone', 'agentEmail'].forEach((id) => { el(id).value = ''; });
+        el('agentDtChip').hidden = true;
+        // 顧客選択の控えも解除する（次の登録に前の選択を引きずらない）。
+        pickedKey = null;
+        el('pickedChip').hidden = true;
+        el('pickedChip').innerHTML = '';
+      }
+
+      async function submitAgent() {
+        if (!validateAgent()) return;
+        const payload = agentPayload();
+        let res;
+        try {
+          res = await apiPost('adminCreateBooking', payload); // runExclusive で二重送信ガード＋オーバーレイ
+        } catch (_) {
+          toast('通信エラー。時間をおいて再度お試しください。');
+          return;
+        }
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        if (res && res.ok) {
+          toast(payload.email
+            ? '確定で登録しました（お客様へ控えメールを送信）'
+            : '確定で登録しました（お店へ通知）');
+          resetAgentForm();
+        } else {
+          const key = res && res.error;
+          toast(AGENT_ERRORS[key] || ('登録に失敗しました' + (key ? '（' + key + '）' : '')));
+        }
+      }
+      el('agentSubmit').addEventListener('click', submitAgent);
+
+      // ============================================================
+      // 顧客一覧から選ぶ（代理登録の氏名・電話・メールを台帳から autofill）
+      //   read-only の adminListCustomers（customers.astro と同じ素材）をモーダルに出し、行タップで
+      //   #agentName / #agentPhone / #agentEmail を埋める。一覧では電話は常にマスク（実値を並べない＝
+      //   のぞき見対策）。選んだときだけ opaque な突合トークン key を pickedKey に控え、送信ペイロードへ
+      //   echo する（GAS 側の監査 proxyBook:picked / :manual の区別に使う）。
+      // ============================================================
+      const custDlg = el('custDialog');
+      let custData = []; // adminListCustomers の原本（モーダルを開くたび取得）
+
+      // 台帳の電話は正規化済み（数字のみ）。一覧セル用マスク（customers.astro:maskPhoneCell と同等）。
+      function maskPhoneCell(d) {
+        const s = String(d || '').replace(/[^0-9]/g, '');
+        if (s.length >= 7) return esc(s.slice(0, 3)) + '-<span class="stars">****</span>-' + esc(s.slice(-4));
+        return '<span class="stars">****</span>';
+      }
+      // 最終来店日の表示（GAS は yyyy-MM-dd で返す。customers.astro:fmtDate の簡略版）。
+      function fmtDate(v) {
+        const s = String(v || '');
+        const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        return m ? m[1] + '/' + m[2] + '/' + m[3] : s;
+      }
+
+      async function loadCustList() {
+        const body = el('custDialogBody');
+        body.innerHTML = loadingHtml('顧客一覧を読み込んでいます…');
+        let res;
+        try {
+          res = await apiPost('adminListCustomers', null, { silent: true });
+        } catch (_) {
+          body.innerHTML = emptyHtml('通信に失敗しました。時間をおいて再度お試しください。', { warn: true });
+          return;
+        }
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        if (!res || !res.ok || !Array.isArray(res.customers)) {
+          body.innerHTML = emptyHtml('顧客台帳を取得できませんでした。', { warn: true });
+          return;
+        }
+        custData = res.customers;
+        renderCustList(filterCust(el('custSearch').value));
+      }
+
+      // 名前の部分一致で絞り込む（空なら全件）。原本 custData は壊さない。
+      function filterCust(q) {
+        const kw = String(q || '').trim().toLowerCase();
+        if (!kw) return custData.slice();
+        return custData.filter((c) => String(c.name || '').toLowerCase().indexOf(kw) >= 0);
+      }
+
+      function renderCustList(list) {
+        const body = el('custDialogBody');
+        if (!custData.length) {
+          body.innerHTML = emptyHtml('登録された顧客がまだありません（確定予約が入ると台帳に記録されます）。');
+          return;
+        }
+        if (!list.length) {
+          body.innerHTML = emptyHtml('該当するお客様が見つかりません。');
+          return;
+        }
+        body.innerHTML = '<div class="clist">' + list.map((c) => {
+          const tagCls = c.tag === '新規' ? 'first' : 'regular';
+          const tag = '<span class="tag ' + tagCls + '">' + esc(c.tag) + '</span>';
+          const dot = '<span class="clist__dot">·</span>';
+          let sub = '<span class="clist__last">最終 ' + esc(c.lastVisit ? fmtDate(c.lastVisit) : '—') + '</span>' + dot;
+          // 電話は一覧では常にマスク（実値は並べない）。メール型・LINE 等の連絡先なしはラベルで明示する。
+          if (c.type === 'phone' && c.phone) sub += '<span class="clist__ph">' + maskPhoneCell(c.phone) + '</span>';
+          else if (c.type === 'email' && c.email) sub += '<span class="clist__ph clist__noph">メール</span>';
+          else sub += '<span class="clist__ph clist__noph">連絡先なし</span>';
+          return '<button type="button" class="clist__row" data-key="' + esc(c.key) + '">'
+            + '<span class="clist__head"><span class="clist__nm">' + esc(c.name || '（お名前未登録）') + '</span>' + tag + '</span>'
+            + '<span class="clist__sub">' + sub + '</span>'
+            + '</button>';
+        }).join('') + '</div>';
+      }
+
+      // 行タップ＝その顧客を選択。氏名・電話（実値・LINE 客は空）・メール（あれば）を autofill する。
+      function pickCustomer(c) {
+        if (!c) return;
+        el('agentName').value = c.name || '';
+        el('agentPhone').value = (c.type === 'phone' && c.phone) ? c.phone : '';
+        el('agentEmail').value = (c.type === 'email' && c.email) ? c.email : '';
+        pickedKey = c.key || null; // 送信時に echo（生の電話・識別子は載せない＝一覧が返す opaque key のみ）
+        renderPickedChip(c);
+        closeCustDialog();
+      }
+
+      // 選択中の表示（○○さんを選択中／解除）。電話が空（LINE 客）なら手入力を促す。
+      function renderPickedChip(c) {
+        const chip = el('pickedChip');
+        const noPhone = !(c.type === 'phone' && c.phone);
+        chip.innerHTML = '<span class="picked-name">' + esc(c.name || '（お名前未登録）') + '</span>さんを選択中'
+          + (noPhone ? '<span class="picked-note">電話は手入力してください</span>' : '')
+          + '<button type="button" class="picked-clear" id="pickedClear">解除</button>';
+        chip.hidden = false;
+      }
+
+      // 選択解除＝手入力に戻す。控えていた key を捨て、autofill した氏名・電話・メールも空にする
+      // （選択中の PII を残したまま監査だけ :manual に落ちる齟齬を避ける）。
+      function clearPicked() {
+        pickedKey = null;
+        el('pickedChip').hidden = true;
+        el('pickedChip').innerHTML = '';
+        ['agentName', 'agentPhone', 'agentEmail'].forEach((id) => { el(id).value = ''; });
+      }
+
+      function openCustDialog() {
+        if (!custDlg) return;
+        el('custSearch').value = '';
+        if (typeof custDlg.showModal === 'function') custDlg.showModal(); else custDlg.setAttribute('open', '');
+        loadCustList();
+      }
+      function closeCustDialog() {
+        if (!custDlg) return;
+        if (typeof custDlg.close === 'function') custDlg.close(); else custDlg.removeAttribute('open');
+      }
+
+      el('pickCustomerBtn').addEventListener('click', openCustDialog);
+      el('custDialogClose').addEventListener('click', closeCustDialog);
+      // 背景（::backdrop）クリックで閉じる（TimeDialog と同じ流儀）。Esc は dialog 既定で閉じる。
+      if (custDlg) custDlg.addEventListener('click', (e) => { if (e.target === custDlg) closeCustDialog(); });
+      el('custSearch').addEventListener('input', (e) => renderCustList(filterCust(e.target.value)));
+      el('custDialogBody').addEventListener('click', (e) => {
+        const row = e.target.closest('.clist__row');
+        if (!row) return;
+        const key = row.getAttribute('data-key');
+        pickCustomer(custData.find((c) => c.key === key));
+      });
+      el('pickedChip').addEventListener('click', (e) => {
+        if (e.target.closest('#pickedClear')) clearPicked();
+      });
+
+      // ---- 起動 ----
+      // サーバゲート済み（middleware が Cookie を検証して通した）前提。承認待ちを読み込む。
+      loadPending();
+    </script>
+
+    <style is:global>
+      /* 「顧客一覧から選ぶ」ボタン（お名前ラベルの右側に寄せる。mini-btn と同じ書き味） */
+      .pick-btn {
+        margin-left: auto; font-family: var(--f-sans); font-size: .72rem; letter-spacing: .04em; cursor: pointer;
+        background: #fff; color: var(--a-cabinet); border: 1px solid var(--a-gold); border-radius: 7px;
+        padding: .3rem .65rem; min-height: 32px;
+      }
+      .pick-btn:hover { background: #FCF6FA; }
+
+      /* 選択中の表示（○○さんを選択中／解除）。顧客色の淡い帯で「台帳の人を選んでいる」ことを示す */
+      .picked-chip {
+        display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .55rem;
+        font-family: var(--f-sans); font-size: .82rem; color: var(--a-ink);
+        background: var(--k-customer-bg); border: 1px solid var(--k-customer); border-radius: 8px; padding: .45rem .7rem;
+      }
+      .picked-chip .picked-name { font-weight: 600; color: #4a3350; }
+      .picked-chip .picked-note { font-size: .72rem; color: var(--a-seal); }
+      .picked-chip .picked-clear {
+        margin-left: auto; cursor: pointer; background: none; border: none; color: var(--a-cabinet);
+        font-family: var(--f-sans); font-size: .76rem; text-decoration: underline; padding: .2rem .3rem; min-height: 32px;
+      }
+
+      /* 顧客一覧モーダル（TimeDialog の .time-dialog と同じ枠組み） */
+      .cust-dialog {
+        border: 1px solid var(--a-line); border-radius: 12px;
+        padding: 0; margin: auto; max-width: 460px; width: calc(100% - 2rem);
+        color: var(--a-ink); background: var(--a-surface);
+      }
+      .cust-dialog::backdrop { background: rgba(44, 31, 58, .38); }
+      .cust-dialog-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: .8rem 1rem .4rem; font-family: var(--f-serif);
+      }
+      .cust-dialog-head strong { font-size: 1rem; }
+      .cust-dialog-search { padding: .2rem 1rem .5rem; }
+      .cust-dialog-note {
+        font-family: var(--f-sans); font-size: .68rem; letter-spacing: .1em; color: var(--a-muted);
+        margin: .45rem 0 0; display: flex; align-items: center; gap: .4rem;
+      }
+      .cust-dialog-note b { color: var(--a-seal); }
+      .cust-dialog-body { padding: 0 1rem 1rem; max-height: 60vh; overflow-y: auto; }
+
+      /* 連絡先なし・メールのラベル（一覧セルの電話位置に置く注記。数字ではないので tabular を戻す） */
+      .clist__noph { color: var(--a-muted); font-variant-numeric: normal; letter-spacing: .04em; }
+    </style>
+  </body>
+</html>

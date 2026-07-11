@@ -18,6 +18,12 @@ pnpm-debug.log*
 .env.production
 .env.development
 .env*.local
+# Cloudflare Worker のローカル秘密（実値。コミット禁止。テンプレは .dev.vars.example）
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+# wrangler の作業ディレクトリ（デプロイ設定リダイレクト等）
+.wrangler/
 # clasp credentials (never commit)
 gas/.clasprc.json
 .clasprc.json

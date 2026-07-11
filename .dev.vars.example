@@ -1,0 +1,20 @@
+# Cloudflare Worker（dev フロント）のローカル秘密テンプレート。
+# これをコピーして `.dev.vars` を作り、実値を入れる（`.dev.vars` は gitignore 済み・コミット禁止）。
+# 本番/dev の Cloudflare 側は `wrangler secret put <KEY>` かダッシュボードの Variables/Secrets に登録する。
+# 実値は絶対にリポジトリへ書かない。
+
+# セッション Cookie の署名鍵（強ランダム。例: openssl rand -base64 48）
+SESSION_SECRET=replace-with-strong-random
+
+# Worker が保持する管理トークン。GAS Script Properties の ADMIN_TOKENS の1つと一致させる。
+# ブラウザには渡さない（Worker だけが保持し、GAS へ添えて送る）。
+ADMIN_TOKEN=replace-with-admin-token
+
+# 追加 PIN（任意）。未設定ならログインはトークンのみ。設定すると必須になる。
+# ADMIN_PIN=
+
+# GAS Web App の /exec URL（管理系転送先）。フロントの PUBLIC_RESERVE_API と同じ dev の値。
+RESERVE_API=https://script.google.com/macros/s/xxxxx/exec
+
+# オリジン制限の許可リスト（任意・カンマ区切り）。未設定ならリクエスト先と同一オリジンのみ許可。
+# ALLOWED_ORIGIN=https://wasyo-dev.example.workers.dev
