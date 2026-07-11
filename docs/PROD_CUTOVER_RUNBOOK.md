@@ -15,7 +15,7 @@
 2. **今の Pages ではバッチを出せない**: `deploy.yml`（develop）は旧 Pages 前提（`upload-pages-artifact path: ./dist`）のまま。ここへバッチを流すと管理系が動かず**現行公開 prod が壊れる**。
    → **バッチの配信路は wasyo-prod(Workers) だけ**。「先に main へマージして Pages に出す」は禁止。
 3. **現行 prod に Worker 秘密は 1 つも無い**（Pages 静的だった）。→ **Worker ランタイム secret は全数 prod 新規**。
-4. `wrangler.toml` は既に `[env.production]` name=`wasyo-prod`・route `wwwasyo.com/*`（zone_name 明示）を保持＝土台済み。
+4. `wrangler.toml` は `[env.production]` name=`wasyo-prod`・route `wwwasyo.com/*` を保持するが、**`@astrojs/cloudflare` 13.7.0 はこの named 環境をビルドで読まない**（実測 2026-07-11）。→ prod デプロイは **`npx wrangler deploy --name wasyo-prod`** で名前上書き・ルートは**ダッシュボードのカスタムドメイン**で付ける（Phase B の「⚙️」参照）。
 
 **したがって基本戦略**: `deploy.yml` を先に撤去 → `develop→main` を昇格（**Pages デプロイは発火しない＝現行 Pages は最後のデプロイ内容で凍結生存＝安全網**）→ wasyo-prod を **main 連携**で立て workers.dev で完全検証 → GAS を prod へ → DNS 切替 → Pages 撤去・private 化。
 
@@ -65,7 +65,14 @@
 
 > DNS はまだ Pages 向き。検証は **workers.dev** で行う。
 
-- [ ] **B-1** 【本人】Cloudflare で Worker **`wasyo-prod`** を **Workers Builds・連携ブランチ=`main`** で作成（`wrangler.toml [env.production]` を使用）。main はバッチ済み＝Worker がビルドされる。
+> ⚙️ **ビルド/デプロイ コマンド【ローカル実測で確定 2026-07-11】**
+> - ビルド コマンド: `pnpm run build`（`PUBLIC_ENV=production`・`PUBLIC_RESERVE_API` 等の公開値は**コマンドに足さず「ビルド変数」欄**へ＝面B）。
+> - デプロイ コマンド: **`npx wrangler deploy --name wasyo-prod`**。
+> - ⚠️ **なぜ `--name` が要るか**: `@astrojs/cloudflare` 13.7.0 は **named 環境（`[env.production]`）のビルドに非対応**。ビルドが吐く `dist/server/wrangler.json` は常にトップレベル `name=wasyo-dev` を焼き込み、redirect 設定経由の `npx wrangler deploy` は **`--env production` を付けても無効**（plain と dry-run 出力が完全一致・ルートも付かない）。素のコマンドだと **dev Worker(wasyo-dev) を上書きしかねない**ので `--name wasyo-prod` で明示上書きする。
+> - ⚠️ **ルート（`wwwasyo.com`）は `wrangler.toml` では付かない**（アダプタが `[env.production].routes` を読まない）。**B-5 のダッシュボード「カスタムドメイン」**で wasyo-prod に紐付ける。
+> - 初回ビルド後、ログで **「wasyo-prod として deploy された」**（wasyo-dev を上書きしていない）ことを確認。
+
+- [ ] **B-1** 【本人】Cloudflare で Worker **`wasyo-prod`** を **Workers Builds・連携ブランチ=`main`** で作成。main はバッチ済み（Phase A で昇格）＝Worker がビルドされる。**ビルド/デプロイ コマンドは上記「⚙️」を厳守**（`[env.production]` はこの配信路では読まれないため名前上書きが要る）。
 - [ ] **B-2** 【本人】**ランタイム secret**（下記 面A）を **Settings ›「Variables and Secrets」**に登録。⚠️ **「Build variables」側に入れない**（`import { env }` に届かず 500 `server_unconfigured`＝2026-07-08 dev で踏んだ罠）。
 - [ ] **B-3** 【本人】**Build variables**（下記 面B・optional 全 ON）を登録。
 - [ ] **B-4** 【本人】デプロイ通知を Cloudflare 側へ：Consumer Worker＋Queue（`cloudflare/templates/workers-builds-notifications-template`）を立て、Event Subscriptions で `build.*` → Discord（Queue 無料枠は確認済み）。
