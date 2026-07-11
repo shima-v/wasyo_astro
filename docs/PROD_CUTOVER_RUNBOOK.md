@@ -75,7 +75,7 @@
 - [ ] **B-1** 【本人】Cloudflare で Worker **`wasyo-prod`** を **Workers Builds・連携ブランチ=`main`** で作成。main はバッチ済み（Phase A で昇格）＝Worker がビルドされる。**ビルド/デプロイ コマンドは上記「⚙️」を厳守**（`[env.production]` はこの配信路では読まれないため名前上書きが要る）。
 - [ ] **B-2** 【本人】**ランタイム secret**（下記 面A）を **Settings ›「Variables and Secrets」**に登録。⚠️ **「Build variables」側に入れない**（`import { env }` に届かず 500 `server_unconfigured`＝2026-07-08 dev で踏んだ罠）。
 - [ ] **B-3** 【本人】**Build variables**（下記 面B・optional 全 ON）を登録。
-- [ ] **B-4** 【本人】デプロイ通知を Cloudflare 側へ：Consumer Worker＋Queue（`cloudflare/templates/workers-builds-notifications-template`）を立て、Event Subscriptions で `build.*` → Discord（Queue 無料枠は確認済み）。
+- [ ] **B-4** 【本人】デプロイ通知を Cloudflare 側へ：Consumer Worker＋Queue で Event Subscriptions `build.*` → Discord（Queue 無料枠は確認済み）。**実装は済み**＝[`infra/build-notify/`](../infra/build-notify/README.md)（`wasyo-build-notify`／Queue `wasyo-build-events`／Discord `/slack` 転送）。本人 account 側手順（`wrangler login`／`wrangler queues create`／`wrangler deploy -c wrangler.toml`／`wrangler secret put DISCORD_WEBHOOK_URL`／ダッシュボードで Event Subscriptions）は同 README に集約。
 - [ ] **B-5** 【本人】`wwwasyo.com` を wasyo-prod のカスタムドメインに紐付け・**証明書発行まで**完了（DNS はまだ Pages なので**表向きの配信は変わらない**・確認は workers.dev）。
   - 可逆: すべて公開 prod 未接触。ロールバック: wasyo-prod を消すだけ。
 
