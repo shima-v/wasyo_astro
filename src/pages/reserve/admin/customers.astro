@@ -204,13 +204,16 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         el('listArea').innerHTML = '<div class="clist">' + list.map((c, i) => {
           const tagCls = c.tag === '新規' ? 'first' : 'regular';
           const tag = '<span class="tag ' + tagCls + '">' + esc(c.tag) + '</span>';
+          // メモ有りマーク（✎）。本文は一覧に出さない＝のぞき見耐性（本文は詳細パネルで表示）。
+          const hasNote = !!(c.note && c.note.trim());
+          const memoMark = hasNote ? '<span class="clist__memo" title="メモあり" aria-label="メモあり">✎</span>' : '';
           // 2段目：来店回数・最終来店・電話（phone 型のみ常にマスク／line・email 型は電話省略）。
           const dot = '<span class="clist__dot">·</span>';
           let sub = '<span class="clist__cnt">来店 <b>' + esc(c.count != null ? c.count : 0) + '</b> 回</span>'
             + dot + '<span class="clist__last">最終 ' + esc(c.lastVisit ? fmtDate(c.lastVisit) : '—') + '</span>';
           if (c.type === 'phone' && c.phone) sub += '<span class="clist__ph">' + maskPhoneCell(c.phone) + '</span>';
           return '<button type="button" class="clist__row" data-i="' + i + '">'
-            + '<span class="clist__head"><span class="clist__nm">' + esc(c.name || '（お名前未登録）') + '</span>' + tag + '</span>'
+            + '<span class="clist__head"><span class="clist__nm">' + esc(c.name || '（お名前未登録）') + '</span>' + tag + memoMark + '</span>'
             + '<span class="clist__sub">' + sub + '</span>'
             + '</button>';
         }).join('') + '</div>';
@@ -246,6 +249,7 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         el('detailSection').hidden = false;
         window.scrollTo({ top: 0, behavior: 'auto' });
         wireDetail();
+        wireMemo(c); // メモ配線は別関数（wireDetail は line 型で早期 return するため全 type で動かす）
         loadVisits(c); // 来店履歴は詳細を開くたびに取りに行く（一覧段階で明細 PII を持たない＝段階開示）
       }
       function closeDetail() {
@@ -336,6 +340,14 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           +   metaField('初来店', c.firstVisit ? fmtDate(c.firstVisit) : '—')
           +   metaField('最終来店', c.lastVisit ? fmtDate(c.lastVisit) : '—')
           + '</div>'
+          // 恒久メモ（1顧客1つ・上書き）。line 型（連絡先なし）でも表示する＝全 type で編集可。
+          // textarea 初期値は esc()（</textarea> ブレイクアウト防止）・maxlength は GAS CUSTOMER_NOTE_MAX と一致。
+          + '<div class="memo">'
+          +   '<div class="memo__h">メモ <span class="memo__hint">店主用・お客様には表示されません</span></div>'
+          +   '<textarea id="memoText" class="memo__ta" maxlength="2000" placeholder="アレルギー・好み・注意点など、次回に申し送りたいこと">' + esc(c.note || '') + '</textarea>'
+          +   '<div class="memo__bar"><span id="memoStatus" class="memo__status" role="status"></span>'
+          +     '<button type="button" class="mini-btn memo__save" id="memoSave">保存</button></div>'
+          + '</div>'
           + '<div class="hist">'
           +   '<div class="hist__h">来店履歴 <span class="n">全 ' + esc(cnt) + ' 回</span></div>'
           +   '<div id="histBody">' + loadingHtml('来店履歴を読み込んでいます…') + '</div>'
@@ -373,6 +385,40 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           } else {
             toast('コピーに対応していない環境です');
           }
+        });
+      }
+
+      // メモ保存の配線。wireDetail と分離＝line 型（連絡先なし）でも動くようにする。
+      // 保存は adminSetCustomerNote（Worker 経由・Cookie セッションで認可）。成功時は同一オブジェクト
+      // 参照の c.note を書き換えて applySortAndRender（一覧の ✎ マークが即反映・並び順は note 非依存で不変）。
+      function wireMemo(c) {
+        const area = el('detailArea');
+        const ta = area.querySelector('#memoText');
+        const saveBtn = area.querySelector('#memoSave');
+        const status = area.querySelector('#memoStatus');
+        if (!ta || !saveBtn) return;
+        const setStatus = (msg, cls) => { if (status) { status.textContent = msg; status.className = 'memo__status' + (cls ? ' ' + cls : ''); } };
+        saveBtn.addEventListener('click', async () => {
+          saveBtn.disabled = true;
+          setStatus('保存中…', '');
+          let res;
+          try {
+            res = await apiPost('adminSetCustomerNote', { key: c.key, note: ta.value }, { silent: true });
+          } catch (_) {
+            saveBtn.disabled = false;
+            setStatus('保存に失敗しました', 'is-warn');
+            return;
+          }
+          saveBtn.disabled = false;
+          if (res && res.error === 'forbidden') { handleForbidden(); return; }
+          if (!res || !res.ok) {
+            setStatus('保存できませんでした', 'is-warn');
+            return;
+          }
+          c.note = ta.value;      // 一覧は同一オブジェクト参照ゆえ note 即反映
+          applySortAndRender();
+          setStatus('保存しました', 'is-ok');
+          toast('メモを保存しました');
         });
       }
 

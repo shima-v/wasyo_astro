@@ -194,3 +194,16 @@ a.chart:hover { border-color: var(--k); transform: translateY(-1px); transition:
 .hist__date { font-family: var(--f-sans); font-size: .8rem; color: var(--a-muted); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
 .hist__time { margin-left: .35rem; }
 .hist__menu { font-size: .9rem; color: var(--a-ink); text-align: right; line-height: 1.4; }
+
+/* 顧客メモ（恒久メモ）＝一覧は ✎ マークのみ（本文非表示・のぞき見耐性）、本文は詳細で編集 */
+.clist__memo { font-size: .82rem; color: var(--a-gold-dp); line-height: 1; flex: none; }
+.memo { background: var(--a-surface); border: 1px solid var(--a-line); border-radius: 12px; padding: .9rem 1rem 1rem; margin-bottom: 1rem; }
+.memo__h { font-family: var(--f-serif); font-size: .98rem; font-weight: 600; margin-bottom: .55rem; display: flex; align-items: center; gap: .5rem; color: var(--a-ink); }
+.memo__hint { font-family: var(--f-sans); font-size: .66rem; font-weight: 400; letter-spacing: .04em; color: var(--a-muted); margin-left: auto; }
+.memo__ta { width: 100%; box-sizing: border-box; min-height: 92px; resize: vertical; font-family: var(--f-sans); font-size: .95rem; line-height: 1.6; padding: .6rem .7rem; border: 1px solid var(--a-line); border-radius: 9px; background: #fff; color: var(--a-ink); }
+.memo__ta:focus { outline: none; border-color: var(--a-gold); box-shadow: inset 0 0 0 1px var(--a-gold); }
+.memo__bar { display: flex; align-items: center; gap: .6rem; margin-top: .6rem; }
+.memo__status { font-family: var(--f-sans); font-size: .74rem; color: var(--a-muted); }
+.memo__status.is-ok { color: var(--a-gold-dp); }
+.memo__status.is-warn { color: #8E2230; }
+.memo__save { margin-left: auto; }
