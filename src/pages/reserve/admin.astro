@@ -87,6 +87,13 @@ const pageTitle = `${ENV_LABEL}管理トップ | ${salonName}`;
           <div class="chart__body"><span class="chart__title">設定</span><span class="chart__status">受付枠・通知先・臨時営業</span></div>
           <div class="chart__aside"><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>
         </a>
+
+        <!-- マニュアル（静的ページ）。動的ステータスは持たない＝固定文言（JS 無改変・要対応の朱印なし）。区分色は設定を流用 -->
+        <a class="chart settings" href="/reserve/admin/manual">
+          <div class="chart__spine"><span class="chart__lug"></span><svg class="chart__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5.5A1.5 1.5 0 016.5 4H11v15.5H6.5A1.5 1.5 0 015 18z"/><path d="M19 5.5A1.5 1.5 0 0017.5 4H13v15.5h4.5A1.5 1.5 0 0019 18z"/><path d="M11 4v15.5M13 4v15.5"/></svg></div>
+          <div class="chart__body"><span class="chart__title">マニュアル</span><span class="chart__status">操作の手引き・顧客情報の扱い・構成</span></div>
+          <div class="chart__aside"><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>
+        </a>
       </div>
       <p class="cabinet-foot">位置と色で覚える棚 ・ 要対応の区分だけ朱で点灯</p>
     </main>
