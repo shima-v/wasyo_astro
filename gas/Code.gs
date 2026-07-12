@@ -175,6 +175,7 @@ function doPost(e) {
       case 'listPending': return json_(requireAdminToken_(body, adminListPending_));
       case 'adminListCustomers': return json_(requireAdminToken_(body, adminListCustomers_));
       case 'adminListConfirmed': return json_(requireAdminToken_(body, function () { return adminListConfirmed_(body); }));
+      case 'adminSetCustomerNote': return json_(requireAdminToken_(body, function () { return adminSetCustomerNote_(body); }));
       case 'getQuota': return json_(requireAdminToken_(body, adminGetQuota_));
       case 'adminDecision': return json_(requireAdminToken_(body, function () { return adminDecision_(body); }));
       case 'broadcastPreview': return json_(requireAdminToken_(body, function () { return adminBroadcastPreview_(body); }));
@@ -975,6 +976,50 @@ function ledgerUpsert_(props, visitDate) {
   }
 }
 
+// 顧客メモ（列7）の最大長。フロント textarea の maxlength と揃える（超過は too_long で拒否）。
+var CUSTOMER_NOTE_MAX = 2000;
+
+/**
+ * 顧客台帳の note（列7）を上書きする（P2 顧客カルテ・1顧客1つの恒久メモ）。
+ * requireAdminToken_ で保護。body {action, adminToken, key:<hash>, note:<string>}。
+ * key は adminListCustomers_ が返す opaque な突合トークン（台帳キーの SHA-256 hex）で、生の識別子は
+ * 受け取らない。全行を hashKey_(row[0])===key で突合し、該当行の列7に setValue する（PII 最小化の帰結・
+ * ledgerLookup_ は生キー前提ゆえ流用不可）。空文字 note＝クリア許可。
+ * 書き込みは列7のみ・カレンダー変更・通知・外部 fetch・他列の改変は一切しない（ledgerUpsert_ は無改変）。
+ * 監査は karteEdit で1行残す（note 本文・生トークンは残さない。target は生の body.key＝ハッシュを渡し
+ * auditPush_ 内の maskId_ に一任＝事前マスクしない）。
+ */
+function adminSetCustomerNote_(body) {
+  var key = (body && body.key) || '';
+  var note = (body && body.note != null) ? String(body.note) : '';
+  if (!key) return { ok: false, error: 'bad_request' };
+  if (note.length > CUSTOMER_NOTE_MAX) return { ok: false, error: 'too_long' };
+  var sh = ledgerSheet_();
+  if (!sh) return { ok: false, error: 'ledger_unconfigured' };
+
+  var res;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var values = sh.getDataRange().getValues();
+    var found = 0;
+    for (var r = 1; r < values.length; r++) {   // r=0 はヘッダ行なのでスキップ
+      if (hashKey_(String(values[r][0] || '')) === key) { found = r; break; }
+    }
+    if (!found) {
+      res = { ok: false, error: 'not_found' };
+    } else {
+      sh.getRange(found + 1, 7).setValue(note);  // 1始まりの行番号・列7＝note
+      res = { ok: true };
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  // 監査はロック解放後。note 本文は渡さず、target は生の body.key（ハッシュ）を渡して maskId_ に一任する。
+  auditPush_(tokenFp_(body.adminToken), 'karteEdit', body.key, res.ok ? 'ok' : 'ng');
+  return res;
+}
+
 /**
  * 顧客台帳（LEDGER_SHEET）を read-only で一覧化して返す（P2 顧客管理ページ用）。
  * requireAdminToken_ で保護。シートへの書き込み・カレンダー変更・通知・PII の外部送出は一切しない。
@@ -1004,6 +1049,9 @@ function adminListCustomers_() {
       firstVisit: ledgerDateStr_(row[3]),
       lastVisit: ledgerDateStr_(row[5]),
       tag: count <= 1 ? '新規' : '常連',
+      // 顧客ごとの恒久メモ（列7・adminSetCustomerNote_ で上書き）。空なら空文字。
+      // 本文は管理ゲート内でのみ扱い、一覧は「メモ有り」マークのみ・本文はフロント詳細パネルで表示する。
+      note: String(row[6] || ''),
       // 来店履歴の突合トークン（adminListConfirmed_ の params.key）。台帳キーを hashKey_ で SHA-256 化した
       // opaque 値＝生の識別子（lineUserId・電話・メール）は突合トークンとして出さない（PII 最小化）。
       // クライアントは中身を解釈せずそのまま echo する（管理ゲート内・HTTPS・no-store）。

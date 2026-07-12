@@ -1,0 +1,30 @@
+# wasyo-build-notify — Workers Builds のビルドイベントを Discord へ転送する Consumer Worker
+#
+# 位置づけ:
+#   本番 Worker（wasyo-prod）の Workers Builds が Event Subscriptions で build.* イベントを
+#   Cloudflare Queue（wasyo-build-events）へ発行し、本 Worker がそれを消費して Discord へ通知する。
+#   設計＝docs/MIGRATION_CLOUDFLARE.md §2 / docs/PROD_CUTOVER_RUNBOOK.md Phase B-4。
+#
+# 重要:
+#   - この Worker は wasyo-prod（astro 本体）とは完全に独立。infra/build-notify/ 配下だけで自己完結する。
+#   - routes・カスタムドメインは付けない（HTTP を受けない純粋な Queue コンシューマ）。
+#   - 秘密の実値はこのファイルに書かない。DISCORD_WEBHOOK_URL は `wrangler secret put` で登録する（README 参照）。
+#
+# ⚠️ name は Cloudflare ダッシュボードの Worker 名と完全一致させること。
+
+name = "wasyo-build-notify"
+main = "index.mjs"
+compatibility_date = "2025-09-01"
+
+# ── Queue コンシューマ設定 ─────────────────────────────────────────────────
+# queue 名は wasyo-build-events を提案（`wrangler queues create wasyo-build-events` で作成）。
+# Event Subscriptions の発行先キューと一致させること。
+[[queues.consumers]]
+queue = "wasyo-build-events"
+# デプロイ通知はごく低頻度なので小さめのバッチで十分。
+max_batch_size = 10
+# バッチが埋まらなくても最大 5 秒で配送する。
+max_batch_timeout = 5
+# 転送失敗（Discord 一過性エラー等）時の最大再試行回数。使い切ったらメッセージは破棄される
+# （デッドレターキューは設けない＝通知の取りこぼしより無限リトライ回避を優先）。
+max_retries = 3

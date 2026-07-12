@@ -1,0 +1,9 @@
+# wasyo-build-notify の秘密テンプレート（キー名のみ。実値は絶対にコミットしない）
+#
+# 本番は `wrangler secret put DISCORD_WEBHOOK_URL` で登録する（README 参照）。
+# ローカルで `wrangler dev` する場合のみ、このファイルを .dev.vars にコピーして実値を入れる
+# （.dev.vars は .gitignore 済み）。
+#
+# Discord Webhook の URL（素の URL。末尾に /slack は付けない＝ネイティブ embeds で送る）。
+#   例: https://discord.com/api/webhooks/<id>/<token>
+DISCORD_WEBHOOK_URL=
