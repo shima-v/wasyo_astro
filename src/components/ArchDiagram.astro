@@ -1,0 +1,209 @@
+---
+// 和笑・予約システムの「システム構成図（しくみの見取り図）」。
+// 管理者マニュアル（manual.astro）から <ArchDiagram /> で埋め込む前提の自己完結コンポーネント。
+// 読者は非エンジニアの店主。ラベルはすべて平易な日本語、矢印には動作を短く添える。
+//
+// 【スタイルの持たせ方＝自己完結（scoped/global <style> を持たない）】
+//   コンポーネントに <style>（scoped でも is:global でも）を置くと import しただけで prod の
+//   <head> に残る（EnvBadge.astro / AdminHeader.astro のコメント参照）。そこで色・レイアウトは
+//   すべて inline style で付ける。メディアクエリの代わりに flex-wrap＋clamp() で、
+//   スマホ幅では自然に縦積みへ折り返す（横スクロールを出さない）。
+//   → manual.astro 側の <style is:global> に委ねるクラスは一つも無い（完全自己完結）。
+//
+// 【配色】既存管理画面のデザイントークン（src/styles/admin.css :root の --a-*/--k-*）の実値を
+//   literal で使用。漆紫＋金線＋和色四色の「カルテ棚」の世界観に馴染ませる。
+//
+// 【絶対に描かない】scriptId・deploymentId・secret・トークン・APIキー・実メール・電話・顧客PII。
+//   ドメイン wwwasyo.com は公開情報ゆえ記載可。
+
+// ---- パレット（admin.css :root の実値を literal で） ----
+const c = {
+  ink: '#2C1F3A', muted: '#7A6080', line: '#E4D8DF', surface: '#FCFAFB', paper: '#F2EDF0',
+  cabinet: '#2C1E38', cabinet2: '#3B2A4B', gold: '#C9A84C', goldSoft: '#EAD9A0',
+  blue: '#4E6E8E', blueBg: '#E9EEF3',       // 配信・保護
+  purple: '#8B6080', purpleBg: '#F0E8EE',   // 予約の頭脳
+  green: '#6E7A5E', greenBg: '#EBEEE5',     // データの保存先
+  amber: '#B08D3C', amberBg: '#F2EBD9',     // 連携・お知らせ
+};
+const sans = "'Noto Sans JP','Noto Sans CJK JP',system-ui,-apple-system,sans-serif";
+const serif = "'Noto Serif JP','YuMincho','Yu Mincho',serif";
+
+// ---- 再利用する inline style 文字列（EnvBadge の ribbonStyle と同じ流儀） ----
+const figure = [
+  'margin:0', 'width:100%', 'box-sizing:border-box',
+  'font-family:' + sans, 'color:' + c.ink, 'line-height:1.6',
+].join(';');
+
+const wrap = [
+  'max-width:640px', 'margin:0 auto', 'width:100%', 'box-sizing:border-box',
+].join(';');
+
+// レイヤー（役割ごとの帯）。左に金の細線を入れて「カルテ棚の段」に見せる。
+const band = [
+  'box-sizing:border-box', 'width:100%',
+  'background:' + c.surface, 'border:1px solid ' + c.line, 'border-radius:12px',
+  'padding:.7rem .8rem .85rem', 'margin:0',
+].join(';');
+
+// 役割ラベル（この段が何をする場所か）。色で段を覚える。
+// accent は文字色＝枠色に共用（明地の段は各アクセント色／土台の暗地は goldSoft を渡す＝どちらも可読）。
+const roleTag = (accent) => [
+  'display:inline-block', 'font-size:clamp(.72rem,2.4vw,.8rem)', 'font-weight:700',
+  'letter-spacing:.04em', 'color:' + accent,
+  'padding:.12rem .5rem', 'border-radius:999px',
+  'border:1px solid ' + accent, 'margin-bottom:.55rem',
+].join(';');
+
+// ノードを並べる行。flex-wrap でスマホ幅では1列に折り返す（メディアクエリ不要）。
+const row = [
+  'display:flex', 'flex-wrap:wrap', 'gap:.55rem', 'justify-content:center',
+  'align-items:stretch',
+].join(';');
+
+// ノード（しくみの部品＝1枚の札）。min-width で狭幅では1枚/行に折り返す。
+const card = (accent, bg) => [
+  'box-sizing:border-box', 'flex:1 1 230px', 'min-width:210px',
+  'background:' + bg, 'border:1px solid ' + c.line, 'border-left:4px solid ' + accent,
+  'border-radius:10px', 'padding:.6rem .7rem .65rem',
+  'display:flex', 'flex-direction:column', 'gap:.28rem',
+].join(';');
+
+const cardHead = 'display:flex;align-items:center;gap:.4rem';
+const emoji = 'font-size:1.15rem;line-height:1;flex:none';
+const cardTitle = (accent) => 'font-size:clamp(.95rem,3.1vw,1.05rem);font-weight:700;color:' + accent;
+const cardDesc = 'font-size:clamp(.8rem,2.7vw,.9rem);color:' + c.ink + ';margin:0';
+const domainBadge = [
+  'align-self:flex-start', 'font-family:' + sans, 'font-size:.72rem', 'font-weight:700',
+  'letter-spacing:.02em', 'color:' + c.goldSoft, 'background:' + c.cabinet,
+  'padding:.08rem .5rem', 'border-radius:999px', 'margin-top:.1rem',
+].join(';');
+
+// 段と段をつなぐ下向きの流れ（縦線＋動作ラベルのピル）。
+const arrowWrap = 'display:flex;flex-direction:column;align-items:center;gap:.28rem;margin:.4rem 0';
+const arrowStem = 'width:2px;height:14px;background:' + c.line + ';border-radius:2px';
+const arrowChip = [
+  'font-size:clamp(.78rem,2.6vw,.88rem)', 'color:' + c.muted, 'background:' + c.paper,
+  'border:1px solid ' + c.line, 'border-radius:999px', 'padding:.2rem .7rem',
+  'text-align:center',
+].join(';');
+
+// 土台（Google Workspace）。漆紫地＋金線で「棚の天板／土台」に。全部がこの上に乗る、を色で示す＝signature。
+const baseBand = [
+  'box-sizing:border-box', 'width:100%', 'margin-top:.5rem',
+  'background:linear-gradient(180deg,' + c.cabinet2 + ',' + c.cabinet + ')',
+  'border:1px solid ' + c.cabinet, 'border-top:2px solid ' + c.gold, 'border-radius:12px',
+  'padding:.75rem .85rem .85rem',
+].join(';');
+const baseTitle = 'font-size:clamp(1rem,3.4vw,1.1rem);font-weight:700;color:#F4ECF3;margin:.15rem 0 .3rem';
+const baseDesc = 'font-size:clamp(.82rem,2.8vw,.92rem);color:#E0D2DE;margin:0';
+
+// 締めのメッセージ（読み物なので明朝）。金の左線でカルテの「特記」に見せる。
+const message = [
+  'box-sizing:border-box', 'margin:.9rem 0 0', 'padding:.8rem .9rem',
+  'font-family:' + serif, 'font-size:clamp(.92rem,3vw,1.02rem)', 'line-height:1.75',
+  'color:' + c.ink, 'background:' + c.surface,
+  'border:1px solid ' + c.line, 'border-left:4px solid ' + c.gold, 'border-radius:10px',
+].join(';');
+const strong = 'color:' + c.cabinet + ';font-weight:700';
+
+const cap = [
+  'font-family:' + sans, 'font-size:.78rem', 'color:' + c.muted, 'text-align:center',
+  'margin-top:.7rem', 'line-height:1.6',
+].join(';');
+---
+
+<figure style={figure} aria-labelledby="arch-cap">
+  <div style={wrap}>
+
+    <!-- ① 利用する人 -->
+    <div style={band}>
+      <span style={roleTag(c.ink)}>利用する人</span>
+      <div style={row}>
+        <div style={card(c.ink, c.surface)}>
+          <div style={cardHead}><span aria-hidden="true" style={emoji}>🧑</span><span style={cardTitle(c.ink)}>お客様</span></div>
+          <p style={cardDesc}>予約フォーム、または LINE から予約します。</p>
+        </div>
+        <div style={card(c.ink, c.surface)}>
+          <div style={cardHead}><span aria-hidden="true" style={emoji}>💇</span><span style={cardTitle(c.ink)}>管理者（店主）</span></div>
+          <p style={cardDesc}>管理画面を開いて予約やお客様台帳を操作します。</p>
+        </div>
+      </div>
+    </div>
+
+    <div style={arrowWrap}><span aria-hidden="true" style={arrowStem}></span><span style={arrowChip}>予約する ／ ログインして操作する ▼</span></div>
+
+    <!-- ② 配信・ログイン保護 -->
+    <div style={band}>
+      <span style={roleTag(c.blue)}>配信・ログイン保護</span>
+      <div style={row}>
+        <div style={card(c.blue, c.blueBg)}>
+          <div style={cardHead}><span aria-hidden="true" style={emoji}>☁️</span><span style={cardTitle(c.blue)}>Cloudflare Workers</span></div>
+          <p style={cardDesc}>ホームページ・予約・管理画面をインターネットに配信します。管理画面は、ログインした本人だけが開けます。</p>
+          <span style={domainBadge}>wwwasyo.com</span>
+        </div>
+      </div>
+    </div>
+
+    <div style={arrowWrap}><span aria-hidden="true" style={arrowStem}></span><span style={arrowChip}>予約・操作を渡す ▼</span></div>
+
+    <!-- ③ 予約の頭脳 -->
+    <div style={band}>
+      <span style={roleTag(c.purple)}>予約の頭脳</span>
+      <div style={row}>
+        <div style={card(c.purple, c.purpleBg)}>
+          <div style={cardHead}><span aria-hidden="true" style={emoji}>⚙️</span><span style={cardTitle(c.purple)}>Google Apps Script</span></div>
+          <p style={cardDesc}>予約の受付・お客様台帳の更新・お知らせの送信を、まとめて行う頭脳です。</p>
+        </div>
+      </div>
+    </div>
+
+    <div style={arrowWrap}><span aria-hidden="true" style={arrowStem}></span><span style={arrowChip}>予約を記録し、お知らせを送る ▼</span></div>
+
+    <!-- ④ データの保存先（Google） -->
+    <div style={band}>
+      <span style={roleTag(c.green)}>データの保存先（Google）</span>
+      <div style={row}>
+        <div style={card(c.green, c.greenBg)}>
+          <div style={cardHead}><span aria-hidden="true" style={emoji}>📅</span><span style={cardTitle(c.green)}>Googleカレンダー</span></div>
+          <p style={cardDesc}>予約が入る（予約が1件ずつ書き込まれます）。</p>
+        </div>
+        <div style={card(c.green, c.greenBg)}>
+          <div style={cardHead}><span aria-hidden="true" style={emoji}>📗</span><span style={cardTitle(c.green)}>スプレッドシートの台帳</span></div>
+          <p style={cardDesc}>お客様が1人1行で記録される台帳です。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑤ 連携・お知らせ -->
+    <div style={band}>
+      <span style={roleTag(c.amber)}>連携・お知らせ</span>
+      <div style={row}>
+        <div style={card(c.amber, c.amberBg)}>
+          <div style={cardHead}><span aria-hidden="true" style={emoji}>💬</span><span style={cardTitle(c.amber)}>LINE公式アカウント</span></div>
+          <p style={cardDesc}>お客様へお知らせを配信します。ログインの入口にもなります。</p>
+        </div>
+        <div style={card(c.amber, c.amberBg)}>
+          <div style={cardHead}><span aria-hidden="true" style={emoji}>🔔</span><span style={cardTitle(c.amber)}>Discord</span></div>
+          <p style={cardDesc}>システムからのお知らせを、店主が受け取ります。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑥ 土台（signature） -->
+    <div style={baseBand}>
+      <span style={roleTag(c.goldSoft)}>土台</span>
+      <div style={baseTitle}>Google Workspace</div>
+      <p style={baseDesc}>サロンの Google アカウントが所有します。上のカレンダー・台帳・頭脳（Apps Script）は、すべてこの中にあります。カレンダーの共有もここで管理します。</p>
+    </div>
+
+    <!-- 伝えたいメッセージ（明朝＝特記） -->
+    <p style={message}>
+      お客様の情報は <span style={strong}>Google</span> と <span style={strong}>LINE</span> にだけ保存し、独自の別データベースは持ちません。
+    </p>
+
+  </div>
+
+  <figcaption id="arch-cap" style={cap}>
+    予約システムの全体像：お客様・店主 → Cloudflare（wwwasyo.com） → Google Apps Script → Googleカレンダー／台帳。LINE・Discord と連携し、土台は Google Workspace。
+  </figcaption>
+</figure>
