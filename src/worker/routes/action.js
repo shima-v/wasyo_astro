@@ -9,7 +9,7 @@ export const prerender = false;
 
 // 転送を許可する管理アクション（GAS doPost の bearer 保護アクションと一致）。
 const ALLOWED_ACTIONS = new Set([
-  'getSlotConfig', 'setSlotConfig', 'getNotifyConfig', 'setNotifyConfig', 'listPending', 'adminListCustomers', 'adminListConfirmed', 'getQuota', 'adminDecision',
+  'getSlotConfig', 'setSlotConfig', 'getNotifyConfig', 'setNotifyConfig', 'listPending', 'adminListCustomers', 'adminListConfirmed', 'adminSetCustomerNote', 'getQuota', 'adminDecision',
   'broadcastPreview', 'broadcast', 'broadcastTest', 'setTempSchedule', 'ownerChannelTest',
   'adminCreateBooking',
 ]);
