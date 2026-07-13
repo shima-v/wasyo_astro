@@ -1,0 +1,700 @@
+---
+// 管理者向けマニュアル（/reserve/admin/manual）。読者は非エンジニアの店主。
+// 公開プライバシーポリシー（src/pages/privacy/index.astro）と同じ「純静的の長文ページ」流儀で作る
+//   （.astro 直書き＋<section> 積み＋末尾 <style is:global>／API・<script> は持たない）。
+// ただし管理ページ本体なので、閲覧には認証を必須にする＝ prerender:false（リテラル）にして
+//   middleware（src/middleware.js）のサーバゲートを通す。static 配信されるとゲートを通らず
+//   誰でも読めてしまうため、この一行が最重要（ADR-0002・見本 settings.astro:13）。
+export const prerender = false;
+
+import { ENV_LABEL } from '../../../data/config.js';
+import EnvBadge from '../../../components/EnvBadge.astro';
+import AdminHeader from '../../../components/AdminHeader.astro';
+import '../../../styles/admin.css';
+// 手順プレビュー（実画面の鏡写し）で実クラス（.clist/.krt/.pii/.field/.fcard/.mchip/.tag/.memo 等）を
+// そのまま効かせるため、実管理画面と同じ admin-cabinet.css を読み込む。この import は「実クラスを
+// 使う figure」のためだけに足したもので、マニュアル本文の要素はこれらのクラスを使わない＝本文は非干渉
+// （枠内への漏れは末尾 <style> の .manual .scr スコープ中和で抑える）。.pcard/.badge/.reserve-btn/
+// .bc-scope/.quota-num 等は admin.css 側（既 import）。
+import '../../../styles/admin-cabinet.css';
+// 構成図（design 作成・自己完結コンポーネント）。本文「4. システム構成」に <ArchDiagram /> で差し込む。
+import ArchDiagram from '../../../components/ArchDiagram.astro';
+
+const _base = import.meta.env.BASE_URL;
+const base = _base.endsWith('/') ? _base : _base + '/';
+const salonName = 'サロン和笑〜Violane〜';
+const tel = '090-9095-6034';
+const pageTitle = `${ENV_LABEL}マニュアル | ${salonName}`;
+
+// 最終更新日。機能を改修したらこの日付と「6. 運用サポート」の更新履歴を更新する。
+const lastUpdated = '2026年7月13日';
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <EnvBadge />
+    <AdminHeader base={base} salonName={salonName} title="マニュアル" back="/reserve/admin" backLabel="管理トップ" />
+
+    <main class="wrap manual">
+      <p class="manual-lead">
+        この管理画面の使い方をまとめた手引きです。予約の承認、お客様への連絡、顧客情報の扱い方、
+        安全のしくみを、順番に説明します。困ったときはこのページに戻ってきてください。
+      </p>
+      <p class="manual-updated">最終更新日：{lastUpdated}</p>
+
+      <!-- 目次 -->
+      <nav class="toc" aria-label="目次">
+        <p class="toc__ttl">目次</p>
+        <ol>
+          <li><a href="#s1"><span class="toc-i" aria-hidden="true">🖥️</span>操作（画面でできること）</a></li>
+          <li><a href="#s2"><span class="toc-i" aria-hidden="true">🔒</span>顧客情報の扱い方</a></li>
+          <li><a href="#s3"><span class="toc-i" aria-hidden="true">🛡️</span>安全管理のしくみ</a></li>
+          <li><a href="#s4"><span class="toc-i" aria-hidden="true">🗺️</span>システム構成</a></li>
+          <li><a href="#s5"><span class="toc-i" aria-hidden="true">🔔</span>通知の受け取り方</a></li>
+          <li><a href="#s6"><span class="toc-i" aria-hidden="true">🧰</span>運用サポート（更新履歴・困ったとき・用語）</a></li>
+        </ol>
+      </nav>
+
+      <!-- ═══ 1. 操作 ═══ -->
+      <section class="card" id="s1">
+        <h2><span class="h2i" aria-hidden="true">🖥️</span>1. 操作（画面でできること）</h2>
+        <p class="sec-lead">まずは「やりたいこと別の手順」です。次に「画面ごとの早見」を載せています。</p>
+
+        <h3 class="blk-title">A. やりたいこと別の手順</h3>
+
+        <div class="uc uc--reserve">
+          <h4><span class="uc__ic" aria-hidden="true">✅</span>① 予約を承認する／辞退する</h4>
+          <ol>
+            <li>「管理トップ」→「予約」を開きます。承認を待っている仮予約が並びます。</li>
+            <li>必要なら、その予約の「お客様へのメッセージ（任意）」欄に一言添えます。</li>
+            <li>受けるなら「承認して確定」、断るなら「辞退」を押します（辞退は確認が出ます）。</li>
+            <li>どちらを押しても、お客様へ自動で連絡（通知）が届きます。</li>
+          </ol>
+          <figure class="shot">
+            <div class="scr" role="img" aria-label="予約管理「承認待ちの仮予約」画面のプレビュー。お客様名・メニュー・日時・連絡先を載せた仮予約カードに、お客様へのメッセージを添えて「承認して確定」または「辞退」を押せる。">
+              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">予約管理</span><span class="tag-img">プレビュー</span></div>
+              <div class="scr__body">
+                <div class="section-title">承認待ちの仮予約</div>
+                <div class="pcard">
+                  <div class="pcard-title">山田 花子 様<span class="badge first">新規</span></div>
+                  <dl class="detail-dl">
+                    <dt>メニュー</dt><dd>全身もみほぐし 50分</dd>
+                    <dt>日時</dt><dd>2026-07-20 14:00</dd>
+                    <dt>連絡先</dt><dd>090-0000-0000</dd>
+                  </dl>
+                  <div class="cust-msg">いつもありがとうございます。当日お待ちしております。</div>
+                  <div class="actions row">
+                    <span class="reserve-btn sm">承認して確定</span>
+                    <span class="reserve-btn sm decline">辞退</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <figcaption>承認待ちの予約に一言添えて「承認して確定」。</figcaption>
+          </figure>
+        </div>
+
+        <div class="uc uc--bridge">
+          <h4><span class="uc__ic" aria-hidden="true">💬</span>② お客様へメッセージを送る</h4>
+          <p>おひとりのお客様へ、個別にメッセージを送る方法は2つあります。</p>
+          <ol>
+            <li><strong>承認・辞退のとき</strong>：①と同じ画面で、承認／辞退の通知にメッセージを添えます。</li>
+            <li><strong>予約通知のリンクから</strong>：Discord に届く予約通知の「お客様へメッセージ」を開くと、そのお客様専用の送信画面が出ます。予約内容（お名前・メニュー・日時・ご要望）を見ながら、個別に送れます。この画面に連絡先は出ません。</li>
+          </ol>
+          <p class="uc-ref">常連・全予約客へまとめて送るお知らせは「⑦ LINEでまとめてお知らせを送る」をご覧ください。</p>
+          <figure class="shot">
+            <div class="scr" role="img" aria-label="「お客様へメッセージ」画面のプレビュー。確定バッジと予約内容（お名前・メニュー・日時・ご要望）を見ながら、そのお客様専用のメッセージ欄に書いて「送信する」。連絡先は表示されない。">
+              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">お客様へメッセージ</span><span class="tag-img">プレビュー</span></div>
+              <div class="scr__body">
+                <div class="section-title">お客様へメッセージを送る</div>
+                <div class="badge-line"><span class="badge ok">確定</span></div>
+                <dl class="detail-dl">
+                  <dt>お名前</dt><dd>山田 花子 様（常連）</dd>
+                  <dt>メニュー</dt><dd>全身もみほぐし 50分</dd>
+                  <dt>日時</dt><dd>7/20(日) 14:00〜（50分）</dd>
+                </dl>
+                <div class="note-box">
+                  <div class="note-label">ご要望</div>
+                  <div class="note-body">肩と腰を重点的にお願いします。</div>
+                </div>
+                <div class="msg-field">
+                  <label>お客様へのメッセージ</label>
+                  <div class="cust-msg ph">お客様へお送りするメッセージを入力してください</div>
+                </div>
+                <span class="reserve-btn">送信する</span>
+              </div>
+            </div>
+            <figcaption>予約内容を見ながら、そのお客様だけにメッセージを送れます。</figcaption>
+          </figure>
+        </div>
+
+        <div class="uc uc--reserve">
+          <h4><span class="uc__ic" aria-hidden="true">📞</span>③ 電話・来店で受けた予約を入れる（代理予約）</h4>
+          <ol>
+            <li>「予約」の画面で「代理で予約を入れる」を選びます。</li>
+            <li>空いている枠から日時を選びます（お客様の予約と同じ空き枠の選び方です）。</li>
+            <li>内容を入れて登録すると、その場で「確定」の予約として入ります。</li>
+          </ol>
+          <figure class="shot">
+            <div class="scr" role="img" aria-label="予約管理「代理で予約を入れる」画面のプレビュー。メニューを選び、空き枠から日時を選び、お名前と電話番号を入れて「この内容で予約を入れる」を押すと確定で登録される。">
+              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">予約管理</span><span class="tag-img">プレビュー</span></div>
+              <div class="scr__body">
+                <div class="section-title">代理で予約を入れる</div>
+                <div class="fcard">
+                  <div class="fsec">
+                    <div class="fsec__lbl">メニュー <span class="req">必須</span></div>
+                    <div class="menu-chips">
+                      <span class="mchip on">全身もみほぐし＋部位オイルケア<span class="price">¥— / 70分</span></span>
+                      <span class="mchip">全身もみほぐし 50分<span class="price">¥— / 50分</span></span>
+                      <span class="mchip">フットケア<span class="price">¥— / 30分</span></span>
+                    </div>
+                  </div>
+                  <div class="fsec">
+                    <div class="fsec__lbl">日時 <span class="req">必須</span></div>
+                    <p class="slot-status">ご希望の日付を選んでください（● 印が空きありの日）。</p>
+                    <div class="dt-chip"><span class="g" aria-hidden="true">◆</span>7/20（日）14:00〜 ・ 全身もみほぐし＋部位オイルケア（約70分） で登録</div>
+                  </div>
+                  <div class="fsec">
+                    <div class="fsec__lbl">お名前 <span class="req">必須</span></div>
+                    <div class="tin">サンプル 太郎</div>
+                  </div>
+                  <div class="fsec">
+                    <div class="fsec__lbl">電話番号 <span class="req">必須</span></div>
+                    <div class="tin tel">090-0000-0000</div>
+                  </div>
+                </div>
+                <div class="submit-wrap">
+                  <span class="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>この内容で予約を入れる</span>
+                </div>
+              </div>
+            </div>
+            <figcaption>空き枠から選んで、電話・来店の予約を代わりに登録。</figcaption>
+          </figure>
+        </div>
+
+        <div class="uc uc--customer">
+          <h4><span class="uc__ic" aria-hidden="true">👁️</span>④ お客様の連絡先を確認する</h4>
+          <ol>
+            <li>「顧客」を開き、確認したいお客様の行を押して詳細を開きます。</li>
+            <li>電話・メールは、ふだんは伏せて（マスクして）表示されています。</li>
+            <li>「表示」を押すと連絡先が出ます。「コピー」で控えられます。</li>
+            <li>そのまま <strong>20秒</strong> 操作がないと、自動でまた伏せた表示に戻ります。</li>
+          </ol>
+          <figure class="shot">
+            <div class="scr" role="img" aria-label="顧客管理のプレビュー。一覧では電話は常にマスクされ、メモがある人には「✎」マークが付く。行を押すと詳細が開き、「表示」を押すと連絡先が出て「コピー」でき、放置すると自動で再びマスクされる。">
+              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">顧客管理</span><span class="tag-img">プレビュー</span></div>
+              <div class="scr__body">
+                <div class="section-title">顧客一覧</div>
+                <div class="clist">
+                  <div class="clist__row">
+                    <span class="clist__head"><span class="clist__nm">山田 花子</span><span class="tag regular">常連</span><span class="clist__memo" aria-hidden="true">✎</span></span>
+                    <span class="clist__sub"><span class="clist__cnt">来店 <b>5</b> 回</span><span class="clist__dot">·</span><span class="clist__last">最終 2026/07/01</span><span class="clist__ph">090-<span class="stars">****</span>-0000</span></span>
+                  </div>
+                  <div class="clist__row">
+                    <span class="clist__head"><span class="clist__nm">サンプル 太郎</span><span class="tag first">新規</span></span>
+                    <span class="clist__sub"><span class="clist__cnt">来店 <b>1</b> 回</span><span class="clist__dot">·</span><span class="clist__last">最終 2026/06/20</span><span class="clist__ph">090-<span class="stars">****</span>-0000</span></span>
+                  </div>
+                </div>
+                <div class="scr-flow" aria-hidden="true">▼ 行を押すと詳細が開き、「表示」で連絡先が出ます</div>
+                <div class="krt">
+                  <div class="krt__top"><div><div class="krt__name">山田 花子</div></div><div class="tags"><span class="tag regular">常連</span></div></div>
+                  <div class="field">
+                    <div class="field__lbl">電話番号</div>
+                    <div class="pii-row">
+                      <span class="pii">090-0000-0000</span>
+                      <span class="pii-actions">
+                        <span class="mini-btn copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M5.5 15.5H5a1.5 1.5 0 01-1.5-1.5V5A1.5 1.5 0 015 3.5h9A1.5 1.5 0 0115.5 5v.5"/></svg>コピー</span>
+                      </span>
+                    </div>
+                    <div class="reveal-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>操作がなければ自動で再びマスクします</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <figcaption>「表示」→「コピー」。放っておけば20秒で自動的に隠れます。</figcaption>
+          </figure>
+        </div>
+
+        <div class="uc uc--customer">
+          <h4><span class="uc__ic" aria-hidden="true">✍️</span>⑤ 顧客にメモを残す</h4>
+          <ol>
+            <li>お客様の詳細を開き、「メモ」欄に書きます（アレルギー・好み・注意点など）。</li>
+            <li>「保存」を押します。メモは店主用で、<strong>お客様には表示されません</strong>。</li>
+          </ol>
+          <figure class="shot">
+            <div class="scr" role="img" aria-label="顧客詳細のメモ欄のプレビュー。「店主用・お客様には表示されません」と添えられたメモ欄に申し送りを書いて「保存」する。">
+              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">顧客管理</span><span class="tag-img">プレビュー</span></div>
+              <div class="scr__body">
+                <div class="krt">
+                  <div class="krt__top"><div><div class="krt__name">山田 花子</div></div><div class="tags"><span class="tag regular">常連</span></div></div>
+                </div>
+                <div class="memo">
+                  <div class="memo__h">メモ <span class="memo__hint">店主用・お客様には表示されません</span></div>
+                  <div class="memo__ta">肩・首のこりが強め。圧は強めがお好み。オイルは控えめでご希望。</div>
+                  <div class="memo__bar"><span class="memo__status is-ok">保存しました</span><span class="mini-btn memo__save">保存</span></div>
+                </div>
+              </div>
+            </div>
+            <figcaption>次回への申し送りメモ。お客様には見えません。</figcaption>
+          </figure>
+        </div>
+
+        <div class="uc uc--settings">
+          <h4><span class="uc__ic" aria-hidden="true">🗓️</span>⑥ 臨時休業・臨時営業を入れる</h4>
+          <ol>
+            <li>「設定」を開き、「臨時営業・休業の登録」を選びます。</li>
+            <li>日付・時間を入れて登録します。営業設定と Google カレンダーの両方に反映されます。</li>
+          </ol>
+          <figure class="shot">
+            <div class="scr" role="img" aria-label="設定「臨時営業・休業の登録」画面のプレビュー。種別（臨時休業／臨時営業）と日付を選び、終日にチェックして「登録する」を押すと営業設定とGoogleカレンダーに反映される。">
+              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">設定</span><span class="tag-img">プレビュー</span></div>
+              <div class="scr__body">
+                <div class="section-title">臨時営業・休業の登録</div>
+                <div class="bc-scope">
+                  <span class="field-label">種別</span>
+                  <label class="opt"><input type="radio" checked disabled /> 臨時休業</label>
+                  <label class="opt"><input type="radio" disabled /> 臨時営業</label>
+                </div>
+                <div class="row sc-row">
+                  <input type="date" value="2026-07-20" disabled />
+                  <label class="opt"><input type="checkbox" checked disabled /> 終日</label>
+                </div>
+                <div class="actions">
+                  <span class="reserve-btn sm">登録する</span>
+                </div>
+              </div>
+            </div>
+            <figcaption>臨時の休み・営業を登録。カレンダーにも反映されます。</figcaption>
+          </figure>
+        </div>
+
+        <div class="uc uc--broadcast">
+          <h4><span class="uc__ic" aria-hidden="true">📣</span>⑦ LINEでまとめてお知らせを送る（一斉送信）</h4>
+          <ol>
+            <li>「一斉送信」を開き、送る相手（送信対象）を選びます。</li>
+            <li>「対象と残枠を確認」を押し、送る人数と、今月の残り送信枠を確かめます。</li>
+            <li>問題なければ送信します。残り枠が足りないときは送れません（無理に送りません）。</li>
+          </ol>
+          <figure class="shot">
+            <div class="scr" role="img" aria-label="一斉通知「臨時のお知らせを一斉送信」画面のプレビュー。送信対象を選び本文を書き、「対象と残枠を確認」で人数と今月の残り送信枠を確かめる。無料枠の80%を超えると警告が出て、残枠不足では送信できない。">
+              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">一斉通知</span><span class="tag-img">プレビュー</span></div>
+              <div class="scr__body">
+                <div class="section-title">臨時のお知らせを一斉送信</div>
+                <div class="bc-scope">
+                  <span class="field-label">送信対象</span>
+                  <label class="opt"><input type="radio" checked disabled /> 常連（2回以上）</label>
+                  <label class="opt"><input type="radio" disabled /> 全予約客</label>
+                </div>
+                <div class="msg-field">
+                  <label>お知らせ本文</label>
+                  <div class="cust-msg">本日は都合により臨時休業いたします。ご不便をおかけします。</div>
+                </div>
+                <div class="pcard">
+                  <div class="pcard-title">送信対象</div>
+                  <div class="bc-count">LINE 12人 / メール 3人 / 届かない 1人</div>
+                  <div class="muted">今月 160/200 通（残 40）・送信後見込み 172</div>
+                </div>
+                <div class="quota-num"><strong>160 / 200 通</strong><span class="muted">（残り 40 通・80%）</span></div>
+                <div class="empty warn">⚠ 無料枠の80%を超えています。上限を超えると追加メッセージは送信されません。</div>
+                <div class="actions row wrap-actions">
+                  <span class="reserve-btn ghost sm">対象と残枠を確認</span>
+                  <span class="reserve-btn sm">この内容で一斉送信</span>
+                </div>
+              </div>
+            </div>
+            <figcaption>送信前に「対象と残枠」を必ず確認。枠不足なら送信不可。</figcaption>
+          </figure>
+        </div>
+
+        <h3 class="blk-title">B. 画面ごとの早見</h3>
+        <dl class="quick">
+          <dt><span class="q-dot top" aria-hidden="true"></span>管理トップ「今日の帯」</dt>
+          <dd>承認待ち・今日の予約・顧客数を一目で要約。手当てが要る区分は朱色で点灯します。</dd>
+          <dt><span class="q-dot reserve" aria-hidden="true"></span>予約管理</dt>
+          <dd>「承認待ちの仮予約」の承認／辞退と、「代理で予約を入れる」（電話・来店の代理登録）。</dd>
+          <dt><span class="q-dot customer" aria-hidden="true"></span>顧客管理</dt>
+          <dd>
+            お客様の一覧。<strong>新規／常連</strong>のタグ、並び替え（最終来店・来店回数）、
+            連絡先の段階表示（表示→コピー→20秒で自動的に隠れる）、来店履歴、
+            メモがある人には「✎」マークが付きます。
+          </dd>
+          <dt><span class="q-dot broadcast" aria-hidden="true"></span>一斉送信</dt>
+          <dd>LINE でまとめて案内。今月の残り枠を表示し、<strong>残り20%を切る（80%を使った）と警告</strong>します。</dd>
+          <dt><span class="q-dot settings" aria-hidden="true"></span>設定</dt>
+          <dd>受付枠・通知のオンオフ・臨時営業/休業。予約確定・却下などの<strong>必須の通知は切れません</strong>。</dd>
+          <dt><span class="q-dot login" aria-hidden="true"></span>ログイン</dt>
+          <dd>管理トークン（設定していれば PIN も）を入れて入室します。</dd>
+        </dl>
+      </section>
+
+      <!-- ═══ 2. 顧客情報の扱い方 ═══ -->
+      <section class="card" id="s2">
+        <h2><span class="h2i" aria-hidden="true">🔒</span>2. 顧客情報の扱い方</h2>
+        <p class="sec-lead">お客様の個人情報（電話・メールなど）を、安全に・目的の範囲だけで使うための約束ごとです。</p>
+
+        <h3 class="blk-title">なぜ電話・メールがふだん伏せてあるのか</h3>
+        <p>
+          横から画面をのぞかれても連絡先が見えないようにするためです。連絡先は「必要なその瞬間だけ」
+          「表示」を押して出す形にしています。ふだんは伏せておくのが基本です。
+        </p>
+
+        <h3 class="blk-title">20秒で自動的に隠れる意味</h3>
+        <p>
+          連絡先を「表示」したあと、20秒操作がないと自動でまた伏せた表示に戻ります。
+          出しっぱなしを防ぐ仕組みです。閉じ忘れても安心ですが、確認が済んだら早めに画面を離れましょう。
+        </p>
+
+        <h3 class="blk-title">メモに書いてよいこと・避けたいこと</h3>
+        <ul class="do-list">
+          <li class="do">書いてよい：施術に必要な申し送り（アレルギー・好み・肌の傾向・注意点など）。</li>
+          <li class="dont">避けたい：施術と関係のない詮索・評価・うわさ。感情的な書き込み。</li>
+        </ul>
+        <p class="note">
+          メモはお客様には表示されませんが、<strong>記録としては残ります</strong>。
+          あとで見返しても差し支えのない、事実にもとづく内容だけを書いてください。
+        </p>
+
+        <h3 class="blk-title">共有の端末で使うときの注意</h3>
+        <ul>
+          <li>席を離れるときは、顧客情報を開いたままにしない。</li>
+          <li>使い終わったら「ログアウト」する。</li>
+        </ul>
+
+        <h3 class="blk-title">目的の外に使わない</h3>
+        <p>
+          お客様の情報は、予約・連絡・施術のためだけに使います。それ以外の目的（宣伝の使い回しなど）
+          には使いません。
+        </p>
+
+        <h3 class="blk-title">開示・訂正・削除の依頼が来たら</h3>
+        <p>
+          お客様から「自分の情報を見せてほしい・直してほしい・消してほしい」と依頼が来たら、
+          ご本人であることを確認したうえで対応します。手順は公開している
+          <a href={`${base}privacy/`} target="_blank" rel="noopener noreferrer">プライバシーポリシー</a>
+          の「9. 開示・訂正・利用停止等のご請求」に沿って進めてください。
+        </p>
+      </section>
+
+      <!-- ═══ 3. 安全管理のしくみ ═══ -->
+      <section class="card" id="s3">
+        <h2><span class="h2i" aria-hidden="true">🛡️</span>3. 安全管理のしくみ</h2>
+        <p class="sec-lead">お客様の情報を守るために、裏側でこのような仕組みにしています（店主が操作する必要はありません）。</p>
+        <ul>
+          <li>
+            <strong>保存先はサロンのものだけ：</strong>
+            情報の保存先は、サロンが持っている Google（カレンダーと台帳）と LINE だけです。
+            独自のデータベースは持ちません。
+          </li>
+          <li>
+            <strong>ブラウザに生の連絡先を渡さない：</strong>
+            お客様の照合には、連絡先そのものではなく「変換した符号（ハッシュ）」を使います。
+            画面の裏側に連絡先の生データを残しません。
+          </li>
+          <li>
+            <strong>管理画面は本人だけ：</strong>
+            ログインした管理者本人しか中身を見られません（サーバー側で毎回確認しています）。
+          </li>
+          <li>
+            <strong>監査ログ：</strong>
+            「いつ・誰が・何を見た／直したか」を記録しています。ただしメッセージ本文や
+            ログインの合言葉そのものは記録に残しません。
+          </li>
+        </ul>
+        <p>
+          くわしい方針は
+          <a href={`${base}privacy/`} target="_blank" rel="noopener noreferrer">プライバシーポリシー</a>
+          に公開しています。
+        </p>
+      </section>
+
+      <!-- ═══ 4. システム構成 ═══ -->
+      <section class="card" id="s4">
+        <h2><span class="h2i" aria-hidden="true">🗺️</span>4. システム構成</h2>
+        <p class="sec-lead">この予約システムが、どの部品でできているかの全体像です。</p>
+        <dl class="arch-list">
+          <dt>配信・入室管理</dt>
+          <dd>Cloudflare Workers（サイトの表示とログインの管理）。ドメインは wwwasyo.com です。</dd>
+          <dt>裏側の処理</dt>
+          <dd>Google Apps Script（予約の登録・通知などを担う）。</dd>
+          <dt>データの置き場所</dt>
+          <dd>Google カレンダー（予約）と、スプレッドシートの台帳（お客様の記録）。</dd>
+          <dt>基盤</dt>
+          <dd>Google Workspace。メールも Google を使います。</dd>
+          <dt>連携</dt>
+          <dd>LINE 公式アカウント（お客様への連絡・受付）。</dd>
+        </dl>
+
+        <div class="arch-figure">
+          <ArchDiagram />
+        </div>
+      </section>
+
+      <!-- ═══ 5. 通知の受け取り方 ═══ -->
+      <section class="card" id="s5">
+        <h2><span class="h2i" aria-hidden="true">🔔</span>5. 通知の受け取り方</h2>
+        <p class="sec-lead">システムからのお知らせや、予約状況を手元で受け取る方法です。</p>
+        <ul>
+          <li>
+            <strong>Discord に参加する：</strong>
+            参加すると、システムからのお知らせ（新しい予約・システムの稼働／停止・週次のバックアップなど）を
+            受け取れます。
+          </li>
+          <li>
+            <strong>Google カレンダーを共有してもらう：</strong>
+            共有してもらうと、予約の状況をそのままカレンダーで見られます。定期のお知らせもここに集まります。
+          </li>
+        </ul>
+        <p class="note">
+          参加用のリンクや共有先の宛先は、安全のためこのページには載せていません。
+          <strong>管理者から個別にご案内します。</strong>
+        </p>
+      </section>
+
+      <!-- ═══ 6. 運用サポート ═══ -->
+      <section class="card" id="s6">
+        <h2><span class="h2i" aria-hidden="true">🧰</span>6. 運用サポート</h2>
+
+        <h3 class="blk-title">更新履歴</h3>
+        <ul class="history">
+          <li><time>2026年7月13日</time>：マニュアルページを新規作成。</li>
+        </ul>
+
+        <h3 class="blk-title">よくあるトラブルと対処</h3>
+        <dl class="trouble">
+          <dt>ログインできない</dt>
+          <dd>
+            管理トークン（と PIN）の入力ミスがないか確認します。しばらく操作していないと
+            入室が切れることがあるので、その場合はもう一度ログインしてください。
+          </dd>
+          <dt>空き枠が出てこない（代理予約）</dt>
+          <dd>
+            その日が休業・臨時休業になっていないか、受付枠の設定を「設定」で確認します。
+            当日や、受付できる期間の外は枠が出ません。
+          </dd>
+          <dt>通知（一斉送信）が送れない・届かない</dt>
+          <dd>
+            「対象と残枠を確認」で今月の残り枠を確認します。枠が足りないと送れません。
+            届かない場合はお客様側の受信設定の可能性もあります。
+          </dd>
+        </dl>
+
+        <h3 class="blk-title">用語集</h3>
+        <dl class="glossary">
+          <dt>承認待ち（仮予約）</dt>
+          <dd>お客様が申し込んだが、まだ確定していない予約。「承認して確定」で成立します。</dd>
+          <dt>確定</dt>
+          <dd>成立した予約。カレンダーに入り、お客様へ確定の連絡が届いています。</dd>
+          <dt>代理予約</dt>
+          <dd>電話・来店で受けた予約を、店主が代わりに登録すること。登録した時点で確定になります。</dd>
+          <dt>残枠</dt>
+          <dd>LINE でまとめて送れる、今月の残り回数。使いきると追加は送れません。</dd>
+          <dt>マスク</dt>
+          <dd>電話・メールを伏せて表示すること。「表示」を押すまで見えません。</dd>
+        </dl>
+
+        <h3 class="blk-title">お問い合わせ先</h3>
+        <p>
+          不具合や操作で困ったときは、システムの管理者にご連絡ください
+          （連絡先は「5. 通知の受け取り方」でご案内している経路と同じです）。
+        </p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>{salonName}</p>
+      <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
+    </footer>
+
+    <!-- 長文（読み物）用スタイル。基本トークン・.wrap・.card・.card>h2 は admin.css を流用し、
+         ここではこのページ固有の要素（目次・手順・スクショ枠・早見/用語の定義リスト等）だけを足す。
+         .manual 配下に限定して他ページへ影響させない。 -->
+    <style is:global>
+      .manual-lead { margin-bottom: .5rem; }
+      .manual-updated { font-size: .82rem; color: var(--c-muted); margin-bottom: 1.25rem; }
+
+      /* 目次 */
+      .toc {
+        background: var(--c-surface); border: 1px solid var(--c-border);
+        border-radius: 12px; padding: .9rem 1rem 1rem; margin-bottom: 1.25rem;
+      }
+      .toc__ttl { font-weight: 600; color: var(--c-purple-dk); margin-bottom: .45rem; }
+      .toc ol { margin: 0 0 0 1.4rem; }
+      .toc li { margin-bottom: .25rem; }
+      .toc a { color: var(--c-purple-dk); }
+
+      /* セクション見出し直下のリード */
+      .manual .sec-lead { color: var(--c-muted); font-size: .92rem; margin-bottom: 1rem; }
+
+      /* カード内の小見出し */
+      .manual .blk-title {
+        font-size: 1rem; color: var(--c-purple-dk);
+        margin: 1.4rem 0 .6rem; padding-left: .55rem;
+        border-left: 4px solid var(--c-accent);
+      }
+      .manual .card > .blk-title:first-of-type { margin-top: .4rem; }
+
+      /* 本文の余白・リスト（admin.css の * リセットで潰れるため、ここで復活させる） */
+      .manual .card p { margin-bottom: .6rem; }
+      .manual .card ul { margin: 0 0 .8rem 1.3rem; list-style: disc; }
+      .manual .card ul li { margin-bottom: .35rem; }
+      .manual .note { font-size: .88rem; color: var(--c-muted); }
+
+      /* やりたいこと別の手順（ユースケース） */
+      .manual .uc { margin: 0 0 1.1rem; }
+      .manual .uc h4 {
+        font-size: .98rem; font-weight: 600; color: var(--c-ink);
+        margin-bottom: .5rem;
+      }
+      .manual .uc ol { margin: 0 0 .7rem 1.4rem; }
+      .manual .uc ol li { margin-bottom: .35rem; }
+      /* 他手順への参照（1行・淡色）。⑦ など別セクションへの案内に使う */
+      .manual .uc .uc-ref { font-size: .85rem; color: var(--c-muted); margin: 0 0 .7rem; }
+
+      /* スクショ枠（画像は後日差し替え。今はプレースホルダ） */
+      .manual .shot { margin: .2rem 0 .4rem; }
+      .manual .shot__ph {
+        display: flex; align-items: center; justify-content: center;
+        min-height: 92px; padding: 1rem;
+        background: var(--c-bg);
+        border: 1px dashed var(--c-purple-lt); border-radius: 10px;
+        color: var(--c-muted); font-size: .85rem; text-align: center;
+      }
+      .manual .shot img { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--c-border); }
+      .manual .shot figcaption { font-size: .82rem; color: var(--c-muted); margin-top: .4rem; }
+
+      /* 早見・構成・用語・トラブルの定義リスト */
+      .manual dl.quick, .manual dl.arch-list, .manual dl.glossary, .manual dl.trouble { margin: .2rem 0 .4rem; }
+      .manual dl.quick dt, .manual dl.arch-list dt, .manual dl.glossary dt, .manual dl.trouble dt {
+        font-weight: 600; color: var(--c-purple-dk); margin-top: .8rem;
+      }
+      .manual dl dt:first-child { margin-top: 0; }
+      .manual dl.quick dd, .manual dl.arch-list dd, .manual dl.glossary dd, .manual dl.trouble dd {
+        margin: .15rem 0 0; color: var(--c-ink); font-size: .95rem;
+      }
+
+      /* メモの do / dont */
+      .manual .do-list { list-style: none !important; margin-left: 0 !important; }
+      .manual .do-list li { padding-left: 1.5rem; position: relative; }
+      .manual .do-list li.do::before { content: "○"; position: absolute; left: 0; color: #2f7a3f; font-weight: 700; }
+      .manual .do-list li.dont::before { content: "×"; position: absolute; left: 0; color: #8E2230; font-weight: 700; }
+
+      /* 構成図（ArchDiagram）の差し込み容器。図は自己完結（中央寄せ・max-width）なので余白のみ足す */
+      .manual .arch-figure { margin-top: 1rem; }
+
+      /* 更新履歴 */
+      .manual .history { list-style: none !important; margin-left: 0 !important; }
+      .manual .history li { font-size: .92rem; }
+      .manual .history time { color: var(--c-purple-dk); font-weight: 600; margin-right: .4rem; }
+
+      /* ═══════════════════════════════════════════════════════════════
+         装飾（絵文字・区切り・注意ブロック）
+         装飾の絵文字はすべて aria-hidden。意味は文字が担い、色と絵文字は
+         「まとまりを一目で掴む」ための道標にとどめる（使いすぎない）。
+         ═══════════════════════════════════════════════════════════════ */
+      /* セクション見出し・目次の先頭アイコン */
+      .manual .card > h2 .h2i { font-size: 1.05em; margin-right: .5rem; }
+      .manual .toc-i { margin-right: .45rem; }
+
+      /* 注意・補足（.note を小ブロック化＝金の左線＋淡い地でカルテの「特記」に） */
+      .manual .note {
+        background: var(--a-paper); border: 1px solid var(--a-line);
+        border-left: 4px solid var(--a-gold); border-radius: 9px;
+        padding: .65rem .8rem; margin: .4rem 0 .8rem;
+      }
+
+      /* やりたいこと別：手順ごとに区分色を持たせ、見出しに色線で「どの画面か」を示す。
+         色は実画面の区分色（予約=青／顧客=紫／一斉=金茶／設定=緑）と一致＝位置＋色で覚える。 */
+      .manual .uc--reserve   { --_k: var(--k-reserve); }
+      .manual .uc--customer  { --_k: var(--k-customer); }
+      .manual .uc--broadcast { --_k: var(--k-broadcast); }
+      .manual .uc--settings  { --_k: var(--k-settings); }
+      .manual .uc--bridge    { --_k: var(--a-gold-dp); }   /* 画面をまたぐ手順は金で示す */
+      .manual .uc h4 {
+        display: flex; align-items: center; gap: .5rem;
+        padding: .1rem 0 .1rem .6rem;
+        border-left: 4px solid var(--_k, var(--a-muted));
+      }
+      .manual .uc h4 .uc__ic { font-size: 1.05rem; flex: none; }
+
+      /* 早見の区分色ドット（画面名に色を添えて mock と対応づける） */
+      .manual .q-dot {
+        display: inline-block; width: .62rem; height: .62rem; border-radius: 3px;
+        margin-right: .5rem; vertical-align: middle; background: var(--a-muted);
+      }
+      .manual .q-dot.top       { background: var(--a-gold); }
+      .manual .q-dot.reserve   { background: var(--k-reserve); }
+      .manual .q-dot.customer  { background: var(--k-customer); }
+      .manual .q-dot.broadcast { background: var(--k-broadcast); }
+      .manual .q-dot.settings  { background: var(--k-settings); }
+      .manual .q-dot.login     { background: var(--a-muted); }
+
+      /* ═══════════════════════════════════════════════════════════════
+         手順の「実画面プレビュー」（実スクリーンショットではない／実UIの鏡写し）
+         ・中身は実管理画面と同じ HTML 構造・クラス（.clist / .krt / .pii / .field /
+           .fcard / .mchip / .tag / .memo / .pcard / .quota-num / .bc-scope 等）を
+           ダミーデータで固定描画したもの。配色・余白は admin.css / admin-cabinet.css
+           の実クラスがそのまま与える（＝実画面と並べて遜色ない見た目）。
+         ・端末フレーム（.scr / .scr__bar / .scr__body）だけがこのマニュアル固有。
+           上帯は実ヘッダ（漆紫グラデ＋金線）の写しで、右端に「プレビュー」印を出す。
+         ・描くのは架空のダミーのみ（山田 花子／サンプル 太郎／090-0000-0000／
+           090-****-**** ／ sample@example.com 等）。実在の顧客・電話・メール・
+           識別子・秘密は一切描かない。図全体を role="img"＋aria-label で1枚の絵として
+           読ませる（＝中の見た目だけのボタン・入力は AT から1枚絵として扱われる）。
+         ═══════════════════════════════════════════════════════════════ */
+      .manual .scr {
+        max-width: 360px; width: 100%; margin: .1rem auto;
+        border: 1px solid var(--a-line); border-radius: 13px; overflow: hidden;
+        background: var(--a-surface); box-shadow: 0 1px 2px rgba(44,30,56,.06);
+        font-family: var(--f-sans); line-height: 1.5;
+      }
+      /* 画面上部の帯（漆紫＋金線＝実 AdminHeader の写し）。右端に「プレビュー」印 */
+      .manual .scr__bar {
+        display: flex; align-items: center; gap: .4rem; padding: .4rem .6rem;
+        background: linear-gradient(180deg, var(--a-cabinet2), var(--a-cabinet));
+        border-bottom: 2px solid var(--a-gold);
+      }
+      .manual .scr__bar .b { color: var(--a-gold); font-size: .8rem; flex: none; }
+      .manual .scr__bar .t { color: #E5D8E2; font-size: .78rem; font-weight: 600; }
+      .manual .scr__bar .tag-img {
+        margin-left: auto; flex: none; font-size: .58rem; letter-spacing: .1em;
+        color: var(--a-gold); border: 1px solid rgba(201,168,76,.5);
+        border-radius: 5px; padding: .04rem .38rem;
+      }
+      /* 画面の内容領域（実ページの本文背景＝藤鼠の上質紙。上に実カードが乗る） */
+      .manual .scr__body { padding: .7rem; background: var(--a-paper); display: flex; flex-direction: column; gap: .5rem; }
+
+      /* プレビュー枠内は実UIクラスをそのまま効かせるのが目的。マニュアル本文の可読性用
+         余白（.manual .card p / ul / li）や各コンポーネントの外側 margin が枠内へ漏れて
+         崩れないよう、枠内だけ最小スコープで中和する（本文レイアウトには不干渉）。 */
+      .manual .scr p { margin: 0; }
+      .manual .scr ul, .manual .scr ol { list-style: none; margin: 0; padding: 0; }
+      .manual .scr li { margin: 0; }
+      .manual .scr .pcard, .manual .scr .fcard, .manual .scr .krt, .manual .scr .memo { margin: 0; }
+      .manual .scr .submit-wrap { padding: 0; }
+
+      /* 一覧→詳細をつなぐ流れの注記（実画面には無い、プレビュー用の道標） */
+      .manual .scr-flow { text-align: center; font-size: .62rem; letter-spacing: .03em; color: var(--a-muted); }
+
+      /* ② の「お客様へメッセージ」プレビューは message.astro（実ページ）の鏡写し。
+         .detail-dl / .msg-field / .cust-msg / .reserve-btn は admin.css が与えるが、
+         .badge.ok/.pending（確定/仮予約）と .note-box 系は message.astro 固有のため、
+         枠内（.manual .scr）に限って近似スタイルを最小追加する（実画面に見た目を寄せる）。 */
+      .manual .scr .badge-line { display: flex; }
+      .manual .scr .badge-line .badge { margin-left: 0; }
+      .manual .scr .badge.ok { background: #E2F0E8; color: #2E7D5B; }
+      .manual .scr .badge.pending { background: #F6EFC9; color: #8a6d1a; }
+      .manual .scr .note-box { background: #FCF6FA; border: 1px solid var(--a-line); border-radius: 8px; padding: .55rem .7rem; }
+      .manual .scr .note-label { font-size: .72rem; color: var(--a-muted); margin-bottom: .2rem; }
+      .manual .scr .note-body { font-size: .88rem; color: var(--a-ink); }
+      /* 空のメッセージ入力欄（textarea）の写し：placeholder 文をグレーで、6行相当の高さに */
+      .manual .scr .cust-msg.ph { color: var(--a-muted); min-height: 4.5em; }
+    </style>
+  </body>
+</html>

@@ -7,6 +7,12 @@
 
 ---
 
+## 保守の約束（改修時に守ること）
+
+- 管理画面の機能を改修したら、店主向けマニュアル（[`../src/pages/reserve/admin/manual.astro`](../src/pages/reserve/admin/manual.astro)）の該当節と更新履歴（frontmatter の `lastUpdated` 定数＋「6. 運用サポート」の更新履歴リスト）も更新する。
+
+---
+
 ## 2026-06-17 — 仮予約が「作成直後に勝手に消える」／承認リンクが not_found
 
 ### 症状
