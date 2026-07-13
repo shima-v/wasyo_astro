@@ -11,6 +11,12 @@ import { ENV_LABEL } from '../../../data/config.js';
 import EnvBadge from '../../../components/EnvBadge.astro';
 import AdminHeader from '../../../components/AdminHeader.astro';
 import '../../../styles/admin.css';
+// 手順プレビュー（実画面の鏡写し）で実クラス（.clist/.krt/.pii/.field/.fcard/.mchip/.tag/.memo 等）を
+// そのまま効かせるため、実管理画面と同じ admin-cabinet.css を読み込む。この import は「実クラスを
+// 使う figure」のためだけに足したもので、マニュアル本文の要素はこれらのクラスを使わない＝本文は非干渉
+// （枠内への漏れは末尾 <style> の .manual .scr スコープ中和で抑える）。.pcard/.badge/.reserve-btn/
+// .bc-scope/.quota-num 等は admin.css 側（既 import）。
+import '../../../styles/admin-cabinet.css';
 // 構成図（design 作成・自己完結コンポーネント）。本文「4. システム構成」に <ArchDiagram /> で差し込む。
 import ArchDiagram from '../../../components/ArchDiagram.astro';
 
@@ -72,15 +78,22 @@ const lastUpdated = '2026年7月13日';
             <li>どちらを押しても、お客様へ自動で連絡（通知）が届きます。</li>
           </ol>
           <figure class="shot">
-            <div class="scr" role="img" aria-label="予約管理の承認待ち画面のイメージ図。仮予約に一言を添えて承認または辞退できる。">
-              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">予約管理</span><span class="tag-img">イメージ</span></div>
+            <div class="scr" role="img" aria-label="予約管理「承認待ちの仮予約」画面のプレビュー。お客様名・メニュー・日時・連絡先を載せた仮予約カードに、お客様へのメッセージを添えて「承認して確定」または「辞退」を押せる。">
+              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">予約管理</span><span class="tag-img">プレビュー</span></div>
               <div class="scr__body">
-                <div class="scr__sec">承認待ちの仮予約</div>
-                <div class="scr-card">
-                  <div class="scr-top"><span class="scr-nm">山田 花子 様</span><span class="scr-tag first">新規</span></div>
-                  <dl class="scr-kv"><span class="k">メニュー</span><span class="v">カット＋カラー</span><span class="k">日時</span><span class="v">7/20（日）14:00</span></dl>
-                  <span class="scr-inp ta">お客様へのメッセージ（任意）</span>
-                  <div class="scr-actions"><span class="scr-btn fill">承認して確定</span><span class="scr-btn decline">辞退</span></div>
+                <div class="section-title">承認待ちの仮予約</div>
+                <div class="pcard">
+                  <div class="pcard-title">山田 花子 様<span class="badge first">新規</span></div>
+                  <dl class="detail-dl">
+                    <dt>メニュー</dt><dd>カット＋カラー</dd>
+                    <dt>日時</dt><dd>2026-07-20 14:00</dd>
+                    <dt>連絡先</dt><dd>090-0000-0000</dd>
+                  </dl>
+                  <div class="cust-msg">いつもありがとうございます。当日お待ちしております。</div>
+                  <div class="actions row">
+                    <span class="reserve-btn sm">承認して確定</span>
+                    <span class="reserve-btn sm decline">辞退</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -95,12 +108,12 @@ const lastUpdated = '2026年7月13日';
             <li>まとめて送る：「一斉送信」から案内を送れます（手順は⑦）。</li>
           </ol>
           <figure class="shot">
-            <div class="scr" role="img" aria-label="メッセージを送る2つの方法を示すイメージ図。ひとりには承認・辞退の通知に添え、まとめては一斉送信で送る。">
-              <div class="scr__bar"><span class="t">お客様へ連絡する</span><span class="tag-img">イメージ</span></div>
+            <div class="scr" role="img" aria-label="お客様へメッセージを送る2つの経路を示すプレビュー。同じメッセージ欄から、ひとりには承認・辞退の通知に添えて、まとめては一斉送信で送れる。">
+              <div class="scr__bar"><span class="t">お客様へ連絡する</span><span class="tag-img">プレビュー</span></div>
               <div class="scr__body">
-                <div class="scr-card">
-                  <span class="scr-lbl">メッセージ</span>
-                  <span class="scr-inp ta">いつもありがとうございます。当日お待ちしております。</span>
+                <div class="msg-field">
+                  <label>メッセージ</label>
+                  <div class="cust-msg">いつもありがとうございます。当日お待ちしております。</div>
                 </div>
                 <div class="scr-two">
                   <div class="scr-route"><span class="ic" aria-hidden="true">💬</span><b>ひとりに</b><span>承認／辞退の通知に添える</span></div>
@@ -120,18 +133,35 @@ const lastUpdated = '2026年7月13日';
             <li>内容を入れて登録すると、その場で「確定」の予約として入ります。</li>
           </ol>
           <figure class="shot">
-            <div class="scr" role="img" aria-label="代理で予約を入れる画面のイメージ図。メニューと空き枠から日時を選び、名前と電話を入れて確定で登録する。">
-              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">予約管理</span><span class="tag-img">イメージ</span></div>
+            <div class="scr" role="img" aria-label="予約管理「代理で予約を入れる」画面のプレビュー。メニューを選び、空き枠から日時を選び、お名前と電話番号を入れて「この内容で予約を入れる」を押すと確定で登録される。">
+              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">予約管理</span><span class="tag-img">プレビュー</span></div>
               <div class="scr__body">
-                <div class="scr__sec">代理で予約を入れる</div>
-                <div class="scr-card">
-                  <span class="scr-lbl">メニュー</span>
-                  <div class="scr-chips"><span class="scr-chip on">カット</span><span class="scr-chip">カラー</span><span class="scr-chip">パーマ</span></div>
-                  <span class="scr-lbl">日時（空き枠から）</span>
-                  <span class="scr-inp">7/20（日）14:00〜</span>
-                  <span class="scr-lbl">お名前 ／ 電話</span>
-                  <span class="scr-inp">サンプル 太郎 ／ 090-0000-0000</span>
-                  <div class="scr-actions"><span class="scr-btn fill">この内容で予約を入れる</span></div>
+                <div class="section-title">代理で予約を入れる</div>
+                <div class="fcard">
+                  <div class="fsec">
+                    <div class="fsec__lbl">メニュー <span class="req">必須</span></div>
+                    <div class="menu-chips">
+                      <span class="mchip on">カット<span class="price">¥— / 60分</span></span>
+                      <span class="mchip">カラー<span class="price">¥— / 90分</span></span>
+                      <span class="mchip">パーマ<span class="price">¥— / 120分</span></span>
+                    </div>
+                  </div>
+                  <div class="fsec">
+                    <div class="fsec__lbl">日時 <span class="req">必須</span></div>
+                    <p class="slot-status">ご希望の日付を選んでください（● 印が空きありの日）。</p>
+                    <div class="dt-chip"><span class="g" aria-hidden="true">◆</span>7/20（日）14:00〜 ・ カット（約60分） で登録</div>
+                  </div>
+                  <div class="fsec">
+                    <div class="fsec__lbl">お名前 <span class="req">必須</span></div>
+                    <div class="tin">サンプル 太郎</div>
+                  </div>
+                  <div class="fsec">
+                    <div class="fsec__lbl">電話番号 <span class="req">必須</span></div>
+                    <div class="tin tel">090-0000-0000</div>
+                  </div>
+                </div>
+                <div class="submit-wrap">
+                  <span class="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>この内容で予約を入れる</span>
                 </div>
               </div>
             </div>
@@ -148,14 +178,33 @@ const lastUpdated = '2026年7月13日';
             <li>そのまま <strong>20秒</strong> 操作がないと、自動でまた伏せた表示に戻ります。</li>
           </ol>
           <figure class="shot">
-            <div class="scr" role="img" aria-label="顧客の連絡先を段階的に表示する画面のイメージ図。ふだんは伏せてあり、表示を押すと出て、放置すると自動で再び隠れる。">
-              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">顧客管理</span><span class="tag-img">イメージ</span></div>
+            <div class="scr" role="img" aria-label="顧客管理のプレビュー。一覧では電話は常にマスクされ、メモがある人には「✎」マークが付く。行を押すと詳細が開き、「表示」を押すと連絡先が出て「コピー」でき、放置すると自動で再びマスクされる。">
+              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">顧客管理</span><span class="tag-img">プレビュー</span></div>
               <div class="scr__body">
-                <div class="scr-card">
-                  <div class="scr-top"><span class="scr-nm">山田 花子</span><span class="scr-tag reg">常連</span></div>
-                  <span class="scr-lbl">電話番号</span>
-                  <div class="scr-pii"><span class="m">090-****-****</span><span class="scr-btn mini"><span aria-hidden="true">👁</span> 表示</span><span class="scr-btn mini"><span aria-hidden="true">⧉</span> コピー</span></div>
-                  <span class="scr-hint"><span aria-hidden="true">⏱</span> 操作がなければ20秒で自動的に隠れます</span>
+                <div class="section-title">顧客一覧</div>
+                <div class="clist">
+                  <div class="clist__row">
+                    <span class="clist__head"><span class="clist__nm">山田 花子</span><span class="tag regular">常連</span><span class="clist__memo" aria-hidden="true">✎</span></span>
+                    <span class="clist__sub"><span class="clist__cnt">来店 <b>5</b> 回</span><span class="clist__dot">·</span><span class="clist__last">最終 2026/07/01</span><span class="clist__ph">090-<span class="stars">****</span>-0000</span></span>
+                  </div>
+                  <div class="clist__row">
+                    <span class="clist__head"><span class="clist__nm">サンプル 太郎</span><span class="tag first">新規</span></span>
+                    <span class="clist__sub"><span class="clist__cnt">来店 <b>1</b> 回</span><span class="clist__dot">·</span><span class="clist__last">最終 2026/06/20</span><span class="clist__ph">090-<span class="stars">****</span>-0000</span></span>
+                  </div>
+                </div>
+                <div class="scr-flow" aria-hidden="true">▼ 行を押すと詳細が開き、「表示」で連絡先が出ます</div>
+                <div class="krt">
+                  <div class="krt__top"><div><div class="krt__name">山田 花子</div></div><div class="tags"><span class="tag regular">常連</span></div></div>
+                  <div class="field">
+                    <div class="field__lbl">電話番号</div>
+                    <div class="pii-row">
+                      <span class="pii">090-0000-0000</span>
+                      <span class="pii-actions">
+                        <span class="mini-btn copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M5.5 15.5H5a1.5 1.5 0 01-1.5-1.5V5A1.5 1.5 0 015 3.5h9A1.5 1.5 0 0115.5 5v.5"/></svg>コピー</span>
+                      </span>
+                    </div>
+                    <div class="reveal-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>操作がなければ自動で再びマスクします</div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -170,14 +219,16 @@ const lastUpdated = '2026年7月13日';
             <li>「保存」を押します。メモは店主用で、<strong>お客様には表示されません</strong>。</li>
           </ol>
           <figure class="shot">
-            <div class="scr" role="img" aria-label="顧客にメモを残す画面のイメージ図。メモは店主用でお客様には表示されない。">
-              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">顧客管理</span><span class="tag-img">イメージ</span></div>
+            <div class="scr" role="img" aria-label="顧客詳細のメモ欄のプレビュー。「店主用・お客様には表示されません」と添えられたメモ欄に申し送りを書いて「保存」する。">
+              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">顧客管理</span><span class="tag-img">プレビュー</span></div>
               <div class="scr__body">
-                <div class="scr-card">
-                  <div class="scr-top"><span class="scr-nm">山田 花子</span><span class="scr-tag reg">常連</span></div>
-                  <span class="scr-lbl">メモ　店主用・お客様には表示されません</span>
-                  <span class="scr-inp ta">カラーはアッシュ系がお好み。次回も同系統でご提案。</span>
-                  <div class="scr-actions end"><span class="scr-btn mini">保存</span></div>
+                <div class="krt">
+                  <div class="krt__top"><div><div class="krt__name">山田 花子</div></div><div class="tags"><span class="tag regular">常連</span></div></div>
+                </div>
+                <div class="memo">
+                  <div class="memo__h">メモ <span class="memo__hint">店主用・お客様には表示されません</span></div>
+                  <div class="memo__ta">カラーはアッシュ系がお好み。次回も同系統でご提案。</div>
+                  <div class="memo__bar"><span class="memo__status is-ok">保存しました</span><span class="mini-btn memo__save">保存</span></div>
                 </div>
               </div>
             </div>
@@ -192,17 +243,21 @@ const lastUpdated = '2026年7月13日';
             <li>日付・時間を入れて登録します。営業設定と Google カレンダーの両方に反映されます。</li>
           </ol>
           <figure class="shot">
-            <div class="scr" role="img" aria-label="設定画面で臨時営業・休業を登録するイメージ図。種別と日付を入れて登録すると営業設定とカレンダーに反映される。">
-              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">設定</span><span class="tag-img">イメージ</span></div>
+            <div class="scr" role="img" aria-label="設定「臨時営業・休業の登録」画面のプレビュー。種別（臨時休業／臨時営業）と日付を選び、終日にチェックして「登録する」を押すと営業設定とGoogleカレンダーに反映される。">
+              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">設定</span><span class="tag-img">プレビュー</span></div>
               <div class="scr__body">
-                <div class="scr__sec">臨時営業・休業の登録</div>
-                <div class="scr-card">
-                  <span class="scr-lbl">種別</span>
-                  <div class="scr-opts"><span class="scr-opt on"><span class="r" aria-hidden="true"></span>臨時休業</span><span class="scr-opt"><span class="r" aria-hidden="true"></span>臨時営業</span></div>
-                  <span class="scr-lbl">日付</span>
-                  <span class="scr-inp">2026-07-20</span>
-                  <div class="scr-opts"><span class="scr-opt on"><span class="r sq" aria-hidden="true"></span>終日</span></div>
-                  <div class="scr-actions"><span class="scr-btn fill">登録する</span></div>
+                <div class="section-title">臨時営業・休業の登録</div>
+                <div class="bc-scope">
+                  <span class="field-label">種別</span>
+                  <label class="opt"><input type="radio" checked disabled /> 臨時休業</label>
+                  <label class="opt"><input type="radio" disabled /> 臨時営業</label>
+                </div>
+                <div class="row sc-row">
+                  <input type="date" value="2026-07-20" disabled />
+                  <label class="opt"><input type="checkbox" checked disabled /> 終日</label>
+                </div>
+                <div class="actions">
+                  <span class="reserve-btn sm">登録する</span>
                 </div>
               </div>
             </div>
@@ -218,16 +273,29 @@ const lastUpdated = '2026年7月13日';
             <li>問題なければ送信します。残り枠が足りないときは送れません（無理に送りません）。</li>
           </ol>
           <figure class="shot">
-            <div class="scr" role="img" aria-label="一斉送信で対象と残枠を確認する画面のイメージ図。送信対象を選び本文を書き、対象と残枠を確認してから送信する。残枠不足なら送れない。">
-              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">一斉通知</span><span class="tag-img">イメージ</span></div>
+            <div class="scr" role="img" aria-label="一斉通知「臨時のお知らせを一斉送信」画面のプレビュー。送信対象を選び本文を書き、「対象と残枠を確認」で人数と今月の残り送信枠を確かめる。無料枠の80%を超えると警告が出て、残枠不足では送信できない。">
+              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">一斉通知</span><span class="tag-img">プレビュー</span></div>
               <div class="scr__body">
-                <div class="scr__sec">臨時のお知らせを一斉送信</div>
-                <div class="scr-card">
-                  <span class="scr-lbl">送信対象</span>
-                  <div class="scr-opts"><span class="scr-opt on"><span class="r" aria-hidden="true"></span>常連（2回以上）</span><span class="scr-opt"><span class="r" aria-hidden="true"></span>全予約客</span></div>
-                  <span class="scr-inp ta">本日は都合により臨時休業いたします。</span>
-                  <div class="scr-quota"><span>送信対象　LINE <b>12</b> 人 ／ メール <b>3</b> 人</span><span>今月 <b>40 / 200</b> 通（残 <b>160</b>）</span></div>
-                  <div class="scr-actions"><span class="scr-btn ghost">対象と残枠を確認</span><span class="scr-btn fill">一斉送信</span></div>
+                <div class="section-title">臨時のお知らせを一斉送信</div>
+                <div class="bc-scope">
+                  <span class="field-label">送信対象</span>
+                  <label class="opt"><input type="radio" checked disabled /> 常連（2回以上）</label>
+                  <label class="opt"><input type="radio" disabled /> 全予約客</label>
+                </div>
+                <div class="msg-field">
+                  <label>お知らせ本文</label>
+                  <div class="cust-msg">本日は都合により臨時休業いたします。ご不便をおかけします。</div>
+                </div>
+                <div class="pcard">
+                  <div class="pcard-title">送信対象</div>
+                  <div class="bc-count">LINE 12人 / メール 3人 / 届かない 1人</div>
+                  <div class="muted">今月 160/200 通（残 40）・送信後見込み 172</div>
+                </div>
+                <div class="quota-num"><strong>160 / 200 通</strong><span class="muted">（残り 40 通・80%）</span></div>
+                <div class="empty warn">⚠ 無料枠の80%を超えています。上限を超えると追加メッセージは送信されません。</div>
+                <div class="actions row wrap-actions">
+                  <span class="reserve-btn ghost sm">対象と残枠を確認</span>
+                  <span class="reserve-btn sm">この内容で一斉送信</span>
                 </div>
               </div>
             </div>
@@ -556,19 +624,25 @@ const lastUpdated = '2026年7月13日';
       .manual .q-dot.login     { background: var(--a-muted); }
 
       /* ═══════════════════════════════════════════════════════════════
-         手順の「模式イメージ図」（実スクリーンショットではない）
-         ・ArchDiagram と同じ流儀：admin.css トークンで配色し、flex-wrap で
-           スマホ幅でも崩れない。図全体を role="img"＋aria-label で1枚の絵として読む。
+         手順の「実画面プレビュー」（実スクリーンショットではない／実UIの鏡写し）
+         ・中身は実管理画面と同じ HTML 構造・クラス（.clist / .krt / .pii / .field /
+           .fcard / .mchip / .tag / .memo / .pcard / .quota-num / .bc-scope 等）を
+           ダミーデータで固定描画したもの。配色・余白は admin.css / admin-cabinet.css
+           の実クラスがそのまま与える（＝実画面と並べて遜色ない見た目）。
+         ・端末フレーム（.scr / .scr__bar / .scr__body）だけがこのマニュアル固有。
+           上帯は実ヘッダ（漆紫グラデ＋金線）の写しで、右端に「プレビュー」印を出す。
          ・描くのは架空のダミーのみ（山田 花子／サンプル 太郎／090-0000-0000／
-           090-****-**** 等）。実在の顧客・電話・メール・秘密は一切描かない。
+           090-****-**** ／ sample@example.com 等）。実在の顧客・電話・メール・
+           識別子・秘密は一切描かない。図全体を role="img"＋aria-label で1枚の絵として
+           読ませる（＝中の見た目だけのボタン・入力は AT から1枚絵として扱われる）。
          ═══════════════════════════════════════════════════════════════ */
       .manual .scr {
-        max-width: 340px; width: 100%; margin: .1rem auto;
+        max-width: 360px; width: 100%; margin: .1rem auto;
         border: 1px solid var(--a-line); border-radius: 13px; overflow: hidden;
         background: var(--a-surface); box-shadow: 0 1px 2px rgba(44,30,56,.06);
         font-family: var(--f-sans); line-height: 1.5;
       }
-      /* 画面上部の帯（漆紫＋金線＝実ヘッダの写し）。右端に「イメージ」印 */
+      /* 画面上部の帯（漆紫＋金線＝実 AdminHeader の写し）。右端に「プレビュー」印 */
       .manual .scr__bar {
         display: flex; align-items: center; gap: .4rem; padding: .4rem .6rem;
         background: linear-gradient(180deg, var(--a-cabinet2), var(--a-cabinet));
@@ -581,53 +655,23 @@ const lastUpdated = '2026年7月13日';
         color: var(--a-gold); border: 1px solid rgba(201,168,76,.5);
         border-radius: 5px; padding: .04rem .38rem;
       }
-      .manual .scr__body { padding: .6rem; background: var(--a-paper); display: flex; flex-direction: column; gap: .5rem; }
-      /* 画面内セクション名（区分色の左線） */
-      .manual .scr__sec {
-        font-size: .72rem; font-weight: 700; letter-spacing: .02em; color: var(--a-ink-soft);
-        padding-left: .42rem; border-left: 3px solid var(--_k, var(--a-muted));
-      }
-      /* 白カード（承認待ち1件・顧客カルテ・入力欄のまとまり） */
-      .manual .scr-card { background: #fff; border: 1px solid var(--a-line); border-radius: 9px; padding: .55rem .6rem; display: flex; flex-direction: column; gap: .4rem; }
-      .manual .scr-top { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
-      .manual .scr-nm { font-family: var(--f-serif); font-size: .92rem; font-weight: 600; color: var(--a-ink); }
-      .manual .scr-tag { font-size: .58rem; padding: .06rem .44rem; border-radius: 20px; white-space: nowrap; }
-      .manual .scr-tag.first { background: #F2EBD9; color: #8a6d1a; border: 1px solid rgba(176,141,60,.35); }
-      .manual .scr-tag.reg   { background: var(--k-customer-bg); color: #6a4a68; border: 1px solid rgba(139,96,128,.35); }
-      /* ラベル：値の2列（メニュー・日時など） */
-      .manual .scr-kv { display: grid; grid-template-columns: auto 1fr; gap: .12rem .55rem; font-size: .68rem; margin: 0; }
-      .manual .scr-kv .k { color: var(--a-muted); }
-      .manual .scr-kv .v { color: var(--a-ink); }
-      /* 入力欄・テキストエリアの見た目（中身はダミーのプレースホルダ文） */
-      .manual .scr-lbl { display: block; font-size: .62rem; letter-spacing: .08em; color: var(--a-muted); }
-      .manual .scr-inp { display: block; width: 100%; background: #fff; border: 1px solid var(--a-line); border-radius: 6px; padding: .32rem .48rem; font-size: .68rem; color: var(--a-muted); }
-      .manual .scr-inp.ta { min-height: 30px; }
-      /* 選択肢（種別・送信対象）。塗り＝選択中を区分色で */
-      .manual .scr-opts { display: flex; flex-wrap: wrap; gap: .3rem .85rem; font-size: .68rem; color: var(--a-ink); }
-      .manual .scr-opt { display: inline-flex; align-items: center; gap: .3rem; }
-      .manual .scr-opt .r { width: .72rem; height: .72rem; border-radius: 50%; border: 1.5px solid var(--a-muted); flex: none; }
-      .manual .scr-opt .r.sq { border-radius: 3px; }
-      .manual .scr-opt.on .r { background: var(--_k, var(--a-cabinet)); border-color: var(--_k, var(--a-cabinet)); }
-      /* メニュー等のチップ */
-      .manual .scr-chips { display: flex; flex-wrap: wrap; gap: .3rem; }
-      .manual .scr-chip { font-size: .64rem; background: #fff; border: 1px solid var(--a-line); border-radius: 7px; padding: .22rem .52rem; color: var(--a-ink-soft); }
-      .manual .scr-chip.on { border-color: var(--_k, var(--a-cabinet)); box-shadow: inset 0 0 0 1px var(--_k, var(--a-cabinet)); color: var(--a-ink); font-weight: 600; }
-      /* ボタン */
-      .manual .scr-actions { display: flex; flex-wrap: wrap; gap: .38rem; }
-      .manual .scr-actions.end { justify-content: flex-end; }
-      .manual .scr-btn { flex: 1 1 auto; text-align: center; font-size: .68rem; font-weight: 600; border-radius: 18px; padding: .32rem .6rem; border: 1px solid transparent; white-space: nowrap; }
-      .manual .scr-btn.fill { background: var(--a-cabinet); color: #fff; }
-      .manual .scr-btn.ghost { background: transparent; color: var(--a-ink-soft); border-color: var(--a-line); }
-      .manual .scr-btn.decline { background: var(--a-seal); color: #fff; flex: 0 1 auto; }
-      .manual .scr-btn.mini { flex: 0 0 auto; font-size: .62rem; font-weight: 600; padding: .24rem .5rem; border-radius: 6px; border-color: var(--a-gold); color: var(--a-cabinet); background: #fff; }
-      /* 連絡先の段階開示行（マスク値＋表示/コピー＋自動再マスクの注記） */
-      .manual .scr-pii { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
-      .manual .scr-pii .m { font-size: .84rem; letter-spacing: .05em; color: var(--a-ink-soft); font-variant-numeric: tabular-nums; }
-      .manual .scr-hint { font-size: .6rem; color: var(--a-gold-dp); display: flex; align-items: center; gap: .28rem; }
-      /* 残枠ミニ（一斉送信の対象と残枠） */
-      .manual .scr-quota { background: var(--k-broadcast-bg); border: 1px solid rgba(176,141,60,.3); border-radius: 8px; padding: .42rem .55rem; font-size: .66rem; color: var(--a-ink); display: flex; flex-direction: column; gap: .22rem; font-variant-numeric: tabular-nums; }
-      .manual .scr-quota b { color: var(--a-gold-dp); }
-      /* 画面をまたぐ手順の2ルート（ひとりに／まとめて） */
+      /* 画面の内容領域（実ページの本文背景＝藤鼠の上質紙。上に実カードが乗る） */
+      .manual .scr__body { padding: .7rem; background: var(--a-paper); display: flex; flex-direction: column; gap: .5rem; }
+
+      /* プレビュー枠内は実UIクラスをそのまま効かせるのが目的。マニュアル本文の可読性用
+         余白（.manual .card p / ul / li）や各コンポーネントの外側 margin が枠内へ漏れて
+         崩れないよう、枠内だけ最小スコープで中和する（本文レイアウトには不干渉）。 */
+      .manual .scr p { margin: 0; }
+      .manual .scr ul, .manual .scr ol { list-style: none; margin: 0; padding: 0; }
+      .manual .scr li { margin: 0; }
+      .manual .scr .pcard, .manual .scr .fcard, .manual .scr .krt, .manual .scr .memo { margin: 0; }
+      .manual .scr .submit-wrap { padding: 0; }
+
+      /* 一覧→詳細をつなぐ流れの注記（実画面には無い、プレビュー用の道標） */
+      .manual .scr-flow { text-align: center; font-size: .62rem; letter-spacing: .03em; color: var(--a-muted); }
+
+      /* 画面をまたぐ手順の2ルート（ひとりに／まとめて）。単一の実画面が無い概念図のため
+         最小の自前スタイルで示す（金の左線でカルテの流儀に馴染ませる）。 */
       .manual .scr-two { display: flex; gap: .4rem; flex-wrap: wrap; }
       .manual .scr-route { flex: 1 1 130px; background: #fff; border: 1px solid var(--a-line); border-left: 3px solid var(--a-gold); border-radius: 8px; padding: .42rem .5rem; display: flex; flex-direction: column; gap: .12rem; font-size: .64rem; color: var(--a-muted); }
       .manual .scr-route .ic { font-size: 1rem; }
