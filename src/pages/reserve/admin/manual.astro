@@ -85,7 +85,7 @@ const lastUpdated = '2026年7月13日';
                 <div class="pcard">
                   <div class="pcard-title">山田 花子 様<span class="badge first">新規</span></div>
                   <dl class="detail-dl">
-                    <dt>メニュー</dt><dd>カット＋カラー</dd>
+                    <dt>メニュー</dt><dd>全身もみほぐし 50分</dd>
                     <dt>日時</dt><dd>2026-07-20 14:00</dd>
                     <dt>連絡先</dt><dd>090-0000-0000</dd>
                   </dl>
@@ -103,25 +103,35 @@ const lastUpdated = '2026年7月13日';
 
         <div class="uc uc--bridge">
           <h4><span class="uc__ic" aria-hidden="true">💬</span>② お客様へメッセージを送る</h4>
+          <p>おひとりのお客様へ、個別にメッセージを送る方法は2つあります。</p>
           <ol>
-            <li>ひとりに送る：予約を承認／辞退するとき、メッセージ欄に書けば連絡に添えられます。</li>
-            <li>まとめて送る：「一斉送信」から案内を送れます（手順は⑦）。</li>
+            <li><strong>承認・辞退のとき</strong>：①と同じ画面で、承認／辞退の通知にメッセージを添えます。</li>
+            <li><strong>予約通知のリンクから</strong>：Discord に届く予約通知の「お客様へメッセージ」を開くと、そのお客様専用の送信画面が出ます。予約内容（お名前・メニュー・日時・ご要望）を見ながら、個別に送れます。この画面に連絡先は出ません。</li>
           </ol>
+          <p class="uc-ref">常連・全予約客へまとめて送るお知らせは「⑦ LINEでまとめてお知らせを送る」をご覧ください。</p>
           <figure class="shot">
-            <div class="scr" role="img" aria-label="お客様へメッセージを送る2つの経路を示すプレビュー。同じメッセージ欄から、ひとりには承認・辞退の通知に添えて、まとめては一斉送信で送れる。">
-              <div class="scr__bar"><span class="t">お客様へ連絡する</span><span class="tag-img">プレビュー</span></div>
+            <div class="scr" role="img" aria-label="「お客様へメッセージ」画面のプレビュー。確定バッジと予約内容（お名前・メニュー・日時・ご要望）を見ながら、そのお客様専用のメッセージ欄に書いて「送信する」。連絡先は表示されない。">
+              <div class="scr__bar"><span class="b" aria-hidden="true">‹</span><span class="t">お客様へメッセージ</span><span class="tag-img">プレビュー</span></div>
               <div class="scr__body">
+                <div class="section-title">お客様へメッセージを送る</div>
+                <div class="badge-line"><span class="badge ok">確定</span></div>
+                <dl class="detail-dl">
+                  <dt>お名前</dt><dd>山田 花子 様（常連）</dd>
+                  <dt>メニュー</dt><dd>全身もみほぐし 50分</dd>
+                  <dt>日時</dt><dd>7/20(日) 14:00〜（50分）</dd>
+                </dl>
+                <div class="note-box">
+                  <div class="note-label">ご要望</div>
+                  <div class="note-body">肩と腰を重点的にお願いします。</div>
+                </div>
                 <div class="msg-field">
-                  <label>メッセージ</label>
-                  <div class="cust-msg">いつもありがとうございます。当日お待ちしております。</div>
+                  <label>お客様へのメッセージ</label>
+                  <div class="cust-msg ph">お客様へお送りするメッセージを入力してください</div>
                 </div>
-                <div class="scr-two">
-                  <div class="scr-route"><span class="ic" aria-hidden="true">💬</span><b>ひとりに</b><span>承認／辞退の通知に添える</span></div>
-                  <div class="scr-route"><span class="ic" aria-hidden="true">📣</span><b>まとめて</b><span>一斉送信で送る（手順⑦）</span></div>
-                </div>
+                <span class="reserve-btn">送信する</span>
               </div>
             </div>
-            <figcaption>承認／辞退の通知に、その場のメッセージを添えられます。</figcaption>
+            <figcaption>予約内容を見ながら、そのお客様だけにメッセージを送れます。</figcaption>
           </figure>
         </div>
 
@@ -141,15 +151,15 @@ const lastUpdated = '2026年7月13日';
                   <div class="fsec">
                     <div class="fsec__lbl">メニュー <span class="req">必須</span></div>
                     <div class="menu-chips">
-                      <span class="mchip on">カット<span class="price">¥— / 60分</span></span>
-                      <span class="mchip">カラー<span class="price">¥— / 90分</span></span>
-                      <span class="mchip">パーマ<span class="price">¥— / 120分</span></span>
+                      <span class="mchip on">全身もみほぐし＋部位オイルケア<span class="price">¥— / 70分</span></span>
+                      <span class="mchip">全身もみほぐし 50分<span class="price">¥— / 50分</span></span>
+                      <span class="mchip">フットケア<span class="price">¥— / 30分</span></span>
                     </div>
                   </div>
                   <div class="fsec">
                     <div class="fsec__lbl">日時 <span class="req">必須</span></div>
                     <p class="slot-status">ご希望の日付を選んでください（● 印が空きありの日）。</p>
-                    <div class="dt-chip"><span class="g" aria-hidden="true">◆</span>7/20（日）14:00〜 ・ カット（約60分） で登録</div>
+                    <div class="dt-chip"><span class="g" aria-hidden="true">◆</span>7/20（日）14:00〜 ・ 全身もみほぐし＋部位オイルケア（約70分） で登録</div>
                   </div>
                   <div class="fsec">
                     <div class="fsec__lbl">お名前 <span class="req">必須</span></div>
@@ -227,7 +237,7 @@ const lastUpdated = '2026年7月13日';
                 </div>
                 <div class="memo">
                   <div class="memo__h">メモ <span class="memo__hint">店主用・お客様には表示されません</span></div>
-                  <div class="memo__ta">カラーはアッシュ系がお好み。次回も同系統でご提案。</div>
+                  <div class="memo__ta">肩・首のこりが強め。圧は強めがお好み。オイルは控えめでご希望。</div>
                   <div class="memo__bar"><span class="memo__status is-ok">保存しました</span><span class="mini-btn memo__save">保存</span></div>
                 </div>
               </div>
@@ -544,6 +554,8 @@ const lastUpdated = '2026年7月13日';
       }
       .manual .uc ol { margin: 0 0 .7rem 1.4rem; }
       .manual .uc ol li { margin-bottom: .35rem; }
+      /* 他手順への参照（1行・淡色）。⑦ など別セクションへの案内に使う */
+      .manual .uc .uc-ref { font-size: .85rem; color: var(--c-muted); margin: 0 0 .7rem; }
 
       /* スクショ枠（画像は後日差し替え。今はプレースホルダ） */
       .manual .shot { margin: .2rem 0 .4rem; }
@@ -670,12 +682,19 @@ const lastUpdated = '2026年7月13日';
       /* 一覧→詳細をつなぐ流れの注記（実画面には無い、プレビュー用の道標） */
       .manual .scr-flow { text-align: center; font-size: .62rem; letter-spacing: .03em; color: var(--a-muted); }
 
-      /* 画面をまたぐ手順の2ルート（ひとりに／まとめて）。単一の実画面が無い概念図のため
-         最小の自前スタイルで示す（金の左線でカルテの流儀に馴染ませる）。 */
-      .manual .scr-two { display: flex; gap: .4rem; flex-wrap: wrap; }
-      .manual .scr-route { flex: 1 1 130px; background: #fff; border: 1px solid var(--a-line); border-left: 3px solid var(--a-gold); border-radius: 8px; padding: .42rem .5rem; display: flex; flex-direction: column; gap: .12rem; font-size: .64rem; color: var(--a-muted); }
-      .manual .scr-route .ic { font-size: 1rem; }
-      .manual .scr-route b { font-size: .72rem; color: var(--a-ink); }
+      /* ② の「お客様へメッセージ」プレビューは message.astro（実ページ）の鏡写し。
+         .detail-dl / .msg-field / .cust-msg / .reserve-btn は admin.css が与えるが、
+         .badge.ok/.pending（確定/仮予約）と .note-box 系は message.astro 固有のため、
+         枠内（.manual .scr）に限って近似スタイルを最小追加する（実画面に見た目を寄せる）。 */
+      .manual .scr .badge-line { display: flex; }
+      .manual .scr .badge-line .badge { margin-left: 0; }
+      .manual .scr .badge.ok { background: #E2F0E8; color: #2E7D5B; }
+      .manual .scr .badge.pending { background: #F6EFC9; color: #8a6d1a; }
+      .manual .scr .note-box { background: #FCF6FA; border: 1px solid var(--a-line); border-radius: 8px; padding: .55rem .7rem; }
+      .manual .scr .note-label { font-size: .72rem; color: var(--a-muted); margin-bottom: .2rem; }
+      .manual .scr .note-body { font-size: .88rem; color: var(--a-ink); }
+      /* 空のメッセージ入力欄（textarea）の写し：placeholder 文をグレーで、6行相当の高さに */
+      .manual .scr .cust-msg.ph { color: var(--a-muted); min-height: 4.5em; }
     </style>
   </body>
 </html>
