@@ -1,0 +1,316 @@
+---
+// 過去のご予約の引き継ぎ（/reserve/handover）。
+// 媒体をまたいだ同一人物を person(不変の背番号)へ束ねる「名寄せ」のお客様側・主導線。
+//   お客様自身が LINE でログイン → 検証済み idToken を GAS へ渡し、その idToken 由来の email に
+//   一致する「過去 person」の**非PIIサマリだけ**を確認 → 本人の同意で今の LINE を過去 person に結合する。
+//
+// 【idToken 方式＝本人承認済み】照合メールは idToken 内の「検証済み email」から取る。お客様が自由入力
+// するメールは使わない（他人の要約の覗き見＝メール列挙攻撃を防ぐため）。ゆえにこのページは LIFF ページで、
+// お客様は LINE ログイン必須（index.astro の initLiff と同じ手順で idToken を得る）。message 系と同じく
+// 「ブラウザ→GAS /exec 直送」経路（Worker 非経由）で handoverCheck / handoverConfirm を叩く。
+//
+// prerender=false リテラル（サーバチャンク行き）。※本ページは公開ルートで保護は idToken（GAS 側検証）に
+// 依り、middleware の管理ゲート（/reserve/admin 限定）は通らない。static でも機能上は成立する（兄弟の
+// message.astro / index.astro は static）が、指示に従いオンデマンドにする。
+export const prerender = false;
+
+import { RESERVE_API, ENV_LABEL, LIFF_ID } from '../../data/config.js';
+import EnvBadge from '../../components/EnvBadge.astro';
+import SubmitOverlay from '../../components/SubmitOverlay.astro';
+
+const _base = import.meta.env.BASE_URL;
+const base = _base.endsWith('/') ? _base : _base + '/';
+const salonName = 'サロン和笑〜Violane〜';
+const tel = '090-9095-6034';
+// title は単一の式にする（<title> RCDATA で式＋生テキストの混在を避ける）
+const pageTitle = `${ENV_LABEL}過去のご予約を引き継ぐ | ${salonName}`;
+---
+
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/jpeg" href={`${base}favicon.jpg`} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>{pageTitle}</title>
+    {LIFF_ID ? <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script> : null}
+  </head>
+  <body>
+    <EnvBadge />
+    <!-- 引き継ぎ送信中の全面オーバーレイ（二重送信防止）。共有部品 SubmitOverlay -->
+    <SubmitOverlay message="引き継いでいます…" subtext="画面をそのままでお待ちください" />
+    <header class="site-header">
+      <a class="home-link" href={base}>‹ {salonName}</a>
+      <span class="head-title">過去のご予約を引き継ぐ</span>
+    </header>
+
+    <main class="wrap">
+      <!-- 読み込み・LINEログイン待ち -->
+      <div id="loading" class="status loading"><span class="spinner" aria-hidden="true"></span><span id="loadingMsg">ご予約履歴を確認しています…</span></div>
+
+      <!-- 引き継ぎ対象あり（非PIIサマリのみ表示） -->
+      <section class="card" id="found" hidden>
+        <h2>過去のご予約が見つかりました</h2>
+        <p class="lead">これまでのご来店の記録が確認できました。</p>
+        <div class="summary" id="summaryBox">
+          <div class="summary__row"><span class="summary__k">ご来店</span><span class="summary__v" id="s-count">—</span></div>
+          <div class="summary__row"><span class="summary__k">最終ご来店</span><span class="summary__v" id="s-last">—</span></div>
+        </div>
+        <p class="ask">この記録を、いまお使いの LINE アカウントに引き継ぎますか？</p>
+        <div class="actions">
+          <button type="button" class="reserve-btn" id="confirmBtn">引き継ぐ</button>
+          <button type="button" class="reserve-btn ghost" id="declineBtn">いいえ</button>
+        </div>
+        <p id="fieldMsg" class="field-msg"></p>
+      </section>
+
+      <!-- 汎用の結果表示（引き継ぎ完了／対象なし／連携済み／無害なエラー） -->
+      <section class="card done" id="result" hidden>
+        <div class="done-mark" id="resultMark">✓</div>
+        <h2 id="resultTitle"></h2>
+        <p id="resultBody"></p>
+        <a class="reserve-btn ghost" href={`${base}reserve/`}>ご予約ページへ</a>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>{salonName}</p>
+      <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
+    </footer>
+
+    <script type="application/json" id="reserve-config" set:html={JSON.stringify({ RESERVE_API, LIFF_ID })}></script>
+    <script>
+      // 共有部品（src/lib）を import するため bundled module 化。サーバ値は JSON から読む。
+      import { runExclusive } from '../../lib/submit-overlay.js';
+      const { RESERVE_API, LIFF_ID } = JSON.parse(document.getElementById('reserve-config').textContent);
+
+      const $ = (s) => document.querySelector(s);
+      const LIFF_ENABLED = !!LIFF_ID;
+      // 検証済み idToken。取得後に handoverCheck / handoverConfirm へ都度渡す（GAS が LINE /verify で再検証）。
+      let idToken = '';
+
+      // ブラウザ→GAS /exec 直送（message.astro と同経路・Worker 非経由）。
+      async function postAction(payload) {
+        const res = await fetch(RESERVE_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload),
+        });
+        return res.json();
+      }
+
+      function showResult(ok, title, body) {
+        $('#loading').hidden = true;
+        $('#found').hidden = true;
+        $('#resultMark').textContent = ok ? '✓' : '！';
+        $('#resultTitle').textContent = title;
+        $('#resultBody').textContent = body;
+        $('#result').hidden = false;
+      }
+
+      // 無害なエラー文言（攻撃者に手がかりを与えない・お客様には平易に）。
+      function benign() {
+        showResult(false, 'ただいまご利用いただけません',
+          '恐れ入りますが、時間をおいてもう一度お試しください。ご不明な点はサロンまでお問い合わせください。');
+      }
+
+      // 来店回数・最終来店年月の非PIIサマリだけを描画する（氏名・連絡先・来店日そのものは受け取らない）。
+      function renderFound(summary) {
+        $('#loading').hidden = true;
+        const n = Number((summary && summary.visitCount) || 0);
+        $('#s-count').textContent = n > 0 ? (n + ' 回') : '—';
+        const ym = String((summary && summary.lastVisitYm) || '');
+        const m = ym.match(/^(\d{4})-(\d{2})$/);
+        $('#s-last').textContent = m ? (m[1] + '年' + Number(m[2]) + '月') : '—';
+        $('#found').hidden = false;
+      }
+
+      // ---- 引き継ぎの実行（同意後） ----
+      function wireConfirm() {
+        $('#declineBtn').addEventListener('click', () => {
+          showResult(true, '引き継ぎを行いませんでした',
+            'いつでもこのページから引き継ぎできます。ご予約は引き続きご利用いただけます。');
+        });
+        $('#confirmBtn').addEventListener('click', () => {
+          runExclusive(async () => {
+            const btn = $('#confirmBtn');
+            $('#fieldMsg').textContent = '';
+            btn.disabled = true;
+            $('#declineBtn').disabled = true;
+            try {
+              const r = await postAction({ action: 'handoverConfirm', idToken });
+              if (r && r.ok && (r.linked || r.alreadyLinked)) {
+                showResult(true, '引き継ぎが完了しました',
+                  'これまでのご来店の記録が、いまお使いの LINE アカウントに引き継がれました。');
+              } else if (r && r.ok && r.found === false) {
+                // 確認から実行までの間に状況が変わった等。対象なしを静かに伝える。
+                showResult(true, '引き継ぐ記録はありませんでした',
+                  '引き継げる過去のご予約は見つかりませんでした。');
+              } else {
+                btn.disabled = false;
+                $('#declineBtn').disabled = false;
+                $('#fieldMsg').textContent = 'うまく引き継げませんでした。お手数ですが、もう一度お試しください。';
+              }
+            } catch (e) {
+              btn.disabled = false;
+              $('#declineBtn').disabled = false;
+              $('#fieldMsg').textContent = '通信に失敗しました。時間をおいて再度お試しください。';
+            }
+          });
+        });
+      }
+
+      // ---- 引き継ぎ対象の確認（read-only・非PII） ----
+      async function check() {
+        let data;
+        try {
+          data = await postAction({ action: 'handoverCheck', idToken });
+        } catch (e) {
+          benign();
+          return;
+        }
+        if (!data || !data.ok) {
+          // bad_token / no_email / ambiguous いずれも無害な文言（他人PIIは一切出さない）。
+          if (data && data.error === 'no_email') {
+            showResult(false, 'メールアドレスの共有が必要です',
+              '過去のご予約の引き継ぎには、LINE でのメールアドレス共有へのご同意が必要です。ご同意のうえ、もう一度お試しください。');
+          } else {
+            benign();
+          }
+          return;
+        }
+        if (data.found) {
+          renderFound(data.summary);
+          return;
+        }
+        // found:false（alreadyLinked の有無で文言を分ける）。どちらも静かに。
+        if (data.alreadyLinked) {
+          showResult(true, 'すでに連携済みです',
+            'この記録は、すでにお客様のアカウントに連携されています。引き継ぎの操作は不要です。');
+        } else {
+          showResult(true, '引き継ぐ記録はありません',
+            '引き継げる過去のご予約は見つかりませんでした。ご予約は引き続きご利用いただけます。');
+        }
+      }
+
+      // ---- 起動：LIFF でログイン → idToken 取得 → 確認 ----
+      async function start() {
+        if (!LIFF_ENABLED || !window.liff || !RESERVE_API) {
+          benign();
+          return;
+        }
+        try {
+          await liff.init({ liffId: LIFF_ID });
+        } catch (_) {
+          benign();
+          return;
+        }
+        // index.astro の initLiff と違い isInClient() では絞らない。外部ブラウザでも LINE ログインさせて
+        // idToken を得る（このページは idToken が無いと何もできないため）。未ログインなら LINE 認可へ。
+        if (!liff.isLoggedIn()) {
+          $('#loadingMsg').textContent = 'LINE ログインに移動します…';
+          liff.login(); // 認可後この URL に戻る
+          return;
+        }
+        idToken = liff.getIDToken() || '';
+        if (!idToken) {
+          benign();
+          return;
+        }
+        wireConfirm();
+        check();
+      }
+
+      start();
+    </script>
+
+    <style is:global>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      /* display:flex 等を指定した要素でも hidden 属性が確実に効くようにする */
+      [hidden] { display: none !important; }
+      :root {
+        --c-bg: #FDF2F5; --c-surface: #FFFFFF; --c-ink: #2C1F3A; --c-muted: #7A6080;
+        --c-border: #E2D0D8; --c-purple: #8B6080; --c-purple-lt: #B09AB0; --c-purple-dk: #3E2B4A;
+        --c-reserve: #8B6080; --c-reserve-hv: #3E2B4A; --c-accent: #C9A84C;
+        --f-serif: 'Noto Serif JP', 'YuMincho', 'Yu Mincho', serif;
+      }
+      body { font-family: var(--f-serif); background: var(--c-bg); color: var(--c-ink); line-height: 1.9; font-size: 16px; }
+      /* 横方向の意図しないはみ出しを切り落とす（縦スクロール・sticky は維持） */
+      html, body { overflow-x: clip; }
+      a { color: var(--c-purple-dk); }
+
+      /* キーボードフォーカスをゴールド輪郭で明示 */
+      :focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; border-radius: 2px; }
+      .site-header {
+        position: sticky; top: 0; z-index: 10;
+        display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+        padding: .7rem 1rem; background: rgba(253,242,245,.92); backdrop-filter: blur(6px);
+        border-bottom: 1px solid var(--c-border);
+      }
+      .home-link { text-decoration: none; color: var(--c-purple-dk); font-size: .9rem; }
+      .head-title { font-size: .9rem; color: var(--c-muted); }
+      .wrap { max-width: 600px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+
+      .status { color: var(--c-muted); font-size: .92rem; padding: .5rem 0; }
+      .status.loading {
+        display: flex; align-items: center; gap: .55rem;
+        color: var(--c-purple-dk); font-weight: 600;
+        background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 8px; padding: .65rem .8rem;
+      }
+      .spinner {
+        width: 18px; height: 18px; flex: none;
+        border: 3px solid var(--c-border); border-top-color: var(--c-purple);
+        border-radius: 50%; animation: spin .8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      .card {
+        background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 12px;
+        padding: 1.1rem 1rem 1.3rem; margin-bottom: 1.25rem;
+      }
+      .card > h2 { font-size: 1.15rem; margin-bottom: .8rem; padding-bottom: .55rem; border-bottom: 1px solid var(--c-border); }
+      .lead { font-size: .95rem; color: var(--c-muted); margin-bottom: .9rem; }
+
+      .summary {
+        background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 8px;
+        padding: .7rem .9rem; margin-bottom: 1rem;
+      }
+      .summary__row { display: flex; justify-content: space-between; gap: 1rem; padding: .2rem 0; }
+      .summary__k { color: var(--c-muted); font-size: .9rem; }
+      .summary__v { font-weight: 700; color: var(--c-purple-dk); }
+
+      .ask { font-size: 1rem; margin: .3rem 0 .2rem; }
+      .field-msg { color: #8E2230; font-size: .9rem; margin-top: .7rem; min-height: 1.2em; text-align: center; }
+
+      .actions { display: flex; flex-direction: column; gap: .6rem; margin-top: 1.2rem; }
+      .reserve-btn {
+        display: inline-flex; align-items: center; justify-content: center; width: 100%;
+        font-family: inherit; font-size: 1rem; cursor: pointer; background: var(--c-reserve); color: #fff;
+        border: none; border-radius: 24px; padding: .75rem 1.2rem; min-height: 48px; text-decoration: none;
+        transition: background .15s, transform .15s;
+      }
+      .reserve-btn:hover { background: var(--c-reserve-hv); transform: translateY(-1px); }
+      .reserve-btn:disabled { opacity: .55; cursor: default; transform: none; }
+      .reserve-btn.ghost { background: transparent; color: var(--c-purple-dk); border: 1px solid var(--c-border); }
+
+      .done { text-align: center; }
+      .done-mark {
+        width: 3rem; height: 3rem; margin: 0 auto .5rem; border-radius: 50%; background: var(--c-purple);
+        color: #fff; font-size: 1.5rem; display: flex; align-items: center; justify-content: center;
+      }
+      .done p { margin: .8rem 0 1rem; }
+
+      .site-footer { text-align: center; color: var(--c-muted); font-size: .82rem; padding: 1.5rem 1rem 2.5rem; }
+      .site-footer .small { font-size: .78rem; }
+
+      /* 動きを抑える設定の利用者にはアニメを無効化 */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.001ms !important;
+        }
+      }
+    </style>
+  </body>
+</html>

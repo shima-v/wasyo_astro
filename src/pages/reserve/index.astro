@@ -209,6 +209,14 @@ const grouped = groupOrder.map((g) => ({
             </div>
           </div>
 
+          <!-- 名寄せの引き継ぎ導線（入口①）。LINE連携で idToken を得たあと handoverCheck し、
+               過去のご予約（媒体違い）が found:true のときだけ控えめに表示。既定は非表示・うるさくしない。 -->
+          <a class="handover-hint" id="handoverHint" href={`${base}reserve/handover`} hidden>
+            <span class="handover-hint__ic" aria-hidden="true">🗂</span>
+            <span class="handover-hint__tx"><strong>過去のご予約履歴が見つかりました。</strong>いまお使いの LINE アカウントに引き継げます。</span>
+            <span class="handover-hint__go" aria-hidden="true">›</span>
+          </a>
+
           <!-- 再訪（保存済み）の折りたたみ表示 -->
           <div class="field known-summary" id="knownSummary" hidden>
             <div class="known-head">
@@ -831,10 +839,32 @@ const grouped = groupOrder.map((g) => ({
             $('#emailFromLine').hidden = false; // LINEから取得した旨と利用目的を明示
           }
           applyLinkState();
+          // 名寄せの引き継ぎ導線（入口①）：この idToken で軽く handoverCheck し、過去のご予約が
+          // 見つかったときだけ控えめなバナーを出す（非ブロッキング・found:false は何も出さない）。
+          maybeShowHandoverHint(idToken);
           return true;
         } catch (_) {
           return false;
         }
+      }
+
+      // 過去のご予約（媒体をまたいだ同一人物）の有無を非PIIで確認し、found:true のときだけ引き継ぎ導線を出す。
+      // 応答は message 系と同じ「ブラウザ→GAS 直送」。氏名・連絡先は受け取らず、found の真偽だけを使う。
+      async function maybeShowHandoverHint(idToken) {
+        if (!idToken || !RESERVE_API) return;
+        try {
+          const res = await fetch(RESERVE_API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'handoverCheck', idToken }),
+          });
+          const data = await res.json();
+          // found:true のときだけ表示。false / alreadyLinked / エラーは何も出さない（うるさくしない）。
+          if (data && data.ok && data.found) {
+            const hint = $('#handoverHint');
+            if (hint) hint.hidden = false;
+          }
+        } catch (_) { /* 失敗時は黙って出さない（予約フローを妨げない） */ }
       }
 
       // 予約成功後（LIFF時のみ）：トークへ送信／友だち追加案内／シェアボタン
@@ -1669,6 +1699,19 @@ const grouped = groupOrder.map((g) => ({
         background: none; border: none; text-decoration: underline; cursor: pointer; padding: .2rem 0;
       }
       .line-unlink:hover { color: var(--c-purple-dk); }
+
+      /* 名寄せの引き継ぎ導線（入口①）。控えめなカードリンク。found:true のときだけ表示。 */
+      .handover-hint {
+        display: flex; align-items: center; gap: .6rem; text-decoration: none;
+        background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 10px;
+        padding: .7rem .85rem; margin-bottom: 1.25rem; color: var(--c-ink);
+        transition: border-color .15s, transform .15s;
+      }
+      .handover-hint:hover { border-color: var(--c-purple-lt); transform: translateY(-1px); }
+      .handover-hint__ic { flex: none; font-size: 1.1rem; line-height: 1; }
+      .handover-hint__tx { flex: 1; font-size: .86rem; line-height: 1.6; }
+      .handover-hint__tx strong { color: var(--c-purple-dk); font-weight: 700; }
+      .handover-hint__go { flex: none; color: var(--c-purple); font-size: 1.2rem; }
 
       /* 連絡方法フィールドの「LINEで連携をご利用ください」強調 */
       .contact-line-note {
