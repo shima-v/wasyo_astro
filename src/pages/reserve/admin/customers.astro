@@ -249,6 +249,7 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         el('detailSection').hidden = false;
         window.scrollTo({ top: 0, behavior: 'auto' });
         wireDetail();
+        wireName(c); // お名前のインライン編集（wireMemo と同型・全 type で動かす）
         wireMemo(c); // メモ配線は別関数（wireDetail は line 型で早期 return するため全 type で動かす）
         loadVisits(c); // 来店履歴は詳細を開くたびに取りに行く（一覧段階で明細 PII を持たない＝段階開示）
       }
@@ -270,7 +271,9 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         }
         let res;
         try {
-          res = await apiPost('adminListConfirmed', { key: c.key }, { silent: true });
+          // その person が持つ全 channel の突合トークン（matchTokens）で OR 突合を頼む。GAS 側は matchTokens が
+          // 非空なら OR、無ければ key で単一突合にフォールバック。Phase 1 は matchTokens=[key] ゆえ結果は同一。
+          res = await apiPost('adminListConfirmed', { key: c.key, matchTokens: c.matchTokens }, { silent: true });
         } catch (_) {
           if (el('histBody') !== body) return; // 取得中に別の詳細へ切り替わっていたら破棄
           body.innerHTML = emptyHtml('来店履歴の取得に失敗しました。', { warn: true });
@@ -333,7 +336,20 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           + '<div class="panel-bar"><button type="button" class="linkish" id="detailBack">‹ 一覧へ戻る</button></div>'
           + '<p class="state-cap"><b>●</b> 連絡先は既定でマスク（必要なときだけ表示・放置で自動再マスク）</p>'
           + '<div class="krt">'
-          +   '<div class="krt__top"><div><div class="krt__name">' + esc(c.name || '（お名前未登録）') + '</div></div>'
+          // お名前は person.displayName を"正"に表示。✎編集→入力→保存（メモ編集 wireMemo と同型・最小実装）。
+          // 入力初期値は esc()（属性ブレイクアウト防止）、maxlength は GAS CUSTOMER_NAME_MAX（100）と一致。
+          +   '<div class="krt__top"><div class="krt__nameblock">'
+          +       '<div class="krt__namerow"><div class="krt__name" id="custName">' + esc(c.name || '（お名前未登録）') + '</div>'
+          +         '<button type="button" class="mini-btn" id="nameEdit" aria-label="お名前を編集">✎ 編集</button></div>'
+          +       '<div class="name-edit" id="nameEditRow" hidden>'
+          +         '<input type="text" id="nameInput" class="name-input" maxlength="100" value="' + esc(c.name || '') + '" placeholder="お名前・呼び名">'
+          +         '<div class="name-edit__bar">'
+          +           '<button type="button" class="mini-btn" id="nameSave">保存</button>'
+          +           '<button type="button" class="linkish" id="nameCancel">やめる</button>'
+          +           '<span id="nameStatus" class="memo__status" role="status"></span>'
+          +         '</div>'
+          +       '</div>'
+          +     '</div>'
           +     '<div class="tags">' + tags + '</div></div>'
           +   contactField(c)
           +   metaField('来店回数', (c.count != null ? c.count + ' 回' : '—'))
@@ -385,6 +401,51 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           } else {
             toast('コピーに対応していない環境です');
           }
+        });
+      }
+
+      // お名前編集の配線。person.displayName を店主が編集する（adminSetCustomerName・Worker 経由・Cookie セッション認可）。
+      // ✎編集→入力→保存。成功時は同一オブジェクト参照の c.name を書き換えて applySortAndRender（一覧・詳細に即反映）。
+      // 表示の"正"は GAS 側で person.displayName（無ければ channel.name）。次回 reload でも編集後の名前で返る。
+      function wireName(c) {
+        const area = el('detailArea');
+        const editBtn = area.querySelector('#nameEdit');
+        const editRow = area.querySelector('#nameEditRow');
+        const input = area.querySelector('#nameInput');
+        const saveBtn = area.querySelector('#nameSave');
+        const cancelBtn = area.querySelector('#nameCancel');
+        const nameEl = area.querySelector('#custName');
+        const status = area.querySelector('#nameStatus');
+        if (!editBtn || !editRow || !input || !saveBtn) return;
+        const setStatus = (msg, cls) => { if (status) { status.textContent = msg; status.className = 'memo__status' + (cls ? ' ' + cls : ''); } };
+        const openEdit = () => { editRow.hidden = false; editBtn.hidden = true; input.value = c.name || ''; input.focus(); input.select(); };
+        const closeEdit = () => { editRow.hidden = true; editBtn.hidden = false; setStatus('', ''); };
+        editBtn.addEventListener('click', openEdit);
+        cancelBtn.addEventListener('click', closeEdit);
+        saveBtn.addEventListener('click', async () => {
+          const v = input.value;
+          saveBtn.disabled = true;
+          setStatus('保存中…', '');
+          let res;
+          try {
+            res = await apiPost('adminSetCustomerName', { key: c.key, name: v }, { silent: true });
+          } catch (_) {
+            saveBtn.disabled = false;
+            setStatus('保存に失敗しました', 'is-warn');
+            return;
+          }
+          saveBtn.disabled = false;
+          if (res && res.error === 'forbidden') { handleForbidden(); return; }
+          if (!res || !res.ok) {
+            setStatus(res && res.error === 'too_long' ? '100文字以内で入力してください' : '保存できませんでした', 'is-warn');
+            return;
+          }
+          c.name = v;                                  // 一覧・詳細は同一オブジェクト参照ゆえ即反映
+          nameEl.textContent = v || '（お名前未登録）'; // 詳細の見出しを即更新
+          editRow.hidden = true; editBtn.hidden = false;
+          applySortAndRender();                        // 一覧の氏名を更新（並び順は氏名非依存で不変）
+          setStatus('保存しました', 'is-ok');
+          toast('お名前を保存しました');
         });
       }
 

@@ -176,6 +176,7 @@ function doPost(e) {
       case 'adminListCustomers': return json_(requireAdminToken_(body, adminListCustomers_));
       case 'adminListConfirmed': return json_(requireAdminToken_(body, function () { return adminListConfirmed_(body); }));
       case 'adminSetCustomerNote': return json_(requireAdminToken_(body, function () { return adminSetCustomerNote_(body); }));
+      case 'adminSetCustomerName': return json_(requireAdminToken_(body, function () { return adminSetCustomerName_(body); }));
       case 'getQuota': return json_(requireAdminToken_(body, adminGetQuota_));
       case 'adminDecision': return json_(requireAdminToken_(body, function () { return adminDecision_(body); }));
       case 'broadcastPreview': return json_(requireAdminToken_(body, function () { return adminBroadcastPreview_(body); }));
@@ -1027,6 +1028,76 @@ function adminSetCustomerNote_(body) {
   return res;
 }
 
+// お客様の表示名（displayName）の最大長。フロント input の maxlength と揃える（超過は too_long で拒否）。
+var CUSTOMER_NAME_MAX = 100;
+
+/**
+ * お客様の表示名（person.displayName）を店主が編集する（P2 Phase 2・identity 層・adminSetCustomerNote_ の雛形）。
+ * requireAdminToken_ で保護。body {action, adminToken, key:<hash>, name:<string>}。
+ *
+ * 【表示名の"正"は person 側（identity 層）に置く — 設計判断】
+ *   - 台帳（channel）の col2=name は「予約時にお客様が入力した生の氏名」で、来店ごとに ledgerUpsert_ が最新の
+ *     予約名で上書きする（channel＝連絡手段ごとの生データ）。ここは一切触らない（channel col0〜6 不変）。
+ *   - 店主が付ける表示名は person.displayName に持たせ、これを表示の"正"とする。adminListCustomers_ は
+ *     person.displayName があればそれを、無ければ channel.name を返す（回帰ゼロのフォールバック）。
+ *   - ※既知の限界: ledgerUpsert_→personRowSync_ は次回来店時に予約名で person.displayName を上書きしうる
+ *     （店主の編集が再予約で戻る）。「編集を sticky にする」は Phase 3/4 の設計判断事項として別途（本 Phase では未対応）。
+ *
+ * 手順:
+ *   ①key（突合トークン＝台帳キーの SHA-256）で channel 行を特定 → 生キー(col0)と personId(col7) を得る。
+ *   ②personId 未採番なら personResolve_(生キー) で採番＋col7 backfill＋person 行を鏡写しで用意（channel col0〜6 不変）。
+ *   ③person シートの displayName（col2）に setValue（person 行のみ・channel/カレンダー/通知/外部 fetch には触れない）。
+ * 100字上限・LockService で排他。空文字は「店主の表示名を消す＝channel.name へ戻す」意味で許可（note と同流儀）。
+ * 監査は nameEdit で1行（氏名本文・生トークンは残さない。target は body.key＝ハッシュを maskId_ に一任）。
+ */
+function adminSetCustomerName_(body) {
+  var key = (body && body.key) || '';
+  var name = (body && body.name != null) ? String(body.name) : '';
+  if (!key) return { ok: false, error: 'bad_request' };
+  if (name.length > CUSTOMER_NAME_MAX) return { ok: false, error: 'too_long' };
+  var sh = ledgerSheet_();
+  if (!sh) return { ok: false, error: 'ledger_unconfigured' };
+
+  var res;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var values = sh.getDataRange().getValues();
+    var rawKey = '';
+    var pid = '';
+    for (var r = 1; r < values.length; r++) {   // r=0 はヘッダ行なのでスキップ
+      if (hashKey_(String(values[r][0] || '')) === key) {
+        rawKey = String(values[r][0] || '');
+        pid = String(values[r][7] || '');       // col7 = personId（未採番なら空）
+        break;
+      }
+    }
+    if (!rawKey) {
+      res = { ok: false, error: 'not_found' };
+    } else {
+      if (!pid) pid = personResolve_(rawKey);    // 未採番なら採番＋col7 backfill＋person 行を用意
+      if (!pid) {
+        res = { ok: false, error: 'person_unresolved' };
+      } else {
+        var psh = personSheet_();                // ledger 設定済み＝psh は非 null（personResolve_ で既に触れている）
+        var prow = personLookup_(pid);
+        if (prow) {
+          psh.getRange(prow, 2).setValue(name);  // person.displayName（col2）を直書き（空文字＝クリアも許可）
+        } else {
+          psh.appendRow([pid, name, '', 0, '', '']); // 念のため（personResolve_ は通常 person 行を作る）
+          prow = personLookup_(pid);
+        }
+        res = prow ? { ok: true } : { ok: false, error: 'person_unresolved' };
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  // 監査はロック解放後。氏名本文は渡さず、target は生の body.key（ハッシュ）を渡して maskId_ に一任する。
+  auditPush_(tokenFp_(body.adminToken), 'nameEdit', body.key, res.ok ? 'ok' : 'ng');
+  return res;
+}
+
 /**
  * 顧客台帳（LEDGER_SHEET）を read-only で一覧化して返す（P2 顧客管理ページ用）。
  * requireAdminToken_ で保護。シートへの書き込み・カレンダー変更・通知・PII の外部送出は一切しない。
@@ -1042,6 +1113,24 @@ function adminListCustomers_() {
   var sh = ledgerSheet_();
   if (!sh) return { ok: true, customers: [] };
   var values = sh.getDataRange().getValues();
+
+  // person 層の join 素材（Phase 2・いずれも read-only）:
+  //   ① personId → displayName（表示名の"正"）。person シートを1回だけ読む。無ければ空マップ。
+  //   ② personId → その person が持つ全 channel の突合トークン matchTokens[]（OR 突合の土台）。
+  // どちらも personId を持つ行にだけ効く。personId 未採番の行は従来どおり channel.name／単一キーになる。
+  // 【回帰ゼロ】Phase 1 は 1 channel=1 person ゆえ matchTokens は実質 [key]、displayName は channel.name の
+  //   鏡写し（personRowSync_）。person シート未作成（未migrate・以降の予約なし）なら nameByPid 空＝全行が
+  //   channel.name にフォールバック＝完全に従来挙動。matchTokens は純追加フィールド。
+  var nameByPid = personDisplayNameMap_();
+  var tokensByPid = {};
+  for (var i = 1; i < values.length; i++) {
+    var k0 = String(values[i][0] || '');
+    if (!k0) continue;
+    var pid0 = String(values[i][7] || '');       // col7 = personId
+    if (!pid0) continue;
+    (tokensByPid[pid0] = tokensByPid[pid0] || []).push(hashKey_(k0));
+  }
+
   var list = [];
   for (var r = 1; r < values.length; r++) {
     var row = values[r];
@@ -1049,8 +1138,12 @@ function adminListCustomers_() {
     if (!key) continue;
     var type = String(row[1] || '');
     var count = Number(row[4] || 0);
+    var pid = String(row[7] || '');
+    var hashed = hashKey_(key);
+    // 表示名は person.displayName を"正"に、無ければ channel.name（回帰ゼロのフォールバック）。
+    var displayName = (pid && nameByPid[pid]) ? nameByPid[pid] : String(row[2] || '');
     var c = {
-      name: String(row[2] || ''),
+      name: displayName,
       type: type,
       count: count,
       firstVisit: ledgerDateStr_(row[3]),
@@ -1062,7 +1155,10 @@ function adminListCustomers_() {
       // 来店履歴の突合トークン（adminListConfirmed_ の params.key）。台帳キーを hashKey_ で SHA-256 化した
       // opaque 値＝生の識別子（lineUserId・電話・メール）は突合トークンとして出さない（PII 最小化）。
       // クライアントは中身を解釈せずそのまま echo する（管理ゲート内・HTTPS・no-store）。
-      key: hashKey_(key),
+      key: hashed,
+      // その person が持つ全 channel の突合トークン（Phase 3/4 の複数 channel 名寄せの土台・OR 突合用）。
+      // Phase 1 は 1:1 ゆえ実質 [key]。personId 未採番なら自キーのみ＝従来と同一集合（回帰ゼロ）。
+      matchTokens: (pid && tokensByPid[pid] && tokensByPid[pid].length) ? tokensByPid[pid] : [hashed],
     };
     // 連絡先は key（type:value）の value 部から復元する。整形前の電話は台帳に無いので正規化数字を使う。
     var idx = key.indexOf(':');
@@ -1077,6 +1173,27 @@ function adminListCustomers_() {
     return (b.lastVisit || '').localeCompare(a.lastVisit || '');
   });
   return { ok: true, customers: list };
+}
+
+/**
+ * personId → displayName のマップを返す（adminListCustomers_ の表示名 join 用・read-only）。
+ * person シートが無ければ空マップ（＝全行が channel.name にフォールバック＝従来挙動・回帰ゼロ）。
+ * ※personSheet_ と違い getSheetByName を直接使い、シートを"作らない"（一覧は read-only を厳守）。
+ * 空 displayName はマップに入れない（呼び出し側で channel.name にフォールバックさせるため）。
+ */
+function personDisplayNameMap_() {
+  var map = {};
+  var id = prop_('LEDGER_SHEET_ID');
+  if (!id) return map;
+  var sh = SpreadsheetApp.openById(id).getSheetByName('person');
+  if (!sh) return map;                 // person シート未作成＝Phase 1 未migrate＝従来どおり
+  var vals = sh.getDataRange().getValues();
+  for (var r = 1; r < vals.length; r++) {   // r=0 はヘッダ行
+    var pid = String(vals[r][0] || '');
+    var dn = String(vals[r][1] || '');
+    if (pid && dn) map[pid] = dn;      // 空 displayName は入れない（channel.name フォールバックに委ねる）
+  }
+  return map;
 }
 
 /**
@@ -1301,16 +1418,31 @@ function adminListConfirmed_(params) {
     return { ok: true, count: count };
   }
 
-  // 用途2: 顧客詳細の来店履歴（指定キーに一致する確定イベントのみ）。
-  var key = params.key || '';
-  if (!key) return { ok: true, visits: [] };
+  // 用途2: 顧客詳細の来店履歴。突合は「その person が持つ全 channel キー」の OR（Phase 2 配線）。
+  //   - params.matchTokens（配列・非空）があればその集合で OR 突合（Phase 3/4 の複数 channel 対応の土台）。
+  //   - 無ければ従来どおり単一 params.key で突合（後方互換）。
+  // 【回帰ゼロ】Phase 1 は 1 channel=1 person ゆえ matchTokens は実質 [key]＝単一突合と同結果。空配列や
+  //   未指定は key へフォールバックし、"全部一致 0 件"にならないようガードする。
+  var tokenSet = {};
+  var hasToken = false;
+  if (Array.isArray(params.matchTokens)) {
+    for (var ti = 0; ti < params.matchTokens.length; ti++) {
+      var tk = String(params.matchTokens[ti] || '');
+      if (tk) { tokenSet[tk] = true; hasToken = true; }
+    }
+  }
+  if (!hasToken) {
+    var key = params.key || '';
+    if (!key) return { ok: true, visits: [] };
+    tokenSet[key] = true;
+  }
   var from = startOfDay_(new Date());
   from.setMonth(from.getMonth() - CONFIRMED_HISTORY_MONTHS); // 過去 N ヶ月まで遡る
   var to = addDays_(startOfDay_(new Date()), RULES.maxAdvanceDays + 1); // 今後の確定予約も含める
   var visits = cal.getEvents(from, to).filter(function (ev) {
     if (getEventProp_(ev, 'status') !== STATUS.CONFIRMED) return false;
-    // イベント側の台帳キーも同じ hashKey_ でハッシュ化してから突合（params.key はハッシュ済みトークン）。
-    return hashKey_(ledgerKey_(getEventProps_(ev))) === key; // その顧客の来店だけ（他人の履歴を混ぜない）
+    // イベント側の台帳キーも同じ hashKey_ でハッシュ化してから OR 突合（tokenSet はハッシュ済みトークンの集合）。
+    return tokenSet[hashKey_(ledgerKey_(getEventProps_(ev)))] === true; // その person の来店だけ（他人の履歴は混ぜない）
   }).map(function (ev) {
     var p = getEventProps_(ev);
     var menu = MENU[p.menuId];

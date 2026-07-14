@@ -162,6 +162,14 @@ a.chart:hover { border-color: var(--k); transform: translateY(-1px); transition:
 .krt__name { font-family: var(--f-serif); font-size: 1.3rem; font-weight: 700; letter-spacing: .05em; line-height: 1.35; color: var(--a-ink); }
 .tags { display: flex; gap: .35rem; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
 
+/* お名前のインライン編集（✎編集→入力→保存＝機能優先の最小実装。見た目の調整は design 側で後日） */
+.krt__nameblock { display: flex; flex-direction: column; gap: .4rem; min-width: 0; }
+.krt__namerow { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.name-edit { display: flex; flex-direction: column; gap: .45rem; }
+.name-input { width: 100%; max-width: 18rem; box-sizing: border-box; font-family: var(--f-sans); font-size: 1rem; padding: .45rem .6rem; border: 1px solid var(--a-line); border-radius: 8px; background: #fff; color: var(--a-ink); }
+.name-input:focus { outline: none; border-color: var(--a-gold); box-shadow: inset 0 0 0 1px var(--a-gold); }
+.name-edit__bar { display: flex; align-items: center; gap: .6rem; }
+
 .field { padding: .75rem 1rem; border-bottom: 1px solid var(--a-line); }
 .field:last-child { border-bottom: none; }
 .field__lbl { font-family: var(--f-sans); font-size: .68rem; letter-spacing: .16em; color: var(--a-muted); margin-bottom: .3rem; }
