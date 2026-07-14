@@ -177,6 +177,7 @@ function doPost(e) {
       case 'adminListConfirmed': return json_(requireAdminToken_(body, function () { return adminListConfirmed_(body); }));
       case 'adminSetCustomerNote': return json_(requireAdminToken_(body, function () { return adminSetCustomerNote_(body); }));
       case 'adminSetCustomerName': return json_(requireAdminToken_(body, function () { return adminSetCustomerName_(body); }));
+      case 'adminSetCustomerContact': return json_(requireAdminToken_(body, function () { return adminSetCustomerContact_(body); }));
       case 'getQuota': return json_(requireAdminToken_(body, adminGetQuota_));
       case 'adminDecision': return json_(requireAdminToken_(body, function () { return adminDecision_(body); }));
       case 'broadcastPreview': return json_(requireAdminToken_(body, function () { return adminBroadcastPreview_(body); }));
@@ -1095,6 +1096,128 @@ function adminSetCustomerName_(body) {
   }
   // 監査はロック解放後。氏名本文は渡さず、target は生の body.key（ハッシュ）を渡して maskId_ に一任する。
   auditPush_(tokenFp_(body.adminToken), 'nameEdit', body.key, res.ok ? 'ok' : 'ng');
+  return res;
+}
+
+// お客様のメールアドレスの上限長（RFC 5321 の実務上限＝254）。超過は too_long で拒否。
+var CUSTOMER_EMAIL_MAX = 254;
+
+/**
+ * お客様の連絡先（電話／メール）を店主が編集する（P2 Phase 3・identity 層・adminSetCustomerName_ の雛形）。
+ * requireAdminToken_ で保護。body {action, adminToken, key:<hash>, contactType:'phone'|'email', value:<string>}。
+ *
+ * 【設計＝"貼り替え"ではなく"エイリアスとして追加"】
+ *   連絡先は channel（＝台帳の1行・キー col0 が連絡先そのもの）なので、編集は「旧 channel を捨てて新キーへ
+ *   書き換える」のではなく「新しい連絡先で **新 channel 行を追加**し、旧 channel は **履歴エイリアス**として
+ *   残す」。旧キーを消さないのは、過去のカレンダー予定（原本）の props から作られる旧キーとの突合を切らない
+ *   ため。新旧どちらの channel も **同じ personId** にぶら下げるので、adminListCustomers_ が返す matchTokens
+ *   にはその person の全 channel ハッシュ（＝旧キーを含む）が並び、adminListConfirmed_ の OR 突合で新旧
+ *   どちらの来店履歴も引ける（履歴が引き継がれる）。
+ *   ※type 非依存：現在の channel の type（line/phone/email）に関わらず、電話でもメールでも追加できる
+ *     （例：LINE 連携のお客様に電話 channel を足す）。
+ *
+ * 【誤統合防止＝キー衝突チェック】
+ *   変更先キー（例 'phone:0901234…' / 'email:name@example.com'）を **他の person が既に使っていたら拒否**
+ *   （key_conflict）。同一 person が既に持っている場合は何もしない（冪等・unchanged）。これで別人どうしを
+ *   同じ連絡先で誤って束ねてしまう事故を防ぐ。
+ *
+ * 手順（adminSetCustomerName_ と同じ「行特定→（未採番なら）person 解決→書き込み」の流儀）:
+ *   ①key（突合トークン＝台帳キーの SHA-256）で対象 channel 行を特定 → 生キー(col0)・personId(col7)・col2〜6 を得る。
+ *   ②personId 未採番なら personResolve_(生キー) で採番＋col7 backfill＋person 行を用意（channel col0〜6 不変）。
+ *   ③変更先キーの衝突を全 channel 行で確認（別 person が使用中→key_conflict／同一 person→unchanged）。
+ *   ④衝突なし→新 channel 行 [newKey, type, name, firstVisit, count, lastVisit, note, personId] を appendRow。
+ * 入力は電話（数字10〜11桁）・メール（簡易形式・254字以内）をバリデーション。LockService で排他。
+ * カレンダー（来店履歴の原本）・既存 channel 行・person 集約には一切書き込まない（新 channel の追加のみ）。
+ * 監査は contactEdit で1行（連絡先本文・生トークンは残さない。target は body.key＝ハッシュを maskId_ に一任）。
+ */
+function adminSetCustomerContact_(body) {
+  var key = (body && body.key) || '';
+  var contactType = (body && body.contactType) || '';
+  var value = (body && body.value != null) ? String(body.value) : '';
+  if (!key) return { ok: false, error: 'bad_request' };
+  if (contactType !== 'phone' && contactType !== 'email') return { ok: false, error: 'bad_request' };
+
+  // 変更先キーを組み立て＋形式バリデーション（ledgerKey_ / ledgerUpsert_ と同じ正規化規則で作る）。
+  var newKey = '';
+  if (contactType === 'phone') {
+    if (value.length > 20) return { ok: false, error: 'too_long' };
+    var digits = normalizePhone_(value);               // 数字のみへ正規化（台帳の phone キーと同形式）
+    if (!/^\d{10,11}$/.test(digits)) return { ok: false, error: 'invalid_phone' }; // 日本の電話＝10〜11桁
+    newKey = 'phone:' + digits;
+  } else {
+    var email = value.trim().toLowerCase();            // ledgerKey_ と同じく trim＋小文字化
+    if (email.length > CUSTOMER_EMAIL_MAX) return { ok: false, error: 'too_long' };
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: 'invalid_email' }; // 簡易形式検査
+    newKey = 'email:' + email;
+  }
+
+  var sh = ledgerSheet_();
+  if (!sh) return { ok: false, error: 'ledger_unconfigured' };
+
+  var res;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var values = sh.getDataRange().getValues();
+    // ① 対象 channel 行を突合トークンで特定 → 生キー・personId・col2〜6（新 channel へ引き継ぐ表示/stats）を得る。
+    var rawKey = '';
+    var pid = '';
+    var srcVals = null;
+    for (var r = 1; r < values.length; r++) {   // r=0 はヘッダ行なのでスキップ
+      if (hashKey_(String(values[r][0] || '')) === key) {
+        rawKey = String(values[r][0] || '');
+        pid = String(values[r][7] || '');       // col7 = personId（未採番なら空）
+        srcVals = values[r];
+        break;
+      }
+    }
+    if (!rawKey) {
+      res = { ok: false, error: 'not_found' };
+    } else {
+      // ② personId 未採番なら採番＋col7 backfill＋person 行を用意（channel col0〜6 不変・adminSetCustomerName_ と同流儀）。
+      if (!pid) pid = personResolve_(rawKey);
+      if (!pid) {
+        res = { ok: false, error: 'person_unresolved' };
+      } else {
+        // ③ キー衝突チェック。personResolve_ が col7 を backfill した可能性があるので台帳を読み直してから走査する。
+        //    変更先キーを別 person が使用中なら誤統合防止で拒否。同一 person が既に持つなら冪等 no-op。
+        var v2 = sh.getDataRange().getValues();
+        var conflict = false;
+        var alreadyMine = false;
+        for (var r2 = 1; r2 < v2.length; r2++) {
+          if (String(v2[r2][0] || '') === newKey) {
+            var owner = String(v2[r2][7] || '');
+            if (owner === pid) alreadyMine = true;   // 既に自分（同一 person）の channel＝何もしない
+            else conflict = true;                    // 別 person（未採番=空も含む）が使用中＝誤統合防止で拒否
+            break;
+          }
+        }
+        if (conflict) {
+          res = { ok: false, error: 'key_conflict' };
+        } else if (alreadyMine) {
+          res = { ok: true, unchanged: true };       // 冪等: 変更先が既にこの person の channel（無操作）
+        } else {
+          // ④ 新 channel 行を追加（同じ personId にぶら下げる）。旧 channel はそのまま履歴エイリアスとして残る。
+          //    col2〜6 は編集元 channel の値を引き継ぎ、表示・stats を保つ。カレンダー・既存行・person 集約は無改変。
+          sh.appendRow([
+            newKey,                        // col0: 新しい連絡先キー
+            contactType,                   // col1: type（phone|email）
+            String(srcVals[2] || ''),      // col2: name（表示は person.displayName 優先だが channel.name も保持）
+            ledgerDateStr_(srcVals[3]),    // col3: firstVisit（編集元から引き継ぐ）
+            Number(srcVals[4] || 0),       // col4: count（編集元から引き継ぐ）
+            ledgerDateStr_(srcVals[5]),    // col5: lastVisit（編集元から引き継ぐ）
+            String(srcVals[6] || ''),      // col6: note（編集元から引き継ぐ）
+            pid,                           // col7: personId（同一人物にぶら下げる＝matchTokens が新旧を束ねる）
+          ]);
+          res = { ok: true };
+        }
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  // 監査はロック解放後。連絡先本文は渡さず、target は生の body.key（ハッシュ）を渡して maskId_ に一任する。
+  auditPush_(tokenFp_(body.adminToken), 'contactEdit', body.key, res.ok ? 'ok' : 'ng');
   return res;
 }
 

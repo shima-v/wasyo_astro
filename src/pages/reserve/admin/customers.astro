@@ -250,6 +250,7 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         window.scrollTo({ top: 0, behavior: 'auto' });
         wireDetail();
         wireName(c); // お名前のインライン編集（wireMemo と同型・全 type で動かす）
+        wireContact(c); // 連絡先の変更・追加（Phase 3・type 非依存＝LINE 客にも足せる）
         wireMemo(c); // メモ配線は別関数（wireDetail は line 型で早期 return するため全 type で動かす）
         loadVisits(c); // 来店履歴は詳細を開くたびに取りに行く（一覧段階で明細 PII を持たない＝段階開示）
       }
@@ -328,6 +329,31 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         return '<div class="field"><div class="field__lbl">' + esc(label) + '</div>'
           + '<div class="field__val">' + esc(val) + '</div></div>';
       }
+      // 連絡先の変更・追加（Phase 3・氏名編集 wireName と同型の ✎→保存）。
+      // 「貼り替え」ではなく「新しい連絡先を追加（過去の履歴は引き継ぐ）」＝type 非依存で、
+      // LINE 連携のお客様にも電話・メールを足せる。placeholder は一般例のみ（実顧客の連絡先は載せない）。
+      function contactEditHtml(c) {
+        return '<div class="field contact-edit">'
+          + '<div class="contact-edit__head">'
+          +   '<button type="button" class="mini-btn" id="contactEdit" aria-label="連絡先を変更・追加">✎ 連絡先を変更・追加</button>'
+          + '</div>'
+          + '<div class="contact-edit__row" id="contactEditRow" hidden>'
+          +   '<div class="field__note">新しい連絡先を追加します（過去のご来店履歴は引き継がれます）。</div>'
+          +   '<div class="contact-edit__inputs">'
+          +     '<select id="contactType" class="contact-type" aria-label="連絡先の種類">'
+          +       '<option value="phone">電話番号</option>'
+          +       '<option value="email">メール</option>'
+          +     '</select>'
+          +     '<input type="text" id="contactValue" class="name-input" maxlength="254" placeholder="例）09012345678 / name@example.com" aria-label="新しい連絡先">'
+          +   '</div>'
+          +   '<div class="name-edit__bar">'
+          +     '<button type="button" class="mini-btn" id="contactSave">保存</button>'
+          +     '<button type="button" class="linkish" id="contactCancel">やめる</button>'
+          +     '<span id="contactStatus" class="memo__status" role="status"></span>'
+          +   '</div>'
+          + '</div>'
+          + '</div>';
+      }
       function detailHtml(c) {
         const tagCls = c.tag === '新規' ? 'first' : 'regular';
         const tags = '<span class="tag ' + tagCls + '">' + esc(c.tag) + '</span>';
@@ -352,6 +378,7 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           +     '</div>'
           +     '<div class="tags">' + tags + '</div></div>'
           +   contactField(c)
+          +   contactEditHtml(c)
           +   metaField('来店回数', (c.count != null ? c.count + ' 回' : '—'))
           +   metaField('初来店', c.firstVisit ? fmtDate(c.firstVisit) : '—')
           +   metaField('最終来店', c.lastVisit ? fmtDate(c.lastVisit) : '—')
@@ -446,6 +473,59 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           applySortAndRender();                        // 一覧の氏名を更新（並び順は氏名非依存で不変）
           setStatus('保存しました', 'is-ok');
           toast('お名前を保存しました');
+        });
+      }
+
+      // 連絡先編集の配線（Phase 3）。adminSetCustomerContact（Worker 経由・Cookie セッション認可）で、
+      // 新しい連絡先を「新 channel」として同じ person に追加する（旧 channel は履歴エイリアスとして残る）。
+      // ✎→種類選択（電話/メール）→入力→保存。type 非依存ゆえ LINE 連携のお客様にも足せる。
+      // 成功時は台帳の状態が変わる（channel が増える）ため、一覧を読み直して最新化する（作話しない）。
+      function wireContact(c) {
+        const area = el('detailArea');
+        const editBtn = area.querySelector('#contactEdit');
+        const editRow = area.querySelector('#contactEditRow');
+        const typeSel = area.querySelector('#contactType');
+        const input = area.querySelector('#contactValue');
+        const saveBtn = area.querySelector('#contactSave');
+        const cancelBtn = area.querySelector('#contactCancel');
+        const status = area.querySelector('#contactStatus');
+        if (!editBtn || !editRow || !typeSel || !input || !saveBtn) return;
+        const setStatus = (msg, cls) => { if (status) { status.textContent = msg; status.className = 'memo__status' + (cls ? ' ' + cls : ''); } };
+        typeSel.value = (c.type === 'email') ? 'email' : 'phone'; // 既定は現在の連絡先種別に寄せる
+        const openEdit = () => { editRow.hidden = false; editBtn.hidden = true; input.value = ''; input.focus(); };
+        const closeEdit = () => { editRow.hidden = true; editBtn.hidden = false; input.value = ''; setStatus('', ''); };
+        editBtn.addEventListener('click', openEdit);
+        cancelBtn.addEventListener('click', closeEdit);
+        saveBtn.addEventListener('click', async () => {
+          const contactType = typeSel.value;
+          const value = input.value.trim();
+          if (!value) { setStatus('連絡先を入力してください', 'is-warn'); return; }
+          saveBtn.disabled = true;
+          setStatus('保存中…', '');
+          let res;
+          try {
+            res = await apiPost('adminSetCustomerContact', { key: c.key, contactType, value }, { silent: true });
+          } catch (_) {
+            saveBtn.disabled = false;
+            setStatus('保存に失敗しました', 'is-warn');
+            return;
+          }
+          saveBtn.disabled = false;
+          if (res && res.error === 'forbidden') { handleForbidden(); return; }
+          if (!res || !res.ok) {
+            const msgMap = {
+              invalid_phone: '電話番号の形式が正しくありません（数字10〜11桁）',
+              invalid_email: 'メールアドレスの形式が正しくありません',
+              too_long: '入力が長すぎます',
+              key_conflict: 'この連絡先は別のお客様が使用中のため追加できません',
+              not_found: 'お客様が見つかりませんでした',
+            };
+            setStatus((res && msgMap[res.error]) || '保存できませんでした', 'is-warn');
+            return;
+          }
+          setStatus('保存しました', 'is-ok');
+          toast('連絡先を追加しました（過去のご来店履歴は引き継がれます）');
+          loadCustomers(); // 新 channel が増える＝台帳の状態が変わるので一覧を最新化（一覧へ戻る）
         });
       }
 

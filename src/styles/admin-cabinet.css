@@ -170,6 +170,13 @@ a.chart:hover { border-color: var(--k); transform: translateY(-1px); transition:
 .name-input:focus { outline: none; border-color: var(--a-gold); box-shadow: inset 0 0 0 1px var(--a-gold); }
 .name-edit__bar { display: flex; align-items: center; gap: .6rem; }
 
+/* 連絡先の変更・追加（Phase 3・氏名編集と同型。見た目の調整は design 側で後日） */
+.contact-edit__head { display: flex; }
+.contact-edit__row { display: flex; flex-direction: column; gap: .5rem; margin-top: .55rem; }
+.contact-edit__inputs { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.contact-type { font-family: var(--f-sans); font-size: 1rem; padding: .45rem .55rem; border: 1px solid var(--a-line); border-radius: 8px; background: #fff; color: var(--a-ink); }
+.contact-type:focus { outline: none; border-color: var(--a-gold); box-shadow: inset 0 0 0 1px var(--a-gold); }
+
 .field { padding: .75rem 1rem; border-bottom: 1px solid var(--a-line); }
 .field:last-child { border-bottom: none; }
 .field__lbl { font-family: var(--f-sans); font-size: .68rem; letter-spacing: .16em; color: var(--a-muted); margin-bottom: .3rem; }
