@@ -166,6 +166,11 @@ function doPost(e) {
       // messageInfo=概要プリフェッチ（読み取り専用・連絡先なし） / messageSend=実送信。
       case 'messageInfo': return json_(messageInfoBySig_(body.token, body.sig));
       case 'messageSend': return json_(messageSendBySig_(body.token, body.sig, body.message));
+      // 名寄せ（本人同意の引き継ぎ・front /reserve/handover 経由）。保護は検証済み LINE idToken（=公開ルートの
+      // capability）で行うため requireAdmin_ は付けない。message 系と同じく公開デプロイ①で完結し Worker は経由しない。
+      // handoverCheck=非PIIサマリの照合（read-only） / handoverConfirm=今のLINEを過去personへ結合（mutation）。
+      case 'handoverCheck': return json_(handoverCheck(body));
+      case 'handoverConfirm': return json_(handoverConfirm(body));
       // 管理（front /reserve/admin 経由）。bearer トークン ADMIN_TOKENS で保護＝Googleログイン不要。
       // これにより管理操作も公開デプロイ①（executeAs=オーナー）で完結し、管理デプロイ②を不要にする布石。
       case 'getSlotConfig': return json_(requireAdminToken_(body, adminGetSlotConfig_));
@@ -178,6 +183,7 @@ function doPost(e) {
       case 'adminSetCustomerNote': return json_(requireAdminToken_(body, function () { return adminSetCustomerNote_(body); }));
       case 'adminSetCustomerName': return json_(requireAdminToken_(body, function () { return adminSetCustomerName_(body); }));
       case 'adminSetCustomerContact': return json_(requireAdminToken_(body, function () { return adminSetCustomerContact_(body); }));
+      case 'adminMergeCustomers': return json_(requireAdminToken_(body, function () { return adminMergeCustomers_(body); }));
       case 'getQuota': return json_(requireAdminToken_(body, adminGetQuota_));
       case 'adminDecision': return json_(requireAdminToken_(body, function () { return adminDecision_(body); }));
       case 'broadcastPreview': return json_(requireAdminToken_(body, function () { return adminBroadcastPreview_(body); }));
@@ -1605,6 +1611,323 @@ function adminListConfirmed_(params) {
     return (b.date + b.time).localeCompare(a.date + a.time);
   });
   return { ok: true, visits: visits };
+}
+
+// ============================================================
+// Phase 4 ③ 名寄せ ＝「本人同意の引き継ぎ」＋（保険）店主の手動マージ
+// ------------------------------------------------------------
+// 目的: 媒体をまたいだ同一人物を person（不変の背番号）に束ねる。
+//   - 主導線＝本人同意の自動引き継ぎ（handoverCheck / handoverConfirm）: お客様自身が「これは自分」と
+//     同意したときにだけ、今の LINE channel を過去 person に結合する（誤統合が原理的に起きない・店主の手間ゼロ）。
+//   - 保険＝店主の手動マージ（adminMergeCustomers_）: 本人確認材料が無いケースのフォールバック。
+//
+// 【credential ＝ 検証済み LINE idToken（＝"署名付きトークン"の実体）— 設計判断】
+//   handoverCheck / handoverConfirm は adminToken では保護しない（公開デプロイ①で完結）。保護は「お客様
+//   自身が持つ capability」＝ LINE の idToken（JWT・LINE が RS256 署名）で行う。verifyLineIdToken_ が
+//   LINE の /verify で署名検証し、改竄・未署名・期限切れの idToken は null で弾く（＝"未署名/改竄トークンを拒否"）。
+//   検証済み claims から currentChannel（line:sub）と照合材料（email）を"同時に"得られるため:
+//     ・照合材料 email が第三者に詐称されない（＝任意メール列挙で他人の要約を覗けない）
+//     ・今束ねる channel（自分の LINE）も同じ idToken で確証される
+//   の両方が1回の検証で担保される。電話は idToken から取れず誤統合しやすいため同定に使わない（プラン方針）。
+//   ※message 系の HMAC token+sig と"公開ルートの capability 保護"という役割は同じ。idToken を選ぶ理由は
+//     照合材料 email の attested 性が必須（自由入力メールは列挙リスク）だから。詳細は docs/log 参照。
+// ============================================================
+
+/**
+ * handover の credential 抽出。body.idToken を LINE の /verify で検証し、
+ *   { lineKey:'line:'+sub, email:'<lowercased>', emailKey:'email:'+email }
+ * を返す。検証失敗（改竄/未署名/期限切れ）→ null（呼び出し側は bad_token＝要約を一切出さない）。
+ * email 未取得（LINE で email スコープ未同意）→ emailKey:'' で返す（呼び出し側は no_email）。
+ */
+function handoverExtractCred_(body) {
+  var verified = verifyLineIdToken_((body && body.idToken) || '');
+  if (!verified || !verified.userId) return null;
+  var email = String(verified.email || '').trim().toLowerCase();
+  return { lineKey: 'line:' + verified.userId, email: email, emailKey: email ? 'email:' + email : '' };
+}
+
+/**
+ * emailKey に一致する channel を持つ「過去 person」を read-only で照合する（書き込まない・person シートも作らない）。
+ * 返り値:
+ *   { found:false }                         … 該当 channel なし
+ *   { ambiguous:true }                      … 複数 person が該当（誤統合防止・拒否。email キーは通常一意だが防御的に）
+ *   { found:true, pid, count, lastVisit }   … 一意に該当。count/lastVisit は person 集約優先、無ければ channel 行の値
+ * 氏名・連絡先・生キーは返さない（呼び出し側で非PIIサマリだけを組み立てる）。
+ */
+function handoverLookupByEmail_(emailKey) {
+  var sh = ledgerSheet_();
+  if (!sh || !emailKey) return { found: false };
+  var values = sh.getDataRange().getValues();
+  var realPids = {};
+  var chanRow = null;
+  for (var r = 1; r < values.length; r++) {
+    if (String(values[r][0] || '') === emailKey) {
+      chanRow = values[r];
+      var pid = String(values[r][7] || '');
+      if (pid) realPids[pid] = true;
+    }
+  }
+  if (!chanRow) return { found: false };
+  var pidList = Object.keys(realPids);
+  if (pidList.length > 1) return { ambiguous: true }; // 別 person が同一 email キーを持つ＝異常。安全側で拒否
+  var pid = pidList.length === 1 ? pidList[0] : '';
+  var count = Number(chanRow[4] || 0);
+  var lastVisit = ledgerDateStr_(chanRow[5]);
+  if (pid) {
+    var agg = handoverPersonAgg_(pid);          // person 集約（あれば）を優先
+    if (agg.hit) { count = agg.count; lastVisit = agg.lastVisit; }
+  }
+  return { found: true, pid: pid, count: count, lastVisit: lastVisit };
+}
+
+/**
+ * person 行の集約（displayName/firstVisit/count/lastVisit/note）を read-only で返す（person シートは作らない）。
+ * hit:true=行が見つかった。無ければ hit:false＋空値。
+ */
+function handoverPersonAgg_(pid) {
+  var out = { hit: false, displayName: '', firstVisit: '', count: 0, lastVisit: '', note: '' };
+  if (!pid) return out;
+  var id = prop_('LEDGER_SHEET_ID');
+  var psh = id ? SpreadsheetApp.openById(id).getSheetByName('person') : null;
+  if (!psh) return out;
+  var pv = psh.getDataRange().getValues();
+  for (var r = 1; r < pv.length; r++) {
+    if (String(pv[r][0] || '') === pid) {
+      out.hit = true;
+      out.displayName = String(pv[r][1] || '');
+      out.firstVisit = ledgerDateStr_(pv[r][2]);
+      out.count = Number(pv[r][3] || 0);
+      out.lastVisit = ledgerDateStr_(pv[r][4]);
+      out.note = String(pv[r][5] || '');
+      break;
+    }
+  }
+  return out;
+}
+
+/**
+ * 台帳（channel）で col0===key の行の personId(col7) を read-only で返す（書き込まない・採番しない）。
+ * 見つからない／未採番なら ''。
+ */
+function personIdForKey_(key) {
+  var sh = ledgerSheet_();
+  if (!sh || !key) return '';
+  var values = sh.getDataRange().getValues();
+  for (var r = 1; r < values.length; r++) {
+    if (String(values[r][0] || '') === key) return String(values[r][7] || '');
+  }
+  return '';
+}
+
+/**
+ * 【公開ルート・idToken 保護】お客様の引き継ぎ確認（read-only）。verifyLineIdToken_ で検証済みの
+ * LINE idToken を credential とし、その idToken 由来の email に一致する「過去 person」の**非PIIサマリだけ**返す。
+ * body: { action:'handoverCheck', idToken:<LINE id_token> }
+ * 応答:
+ *   該当あり:                { ok:true, found:true, summary:{ visitCount:N, lastVisitYm:'YYYY-MM' } }
+ *   該当なし:                { ok:true, found:false }
+ *   既に今のLINEが同一person: { ok:true, found:false, alreadyLinked:true }（引き継ぎ不要）
+ *   idToken 不正/未署名/改竄: { ok:false, error:'bad_token' }（要約は一切返さない＝他人PII漏れない）
+ *   email 未取得:            { ok:false, error:'no_email' }
+ *   複数該当（防御的）:       { ok:false, error:'ambiguous' }
+ * 【非PII厳守】応答に氏名・電話・メール・personId・生キーは一切含めない（visitCount と lastVisitYm のみ）。
+ * カレンダー・シートには一切書き込まない（純 read・person シートも作らない）。
+ */
+function handoverCheck(body) {
+  var cred = handoverExtractCred_(body);
+  if (!cred) return { ok: false, error: 'bad_token' };
+  if (!cred.email) return { ok: false, error: 'no_email' };
+  var hit = handoverLookupByEmail_(cred.emailKey);
+  if (hit.ambiguous) return { ok: false, error: 'ambiguous' };
+  if (!hit.found) return { ok: true, found: false };
+  // 今の LINE が既にこの person に紐づいているなら引き継ぎ不要（found:false + alreadyLinked）。
+  var curPid = personIdForKey_(cred.lineKey);
+  if (curPid && hit.pid && curPid === hit.pid) return { ok: true, found: false, alreadyLinked: true };
+  var lastVisit = String(hit.lastVisit || '');
+  return {
+    ok: true, found: true,
+    summary: { visitCount: Number(hit.count || 0), lastVisitYm: lastVisit ? lastVisit.slice(0, 7) : '' },
+  };
+}
+
+/**
+ * 【公開ルート・idToken 保護】お客様の引き継ぎ同意を受けて、今の LINE channel を過去 person に結合する（mutation）。
+ * body: { action:'handoverConfirm', idToken:<LINE id_token> }
+ * credential は handoverCheck と同じ（検証済み idToken）。照合材料 email に一致する過去 person に**のみ**結合し、
+ * 該当なし・複数該当・不一致は結合しない（＝誤統合ゼロ）。冪等（既に同一 person なら no-op）。
+ * 結合の実体＝「今の LINE channel 行の personId(col7) を過去 person に向ける」:
+ *   - LINE channel 行が既にある → col7 を pastPid へ付け替え（既に pastPid なら no-op）。
+ *   - LINE channel 行がまだ無い（LINE 予約前に引き継ぎ）→ pastPid にぶら下がる LINE channel 行を新設
+ *     （col2〜6 は person 集約を鏡写し＝Phase 3 の連絡先追加と同流儀。以後の LINE 予約は isFirst=false になる）。
+ * カレンダー（来店履歴の原本）には一切書き込まない。col0〜6 不変。LockService 排他・auditPush_('handover')。
+ * 応答: { ok:true, linked:true } / { ok:true, alreadyLinked:true }（冪等） / { ok:true, found:false }（過去personなし）
+ *       / { ok:false, error:'bad_token'|'no_email'|'ambiguous'|'ledger_unconfigured'|'person_unresolved' }
+ */
+function handoverConfirm(body) {
+  var cred = handoverExtractCred_(body);
+  if (!cred) return { ok: false, error: 'bad_token' };
+  if (!cred.email) return { ok: false, error: 'no_email' };
+  var sh = ledgerSheet_();
+  if (!sh) return { ok: false, error: 'ledger_unconfigured' };
+
+  var res;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    // ① 過去 person を email で一意特定（複数該当は誤統合防止で拒否）。
+    var hit = handoverLookupByEmail_(cred.emailKey);
+    if (hit.ambiguous) {
+      res = { ok: false, error: 'ambiguous' };
+    } else if (!hit.found) {
+      res = { ok: true, found: false };                         // 過去 person が無い＝引き継ぐ対象なし
+    } else {
+      var pastPid = hit.pid || personResolve_(cred.emailKey);   // email channel の personId（未採番なら採番＋backfill）
+      if (!pastPid) {
+        res = { ok: false, error: 'person_unresolved' };
+      } else {
+        // ② 今の LINE channel 行を探して結合する。
+        var lineRow = ledgerLookup_(cred.lineKey);
+        if (lineRow) {
+          var curPid = String(sh.getRange(lineRow, 8).getValue() || '');
+          if (curPid === pastPid) {
+            res = { ok: true, alreadyLinked: true };            // 冪等 no-op（既に同一 person）
+          } else {
+            sh.getRange(lineRow, 8).setValue(pastPid);          // col7 を過去 person へ付け替え（col0〜6・カレンダー不変）
+            res = { ok: true, linked: true };
+          }
+        } else {
+          // LINE channel 行がまだ無い＝pastPid にぶら下がる LINE 行を新設（stats は person 集約を鏡写し）。
+          var agg = handoverPersonAgg_(pastPid);
+          sh.appendRow([
+            cred.lineKey, 'line', String(agg.displayName || ''),
+            String(agg.firstVisit || ''), Number(agg.count || 0), String(agg.lastVisit || ''), '', pastPid,
+          ]);
+          res = { ok: true, linked: true };
+        }
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  // 監査。生トークン・連絡先は残さない（operator は 'via:line' ラベル・target は LINE キーを maskId_ に一任）。
+  auditPush_('via:line', 'handover', cred.lineKey, (res && res.ok) ? (res.alreadyLinked ? 'noop' : (res.linked ? 'ok' : 'none')) : 'ng');
+  return res;
+}
+
+/**
+ * 【店主の手動マージ・保険】2 person を統合する（本人確認材料が無いケースのフォールバック）。
+ * requireAdminToken_ で保護。body: { action:'adminMergeCustomers', adminToken, sourceKey:<hash>, targetKey:<hash> }
+ * sourceKey/targetKey は adminListCustomers_ が返す突合トークン（channel キーの SHA-256）。source を target へ寄せる。
+ *
+ * 【破壊的操作・要バックアップ／巻き戻しの考え方（可逆寄り設計）】
+ *   本操作は target の集約（count/firstVisit/lastVisit/note/displayName）を"上書き"し、source の channel を
+ *   target へ付け替える。上書きと付け替えは情報損失を伴うため、**実行前にスプレッドシートのバックアップ必須**。
+ *   巻き戻し（rollback）の設計:
+ *     ・削除は一切しない。source の person 行は残し、col7 に mergedInto=targetPid を立てて tombstone 化する
+ *       （＝無効フラグ。source の元集約 col1〜6 は保持するので source 単体は復元可能）。
+ *     ・target 集約は元値を保存しないため、target 側の完全復元は"バックアップからの復元"に依る（だから要バックアップ）。
+ *     ・channel の付け替えは col7(personId) を書き換えるだけ（col0〜6・カレンダーは不変）。
+ *   統合規則: count=合算 / firstVisit=最小 / lastVisit=最大 / note=連結（重複除外・上限で切詰め）/
+ *            displayName=target 優先（空なら source）。カレンダーには一切書き込まない。auditPush_('merge')。
+ * 応答: { ok:true, merged:true, count:N } / { ok:true, unchanged:true }（既に同一 person）
+ *       / { ok:false, error:'bad_request'|'same_customer'|'not_found'|'person_unresolved'|'ledger_unconfigured' }
+ */
+function adminMergeCustomers_(body) {
+  var sourceKey = (body && body.sourceKey) || '';
+  var targetKey = (body && body.targetKey) || '';
+  if (!sourceKey || !targetKey) return { ok: false, error: 'bad_request' };
+  if (sourceKey === targetKey) return { ok: false, error: 'same_customer' };
+  var sh = ledgerSheet_();
+  if (!sh) return { ok: false, error: 'ledger_unconfigured' };
+
+  var res;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    // ① 突合トークン→生キー→personId を解決（未採番なら personResolve_ で採番＋col7 backfill＋person 行を用意）。
+    var srcRaw = rawKeyForHash_(sh, sourceKey);
+    var tgtRaw = rawKeyForHash_(sh, targetKey);
+    if (!srcRaw || !tgtRaw) {
+      res = { ok: false, error: 'not_found' };
+    } else {
+      var srcPid = personResolve_(srcRaw);
+      var tgtPid = personResolve_(tgtRaw);
+      if (!srcPid || !tgtPid) {
+        res = { ok: false, error: 'person_unresolved' };
+      } else if (srcPid === tgtPid) {
+        res = { ok: true, unchanged: true };                    // 既に同一 person＝何もしない
+      } else {
+        // ② 集約を統合して target person 行へ反映（合算・最小・最大・連結）。
+        var s = handoverPersonAgg_(srcPid);
+        var t = handoverPersonAgg_(tgtPid);
+        var mergedCount = Number(s.count || 0) + Number(t.count || 0);
+        var mergedFirst = minDate_(s.firstVisit, t.firstVisit);
+        var mergedLast = maxDate_(s.lastVisit, t.lastVisit);
+        var mergedName = t.displayName || s.displayName;        // target 優先
+        var mergedNote = joinNotes_(t.note, s.note);            // target→source の順で連結
+        var psh = personSheet_();
+        var trow = personLookup_(tgtPid);
+        if (trow) {
+          psh.getRange(trow, 2).setValue(mergedName);
+          psh.getRange(trow, 3).setValue(mergedFirst);
+          psh.getRange(trow, 4).setValue(mergedCount);
+          psh.getRange(trow, 5).setValue(mergedLast);
+          psh.getRange(trow, 6).setValue(mergedNote);
+        }
+        // ③ source を指す channel を全て target へ付け替え（col7 のみ・col0〜6/カレンダー不変）。
+        //    Phase 3 のエイリアス（連絡先追加で増えた行）も含め、source の全 channel が target に寄る。
+        var values = sh.getDataRange().getValues();
+        for (var r = 1; r < values.length; r++) {
+          if (String(values[r][0] || '') && String(values[r][7] || '') === srcPid) {
+            sh.getRange(r + 1, 8).setValue(tgtPid);
+          }
+        }
+        // ④ source person 行を tombstone 化（削除せず col7 に mergedInto=tgtPid を立てる＝可逆寄り）。
+        var srow = personLookup_(srcPid);
+        if (srow) psh.getRange(srow, 7).setValue(tgtPid); // person col7 = mergedInto マーカー（元集約 col1〜6 は保持）
+        res = { ok: true, merged: true, count: mergedCount };
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  // 監査。生トークンは残さない（operator は adminToken の指紋・target は source->target のハッシュを maskId_ に一任）。
+  auditPush_(tokenFp_(body.adminToken), 'merge', (body.sourceKey || '') + '->' + (body.targetKey || ''), (res && res.ok) ? 'ok' : 'ng');
+  return res;
+}
+
+/** 台帳（channel）で hashKey_(col0)===hash の行の生キー(col0) を返す（無ければ ''）。突合トークン→生キーの逆引き。 */
+function rawKeyForHash_(sh, hash) {
+  var values = sh.getDataRange().getValues();
+  for (var r = 1; r < values.length; r++) {
+    var k = String(values[r][0] || '');
+    if (k && hashKey_(k) === hash) return k;
+  }
+  return '';
+}
+
+/** yyyy-MM-dd 文字列の最小（空は無視）。firstVisit の統合に使う。 */
+function minDate_(a, b) {
+  a = String(a || ''); b = String(b || '');
+  if (!a) return b; if (!b) return a;
+  return a < b ? a : b;
+}
+
+/** yyyy-MM-dd 文字列の最大（空は無視）。lastVisit の統合に使う。 */
+function maxDate_(a, b) {
+  a = String(a || ''); b = String(b || '');
+  if (!a) return b; if (!b) return a;
+  return a > b ? a : b;
+}
+
+/** メモ連結（target→source の順・空は除外・同一は1つ・CUSTOMER_NOTE_MAX で切詰め）。 */
+function joinNotes_(a, b) {
+  a = String(a || '').trim(); b = String(b || '').trim();
+  var parts = [];
+  if (a) parts.push(a);
+  if (b && b !== a) parts.push(b);
+  var joined = parts.join('\n---\n');
+  return joined.length > CUSTOMER_NOTE_MAX ? joined.slice(0, CUSTOMER_NOTE_MAX) : joined;
 }
 
 // ============================================================
