@@ -1288,6 +1288,11 @@ function adminListCustomers_() {
       // その person が持つ全 channel の突合トークン（Phase 3/4 の複数 channel 名寄せの土台・OR 突合用）。
       // Phase 1 は 1:1 ゆえ実質 [key]。personId 未採番なら自キーのみ＝従来と同一集合（回帰ゼロ）。
       matchTokens: (pid && tokensByPid[pid] && tokensByPid[pid].length) ? tokensByPid[pid] : [hashed],
+      // person 単位の突合キー（Phase 4・純追加）。連絡先編集・名寄せで同一 person が複数 channel 行に
+      // なる（1一覧に重複表示）ため、フロントがこの opaque 値で行をグルーピング／dedup して 1 名に見せる。
+      // personId を hashKey_ で SHA-256 化した opaque 値＝生の内部ID（UUID）は出さない（PII 最小化）。
+      // 未採番（pid なし）は自キーのハッシュにフォールバック＝行ごとに一意＝従来の 1 行 1 名（回帰ゼロ）。
+      personRef: pid ? hashKey_(pid) : hashed,
     };
     // 連絡先は key（type:value）の value 部から復元する。整形前の電話は台帳に無いので正規化数字を使う。
     var idx = key.indexOf(':');

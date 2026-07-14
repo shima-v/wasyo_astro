@@ -50,9 +50,27 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
       <section id="listSection">
         <div class="sec-head">
           <h2 class="section-title">顧客一覧<span class="section-count" id="listCount"></span></h2>
-          <button type="button" class="reserve-btn ghost sm" id="reloadBtn">再読み込み</button>
+          <div class="sec-head__actions">
+            <button type="button" class="reserve-btn ghost sm" id="mergeToggle">顧客を統合</button>
+            <button type="button" class="reserve-btn ghost sm" id="reloadBtn">再読み込み</button>
+          </div>
         </div>
         <p class="state-cap"><b>●</b> 一覧では電話は常にマスク（のぞき見対策）</p>
+
+        <!-- 手動マージ（統合）バー。「顧客を統合」で表示。同じお客様の重複を店主が1人にまとめる保険。 -->
+        <div class="merge-bar" id="mergeBar" hidden>
+          <p class="merge-bar__lead">同じお客様の重複を1人にまとめます。一覧から<b>統合元</b>（消える側）と<b>統合先</b>（残る側）の2名をタップしてください。</p>
+          <div class="merge-bar__slots">
+            <div class="merge-slot is-src" id="mergeSrcSlot"><span class="merge-slot__lbl">統合元</span><span class="merge-slot__nm" id="mergeSrcNm">未選択</span></div>
+            <button type="button" class="merge-swap" id="mergeSwap" title="統合元と統合先を入れ替え" aria-label="統合元と統合先を入れ替え">⇄</button>
+            <div class="merge-slot is-tgt" id="mergeTgtSlot"><span class="merge-slot__lbl">統合先</span><span class="merge-slot__nm" id="mergeTgtNm">未選択</span></div>
+          </div>
+          <div class="merge-bar__actions">
+            <button type="button" class="reserve-btn sm" id="mergeRun" disabled>統合する</button>
+            <button type="button" class="linkish" id="mergeCancel">やめる</button>
+          </div>
+        </div>
+
         <div class="sort-bar" id="sortBar">
           <span class="sort-bar__lbl">並び替え</span>
           <button type="button" class="sort-btn is-active" data-key="lastVisit" data-label="最終来店">最終来店 ▼</button>
@@ -74,6 +92,19 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
       <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
     </footer>
 
+    <!-- 統合の確認ダイアログ（破壊的操作・誤操作防止）。実行前に必ず出す。 -->
+    <div class="modal-overlay" id="mergeConfirm" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mergeConfirmTitle">
+        <h3 id="mergeConfirmTitle" class="modal__title">お客様を統合します</h3>
+        <p class="modal__body" id="mergeConfirmBody"></p>
+        <p class="modal__warn">⚠ この操作は「元に戻す」のに手間がかかります。実行前に台帳（スプレッドシート）のバックアップをおすすめします。</p>
+        <div class="modal__actions">
+          <button type="button" class="reserve-btn decline sm" id="mergeConfirmYes">統合する</button>
+          <button type="button" class="reserve-btn ghost sm" id="mergeConfirmNo">やめる</button>
+        </div>
+      </div>
+    </div>
+
     <div id="toast"></div>
 
     <script>
@@ -93,11 +124,15 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
       const CLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>';
 
       const REMASK_MS = 20000; // 放置で自動再マスクまでの目安（20秒）
-      let remaskTimer = null;
-      let customersData = [];   // GAS 取得の原本
-      let viewData = [];        // 並び替え後の表示用（data-i はこちらの添字）
+      let remaskTimers = []; // 開示中の自動再マスクタイマ（連絡先が複数行になり得るため配列で管理）
+      let customersData = [];   // GAS 取得の原本（行＝channel）
+      let groupedData = [];     // person 単位にまとめた表示用（同一 person の複数 channel を1名に dedup）
+      let viewData = [];        // 並び替え後の表示用（data-i はこちらの添字・person 単位）
       let sortKey = 'lastVisit'; // 既定＝最終来店（GAS も同順で返す）
       let sortDir = 'desc';
+      // 手動マージ（統合）モードの状態。src/tgt は person の突合キー（personRef）で保持する。
+      let mergeMode = false;
+      let mergeSel = { src: null, tgt: null };
 
       // ---- 電話・メールの整形／マスク ----
       // 台帳の電話は正規化済み（数字のみ）。ハイフン付きの整形はここ（フロント）で行う。
@@ -162,7 +197,63 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           return;
         }
         customersData = res.customers;
+        groupedData = groupByPerson(customersData);
         applySortAndRender();
+      }
+
+      // 同一 person の複数 channel 行を1名にまとめる（連絡先編集・名寄せ後の重複表示を解消）。
+      // 束ねるキーは GAS が純追加した opaque な personRef（personId の SHA-256・生の内部IDは出ない）。
+      // personRef が無い（旧応答）ときは自 channel の突合キー key にフォールバック＝行ごとに一意＝
+      // 従来どおり 1 行 1 名（回帰ゼロ）。ここは表示だけ・台帳/カレンダーには一切書かない。
+      function groupByPerson(rows) {
+        const map = new Map();
+        const order = [];
+        rows.forEach((r) => {
+          const ref = r.personRef || r.key;
+          if (!map.has(ref)) { map.set(ref, []); order.push(ref); }
+          map.get(ref).push(r);
+        });
+        return order.map((ref) => mergePersonRows(ref, map.get(ref)));
+      }
+
+      // 連絡先の優先度（詳細・履歴突合の代表 channel を選ぶ）：電話→メール→LINE。
+      const chanRank = (r) => (r.type === 'phone' ? 0 : r.type === 'email' ? 1 : 2);
+
+      // 1 person にぶら下がる channel 行群を、表示用の1オブジェクトに畳む。
+      function mergePersonRows(ref, rows) {
+        // 代表 channel＝連絡先を持つものを優先（氏名/メモ/連絡先追加・履歴突合の起点キーに使う）。
+        const rep = rows.slice().sort((a, b) => chanRank(a) - chanRank(b))[0];
+        // 連絡先一覧（詳細で全 channel を見せる）。順序は電話→メール→LINE。
+        const channels = rows.slice().sort((a, b) => chanRank(a) - chanRank(b))
+          .map((r) => ({ type: r.type, phone: r.phone, email: r.email, key: r.key }));
+        // 突合トークンは person の全 channel の和集合（GAS も和集合で返すが念のため union で堅牢化）。履歴 OR 突合用。
+        const tokenSet = new Set();
+        rows.forEach((r) => (r.matchTokens && r.matchTokens.length ? r.matchTokens : [r.key]).forEach((t) => { if (t) tokenSet.add(t); }));
+        // 集約 stats は channel 行の値から近似（count=最大・firstVisit=最小・lastVisit=最大）。
+        // ※Phase 3 の連絡先追加は新 channel へ stats をコピーするため通常は全 channel 同値。
+        //   厳密な person 合算は person シートが正だが、一覧の dedup 表示にはこの近似で足りる（作話はしない）。
+        let count = 0, first = '', last = '';
+        rows.forEach((r) => {
+          const c = Number(r.count || 0);
+          if (c > count) count = c;
+          const fv = String(r.firstVisit || ''); if (fv && (!first || fv < first)) first = fv;
+          const lv = String(r.lastVisit || ''); if (lv && (!last || lv > last)) last = lv;
+        });
+        return {
+          personRef: ref,
+          name: rep.name,                 // person.displayName（全 channel 鏡写し済み＝どの行でも同値）
+          count: count,
+          firstVisit: first,
+          lastVisit: last,
+          note: rep.note || '',           // person メモ（全 channel 鏡写し済み）
+          tag: count <= 1 ? '新規' : '常連',
+          key: rep.key,                   // 代表 channel の突合トークン（氏名/メモ/連絡先追加・履歴の起点）
+          type: rep.type,
+          phone: rep.phone,
+          email: rep.email,
+          matchTokens: Array.from(tokenSet),
+          channels: channels,
+        };
       }
 
       // 並び替え（最終来店＝yyyy-MM-dd 文字列比較／来店回数＝数値）。原本を壊さずコピーを並べる。
@@ -180,9 +271,10 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         return arr;
       }
       function applySortAndRender() {
-        viewData = sortCustomers(customersData);
+        viewData = sortCustomers(groupedData);
         renderList(viewData);
         updateSortUI();
+        if (mergeMode) paintMergeSelection(); // 再描画後に統合の選択ハイライトを復元
       }
       function updateSortUI() {
         const bar = el('sortBar');
@@ -207,12 +299,17 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           // メモ有りマーク（✎）。本文は一覧に出さない＝のぞき見耐性（本文は詳細パネルで表示）。
           const hasNote = !!(c.note && c.note.trim());
           const memoMark = hasNote ? '<span class="clist__memo" title="メモあり" aria-label="メモあり">✎</span>' : '';
-          // 2段目：来店回数・最終来店・電話（phone 型のみ常にマスク／line・email 型は電話省略）。
+          // 複数の連絡先（channel）を持つ person は「連絡先N件」チップを添える（まとめて1名で見えている合図）。
+          // 折り返さない見出し行ではなく、折り返し可能なサブ行に置く（狭幅でのはみ出し回避）。
+          const nCh = (c.channels && c.channels.length) || 1;
+          const chip = nCh > 1 ? '<span class="clist__chip" title="連絡先が複数あります">連絡先 ' + esc(nCh) + ' 件</span>' : '';
+          // 2段目：来店回数・最終来店・（連絡先チップ）・電話（phone 型のみ常にマスク／line・email 型は電話省略）。
           const dot = '<span class="clist__dot">·</span>';
           let sub = '<span class="clist__cnt">来店 <b>' + esc(c.count != null ? c.count : 0) + '</b> 回</span>'
-            + dot + '<span class="clist__last">最終 ' + esc(c.lastVisit ? fmtDate(c.lastVisit) : '—') + '</span>';
+            + dot + '<span class="clist__last">最終 ' + esc(c.lastVisit ? fmtDate(c.lastVisit) : '—') + '</span>'
+            + chip;
           if (c.type === 'phone' && c.phone) sub += '<span class="clist__ph">' + maskPhoneCell(c.phone) + '</span>';
-          return '<button type="button" class="clist__row" data-i="' + i + '">'
+          return '<button type="button" class="clist__row" data-i="' + i + '" data-ref="' + esc(c.personRef || c.key) + '">'
             + '<span class="clist__head"><span class="clist__nm">' + esc(c.name || '（お名前未登録）') + '</span>' + tag + memoMark + '</span>'
             + '<span class="clist__sub">' + sub + '</span>'
             + '</button>';
@@ -222,8 +319,94 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
       el('listArea').addEventListener('click', (e) => {
         const row = e.target.closest('.clist__row');
         if (!row) return;
+        // 統合モード中はタップ＝選択（詳細は開かない）。通常はタップ＝詳細を開く。
+        if (mergeMode) { toggleMergeSelect(row.getAttribute('data-ref')); return; }
         openDetail(Number(row.getAttribute('data-i')));
       });
+
+      // ============================================================
+      // 手動マージ（統合）— 店主が同じお客様の重複を1人にまとめる保険
+      //   sourceKey/targetKey は person の代表 channel の突合トークン（GAS が rawKeyForHash_→personResolve_ で
+      //   personId に解決し、source を target へ寄せる）。破壊的操作ゆえ実行前に必ず確認ダイアログを出す。
+      // ============================================================
+      function personByRef(ref) { return viewData.find((c) => (c.personRef || c.key) === ref) || null; }
+      const refName = (ref) => { const p = personByRef(ref); return p ? (p.name || '（お名前未登録）') : '未選択'; };
+
+      function enterMergeMode() {
+        mergeMode = true; mergeSel = { src: null, tgt: null };
+        closeDetail();                    // 詳細を開いていたら閉じて一覧へ
+        el('mergeBar').hidden = false;
+        el('listArea').classList.add('is-merge');
+        el('mergeToggle').textContent = '統合をやめる';
+        paintMergeSelection();
+      }
+      function exitMergeMode() {
+        mergeMode = false; mergeSel = { src: null, tgt: null };
+        el('mergeBar').hidden = true;
+        el('mergeConfirm').hidden = true;
+        el('listArea').classList.remove('is-merge');
+        el('mergeToggle').textContent = '顧客を統合';
+        paintMergeSelection();
+      }
+      function toggleMergeSelect(ref) {
+        if (!ref) return;
+        if (mergeSel.src === ref) mergeSel.src = null;
+        else if (mergeSel.tgt === ref) mergeSel.tgt = null;
+        else if (!mergeSel.src) mergeSel.src = ref;
+        else if (!mergeSel.tgt) mergeSel.tgt = ref;
+        else mergeSel.tgt = ref;         // 両方選択済みなら統合先を差し替え
+        paintMergeSelection();
+      }
+      // 選択ハイライト（行）＋バーの表示＋実行ボタンの活性を、現在の mergeSel に同期する。
+      function paintMergeSelection() {
+        el('listArea').querySelectorAll('.clist__row').forEach((row) => {
+          const ref = row.getAttribute('data-ref');
+          row.classList.toggle('is-src', mergeMode && ref === mergeSel.src);
+          row.classList.toggle('is-tgt', mergeMode && ref === mergeSel.tgt);
+        });
+        el('mergeSrcNm').textContent = mergeSel.src ? refName(mergeSel.src) : '未選択';
+        el('mergeTgtNm').textContent = mergeSel.tgt ? refName(mergeSel.tgt) : '未選択';
+        el('mergeRun').disabled = !(mergeSel.src && mergeSel.tgt);
+      }
+      function openMergeConfirm() {
+        if (!(mergeSel.src && mergeSel.tgt)) return;
+        el('mergeConfirmBody').textContent =
+          '「' + refName(mergeSel.src) + '」を「' + refName(mergeSel.tgt) + '」に統合します。'
+          + '統合元は統合先にまとめられ、これまでのご来店の記録は統合先に引き継がれます。';
+        el('mergeConfirm').hidden = false;
+      }
+      async function runMerge() {
+        const s = personByRef(mergeSel.src), t = personByRef(mergeSel.tgt);
+        el('mergeConfirm').hidden = true;
+        if (!s || !t) return;
+        let res;
+        try {
+          res = await apiPost('adminMergeCustomers', { sourceKey: s.key, targetKey: t.key });
+        } catch (_) { toast('統合に失敗しました'); return; }
+        if (res && res.error === 'forbidden') { handleForbidden(); return; }
+        if (!res || !res.ok) {
+          const map = {
+            same_customer: '同じお客様どうしは統合できません',
+            not_found: 'お客様が見つかりませんでした',
+            bad_request: '選択が正しくありません',
+          };
+          toast((res && map[res.error]) || '統合できませんでした');
+          return;
+        }
+        if (res.unchanged) toast('すでに同じお客様でした');
+        else toast('お客様を統合しました' + (res.count != null ? '（来店 ' + res.count + ' 回分を引き継ぎ）' : ''));
+        exitMergeMode();
+        loadCustomers();                 // 台帳の状態が変わる＝読み直して最新化（作話しない）
+      }
+
+      el('mergeToggle').addEventListener('click', () => { if (mergeMode) exitMergeMode(); else enterMergeMode(); });
+      el('mergeCancel').addEventListener('click', exitMergeMode);
+      el('mergeSwap').addEventListener('click', () => { const s = mergeSel.src; mergeSel.src = mergeSel.tgt; mergeSel.tgt = s; paintMergeSelection(); });
+      el('mergeRun').addEventListener('click', openMergeConfirm);
+      el('mergeConfirmYes').addEventListener('click', runMerge);
+      el('mergeConfirmNo').addEventListener('click', () => { el('mergeConfirm').hidden = true; });
+      // オーバーレイの余白クリックで確認ダイアログを閉じる（誤タップ時の安全側＝実行しない）。
+      el('mergeConfirm').addEventListener('click', (e) => { if (e.target === el('mergeConfirm')) el('mergeConfirm').hidden = true; });
 
       // 並び替えバー：同じキーは方向トグル、違うキーは降順から。
       el('sortBar').addEventListener('click', (e) => {
@@ -238,7 +421,7 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
       // ============================================================
       // 詳細パネル（在ページ・PII 段階開示）
       // ============================================================
-      function clearRemask() { if (remaskTimer) { clearTimeout(remaskTimer); remaskTimer = null; } }
+      function clearRemask() { remaskTimers.forEach(clearTimeout); remaskTimers = []; }
 
       function openDetail(i) {
         const c = viewData[i];
@@ -304,12 +487,24 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         }).join('') + '</ul>';
       }
 
-      // 連絡先フィールド（phone→電話番号 / email→メール / line→台帳に連絡先なしを明示）。
-      function contactField(c) {
-        if (c.type === 'phone' && c.phone) return piiField('電話番号', maskPhone(c.phone), fmtPhone(c.phone));
-        if (c.type === 'email' && c.email) return piiField('メール', maskEmail(c.email), c.email);
-        return '<div class="field"><div class="field__lbl">連絡先</div>'
-          + '<div class="field__note">LINE連携のお客様です（電話・メールは台帳にありません）。</div></div>';
+      // 連絡先フィールド（person 単位）。名寄せ後は同一 person が複数 channel（電話・メール・LINE）を
+      // 持ち得るため、その person の全 channel を段階開示の行として並べる（phone/email は開示可・LINE は連絡先なし）。
+      function contactFields(c) {
+        const chans = (c.channels && c.channels.length)
+          ? c.channels
+          : [{ type: c.type, phone: c.phone, email: c.email }]; // 旧応答フォールバック
+        const contactChans = chans.filter((ch) => (ch.type === 'phone' && ch.phone) || (ch.type === 'email' && ch.email));
+        const hasLine = chans.some((ch) => !ch.phone && !ch.email); // LINE 等・連絡先を持たない channel の有無
+        if (!contactChans.length) {
+          return '<div class="field"><div class="field__lbl">連絡先</div>'
+            + '<div class="field__note">LINE連携のお客様です（電話・メールは台帳にありません）。</div></div>';
+        }
+        let html = contactChans.map((ch) => (ch.type === 'phone' && ch.phone)
+          ? piiField('電話番号', maskPhone(ch.phone), fmtPhone(ch.phone))
+          : piiField('メール', maskEmail(ch.email), ch.email)
+        ).join('');
+        if (hasLine) html += '<div class="field"><div class="field__note">このほかに LINE 連携の連絡先があります。</div></div>';
+        return html;
       }
       // 既定マスク→[表示]で開示＋[コピー]表示＋放置で自動再マスク（ADR-0001 決定3）。
       function piiField(label, masked, full) {
@@ -377,7 +572,7 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           +       '</div>'
           +     '</div>'
           +     '<div class="tags">' + tags + '</div></div>'
-          +   contactField(c)
+          +   contactFields(c)
           +   contactEditHtml(c)
           +   metaField('来店回数', (c.count != null ? c.count + ' 回' : '—'))
           +   metaField('初来店', c.firstVisit ? fmtDate(c.firstVisit) : '—')
@@ -401,25 +596,31 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         const area = el('detailArea');
         const back = area.querySelector('#detailBack');
         if (back) back.addEventListener('click', closeDetail);
-        const row = area.querySelector('.pii-row');
-        if (!row) return; // line 型（連絡先なし）は開示操作なし
+        // 連絡先が複数行になり得る（名寄せ後の複数 channel）ため、全 .pii-row を個別に配線する。
+        area.querySelectorAll('.pii-row').forEach(wirePiiRow);
+      }
+
+      // 1つの連絡先開示行（.pii-row）の配線：[表示]で開示→[コピー]／放置で自動再マスク（ADR-0001 決定3）。
+      // タイマは行ごとに持ち、remaskTimers（配列）で束ねて clearRemask 一括解除に載せる。
+      function wirePiiRow(row) {
         const pii = row.querySelector('.pii');
         const revealBtn = row.querySelector('.reveal');
         const copyBtn = row.querySelector('.copy');
         const note = row.parentElement.querySelector('.reveal-note');
-
+        if (!pii || !revealBtn || !copyBtn) return;
+        let timer = null;
         function remask() {
           pii.textContent = pii.getAttribute('data-mask');
           pii.classList.add('masked');
-          revealBtn.hidden = false; copyBtn.hidden = true; note.hidden = true;
-          remaskTimer = null;
+          revealBtn.hidden = false; copyBtn.hidden = true; if (note) note.hidden = true;
+          timer = null;
         }
         revealBtn.addEventListener('click', () => {
           pii.textContent = pii.getAttribute('data-full');
           pii.classList.remove('masked');
-          revealBtn.hidden = true; copyBtn.hidden = false; note.hidden = false;
-          clearRemask();
-          remaskTimer = setTimeout(remask, REMASK_MS); // 放置で自動再マスク
+          revealBtn.hidden = true; copyBtn.hidden = false; if (note) note.hidden = false;
+          timer = setTimeout(remask, REMASK_MS); // 放置で自動再マスク（この行のみ）
+          remaskTimers.push(timer);
         });
         copyBtn.addEventListener('click', () => {
           const full = pii.getAttribute('data-full');
