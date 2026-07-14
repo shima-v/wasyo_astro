@@ -68,6 +68,17 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
           <button type="button" class="reserve-btn" id="confirmChange" disabled>この日時に変更する（再承認）</button>
           <p class="hint">変更後はサロンの再確認のうえ、確定のご連絡をいたします。</p>
         </div>
+
+        <!-- 名寄せの引き継ぎ導線（入口②）。メイン UI を邪魔しない補助リンク。
+             別の連絡手段（電話・メール等）でのご予約を、いまお使いの LINE アカウントに引き継ぐ。
+             リンク先の handover ページで LINE ログイン（idToken 取得）する前提。 -->
+        <div class="handover-aside">
+          <a class="handover-aside__link" href={`${base}reserve/handover`}>
+            <span class="handover-aside__ic" aria-hidden="true">🗂</span>
+            <span class="handover-aside__tx">過去（別の連絡手段）のご予約を、このアカウントに引き継ぐ</span>
+            <span class="handover-aside__go" aria-hidden="true">›</span>
+          </a>
+        </div>
       </section>
 
       <section class="card done" id="result" hidden>
@@ -375,6 +386,17 @@ const pageTitle = `${ENV_LABEL}ご予約の確認・変更 | ${salonName}`;
         background: #FCF6FA; border: 1px solid var(--c-border); border-radius: 8px; padding: .7rem .8rem;
       }
       .hint { font-size: .8rem; color: var(--c-muted); margin-top: .5rem; }
+
+      /* 名寄せの引き継ぎ導線（入口②）。メイン UI と区切る控えめな補助リンク。 */
+      .handover-aside { margin-top: 1.2rem; padding-top: 1rem; border-top: 1px solid var(--c-border); }
+      .handover-aside__link {
+        display: flex; align-items: center; gap: .55rem; text-decoration: none;
+        font-size: .84rem; line-height: 1.6; color: var(--c-muted);
+      }
+      .handover-aside__link:hover { color: var(--c-purple-dk); }
+      .handover-aside__ic { flex: none; font-size: 1rem; line-height: 1; }
+      .handover-aside__tx { flex: 1; }
+      .handover-aside__go { flex: none; color: var(--c-purple); font-size: 1.1rem; }
 
       .actions { display: flex; flex-direction: column; gap: .6rem; margin-top: 1.2rem; }
 
