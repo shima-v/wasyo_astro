@@ -971,8 +971,15 @@ function ledgerUpsert_(props, visitDate) {
     var count = Number(sh.getRange(row, 5).getValue() || 0) + 1;
     sh.getRange(row, 5).setValue(count);
     sh.getRange(row, 6).setValue(dateStr);
+    // person 層（identity 土台・非破壊）: この channel 行の personId を解決（無ければ採番して col7 へ
+    // backfill）し、person シートの集約（来店回数・最終来店・氏名）を channel と同期する。col0〜6 は不変。
+    var pid = personResolve_(key);
+    if (pid) personRowSync_(pid, { displayName: String(props.name || ''), count: count, lastVisit: dateStr });
   } else {
-    sh.appendRow([key, type, props.name || '', dateStr, 1, dateStr, '']);
+    // 新規: person を採番し、channel 行の col7 へ personId を含めて追加（col0〜6 は従来どおり同順・同値）。
+    var newPid = personResolve_(key);
+    sh.appendRow([key, type, props.name || '', dateStr, 1, dateStr, '', newPid]);
+    if (newPid) personRowSync_(newPid, { displayName: String(props.name || ''), firstVisit: dateStr, count: 1, lastVisit: dateStr });
   }
 }
 
@@ -1079,6 +1086,170 @@ function adminListCustomers_() {
 function ledgerDateStr_(v) {
   if (v instanceof Date) return fmt_(v, 'yyyy-MM-dd');
   return String(v || '');
+}
+
+// ============================================================
+// person（人・identity 層）— Phase 1: 土台だけ（非破壊・追加のみ・冪等）
+// ------------------------------------------------------------
+// 目的: 連絡先＝主キーの癒着（電話を変えると履歴が切れる／媒体違いで別人扱い）を解くため、
+//       「人（person＝不変の内部背番号 personId）」と「連絡手段（channel＝既存の台帳行）」を層分離する。
+// Phase 1 の約束:
+//   - 既存の表示・挙動は一切変えない（adminListCustomers_ 等は従来どおり channel を表示）。
+//   - channel（台帳＝getSheets()[0]）の col0〜6 は不変。personId は col7 に純追加（append only）。
+//   - person は名前付きシート 'person' として"末尾"に作る（位置0の台帳参照 getSheets()[0] を壊さない）。
+//   - カレンダー（来店履歴の原本）には一切書き込まない。
+//   - 冪等: 既に personId がある行は再採番しない（二度流しても同結果）。
+// 次フェーズ以降で、履歴を personId に紐づけ替え／媒体をまたいだ名寄せ／表示の person 化を行う。
+// ============================================================
+
+/**
+ * person シートを取得（無ければ作成）。列 = personId|displayName|firstVisit|count|lastVisit|note。
+ * 台帳（getSheets()[0]）を末尾以外へずらさないよう、必ず"末尾"の index に挿入する。
+ * 台帳未設定（LEDGER_SHEET_ID なし）なら null（作話しない）。logPush_/auditPush_ と同じ流儀。
+ */
+function personSheet_() {
+  var id = prop_('LEDGER_SHEET_ID');
+  if (!id) return null;
+  var ss = SpreadsheetApp.openById(id);
+  var sh = ss.getSheetByName('person');
+  if (!sh) {
+    sh = ss.insertSheet('person', ss.getSheets().length); // 末尾に追加＝位置0の台帳を動かさない
+    sh.appendRow(['personId', 'displayName', 'firstVisit', 'count', 'lastVisit', 'note']);
+  }
+  return sh;
+}
+
+/** personId に該当する person 行（1始まり）を返す。無ければ 0。 */
+function personLookup_(personId) {
+  if (!personId) return 0;
+  var sh = personSheet_();
+  if (!sh) return 0;
+  var values = sh.getDataRange().getValues();
+  for (var r = 1; r < values.length; r++) {   // r=0 はヘッダ行
+    if (String(values[r][0]) === personId) return r + 1;
+  }
+  return 0;
+}
+
+/**
+ * person 行の集約を upsert（無ければ作成、あれば更新）。
+ * agg = { displayName, firstVisit, count, lastVisit, note }（部分指定可）。
+ * 空文字/未指定のフィールドは"上書きしない"（既存値を保全）。count のみ数値として常に反映。
+ * カレンダー・channel（台帳）には触れない。person シートのみ。
+ */
+function personRowSync_(personId, agg) {
+  if (!personId) return;
+  var sh = personSheet_();
+  if (!sh) return;
+  agg = agg || {};
+  var row = personLookup_(personId);
+  if (row) {
+    if (agg.displayName != null && agg.displayName !== '') sh.getRange(row, 2).setValue(String(agg.displayName));
+    if (agg.firstVisit != null && agg.firstVisit !== '') sh.getRange(row, 3).setValue(String(agg.firstVisit));
+    if (agg.count != null) sh.getRange(row, 4).setValue(Number(agg.count) || 0);
+    if (agg.lastVisit != null && agg.lastVisit !== '') sh.getRange(row, 5).setValue(String(agg.lastVisit));
+    if (agg.note != null && agg.note !== '') sh.getRange(row, 6).setValue(String(agg.note));
+  } else {
+    sh.appendRow([
+      personId,
+      String(agg.displayName || ''),
+      String(agg.firstVisit || ''),
+      Number(agg.count || 0),
+      String(agg.lastVisit || ''),
+      String(agg.note || ''),
+    ]);
+  }
+}
+
+/**
+ * channel キー（type:value 文字列）または予約 props から personId を解決する。
+ *   - 該当 channel 行に personId(col7) が既にあればそれを返す（冪等・再採番しない）。
+ *   - 無ければ Utilities.getUuid() で採番し、channel 行の col7 へ backfill（col0〜6 は不変）。
+ *     このとき person シートへ当該行の集約を鏡写しで作成する。
+ *   - channel 行自体が未作成（新規予約の appendRow 直前）なら、personId のみ採番して最小 person 行を作り
+ *     返す（channel 行の作成＝col7 への書き込みは呼び出し側 ledgerUpsert_ の appendRow が担う）。
+ * 台帳未設定なら '' を返す。カレンダーには一切触れない。
+ */
+function personResolve_(keyOrProps) {
+  var sh = ledgerSheet_();
+  if (!sh) return '';
+  var key = (typeof keyOrProps === 'string') ? keyOrProps : ledgerKey_(keyOrProps || {});
+  if (!key) return '';
+  var row = ledgerLookup_(key);
+  if (row) {
+    var pid = String(sh.getRange(row, 8).getValue() || '');  // col7 = 1始まり8列目
+    if (pid) return pid;                                      // 既に解決済み（冪等）
+    pid = Utilities.getUuid();
+    sh.getRange(row, 8).setValue(pid);                        // channel col7 へ backfill（col0〜6 不変）
+    var vals = sh.getRange(row, 1, 1, 7).getValues()[0];      // col0..6 を読み取り person へ鏡写し
+    personRowSync_(pid, {
+      displayName: String(vals[2] || ''),
+      firstVisit: ledgerDateStr_(vals[3]),
+      count: Number(vals[4] || 0),
+      lastVisit: ledgerDateStr_(vals[5]),
+      note: String(vals[6] || ''),
+    });
+    return pid;
+  }
+  // channel 行が未作成: personId のみ採番し、最小 person 行を用意（channel 行作成は呼び出し側）。
+  var newPid = Utilities.getUuid();
+  var seedName = (typeof keyOrProps === 'object' && keyOrProps) ? String(keyOrProps.name || '') : '';
+  personRowSync_(newPid, { displayName: seedName });
+  return newPid;
+}
+
+/**
+ * 既存の全 channel（台帳）行へ person を割り当てる移行関数。**既定は dry-run（安全側）**。
+ *   - dry-run（引数省略 or true）: 件数と同名衝突を集計して返すだけ。**一切書き込まない**。
+ *   - 実行（migrateToPersonModel_(false)）: personId 未設定の行に採番して col7 へ書き、person 行を作成。
+ * 性質:
+ *   - 冪等: 既に personId(col7) がある行は再採番せず alreadyAssigned に数える（二度流しても同結果）。
+ *   - 非破壊: col0〜6・カレンダーには一切触れない（personId は col7、person シートのみ書き込む）。
+ *   - 名寄せはしない（Phase 1 は 1 channel 行 = 1 person の 1:1）。同名 channel は「将来の名寄せ候補」として
+ *     nameCollisions に報告するだけで自動統合はしない。
+ * ※本関数はどの HTTP ルータ（doGet/doPost）にも配線していない。実行はオーナーが GAS エディタ／clasp run で
+ *   手動起動する前提（返り値の氏名はオーナー自身の台帳データで、外部送出はしない）。
+ * @param {boolean} dryRun 既定 true。実書き込みは明示的に false を渡したときだけ。
+ * @return {{ok:boolean, dryRun:boolean, total:number, alreadyAssigned:number, assigned:number, nameCollisions:Array}}
+ */
+function migrateToPersonModel_(dryRun) {
+  dryRun = (dryRun !== false); // 省略・true は dry-run。実書き込みは false を明示したときのみ。
+  var sh = ledgerSheet_();
+  if (!sh) return { ok: false, error: 'ledger_unconfigured' };
+  var values = sh.getDataRange().getValues();
+  var total = 0, already = 0, assigned = 0;
+  var nameMap = {}; // displayName -> 行番号(1始まり)配列。将来の名寄せ候補（同名）検出用。
+  for (var r = 1; r < values.length; r++) {   // r=0 はヘッダ行
+    var row = values[r];
+    var key = String(row[0] || '');
+    if (!key) continue;
+    total++;
+    var name = String(row[2] || '');
+    if (name) { (nameMap[name] = nameMap[name] || []).push(r + 1); }
+    var existingPid = String(row[7] || ''); // col7
+    if (existingPid) { already++; continue; } // 冪等: 既に personId があれば触らない
+    assigned++;
+    if (!dryRun) {
+      var pid = Utilities.getUuid();
+      sh.getRange(r + 1, 8).setValue(pid); // channel col7 のみ（col0〜6・カレンダー不変）
+      personRowSync_(pid, {
+        displayName: name,
+        firstVisit: ledgerDateStr_(row[3]),
+        count: Number(row[4] || 0),
+        lastVisit: ledgerDateStr_(row[5]),
+        note: String(row[6] || ''),
+      });
+    }
+  }
+  var nameCollisions = [];
+  for (var nm in nameMap) {
+    if (nameMap[nm].length > 1) nameCollisions.push({ name: nm, rows: nameMap[nm] });
+  }
+  return {
+    ok: true, dryRun: dryRun,
+    total: total, alreadyAssigned: already, assigned: assigned,
+    nameCollisions: nameCollisions,
+  };
 }
 
 // ============================================================
