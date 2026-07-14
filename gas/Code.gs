@@ -1372,6 +1372,28 @@ function migrateToPersonModel_(dryRun) {
   };
 }
 
+/**
+ * dry-run（書き込まない素振り）の結果を実行ログに出す薄いラッパー。
+ * GAS エディタで本関数を選んで Run すると、実行ログに件数(非PII)が出る。
+ * migrateToPersonModel_ は戻り値で返すだけでログに出ないため、観測用に用意。
+ */
+function migrateDryRun() {
+  var r = migrateToPersonModel_(true);
+  console.log(JSON.stringify(r));
+  return r;
+}
+
+/**
+ * 本移行（personId を実際に col7＋person シートへ書き込む）＋結果をログに出すラッパー。
+ * dev で migrateDryRun を確認した後、本人立会いのもとで実行する想定。
+ * col0〜6・カレンダーは不変・冪等（二度流しても assigned は増えない）。
+ */
+function migrateApply() {
+  var r = migrateToPersonModel_(false);
+  console.log(JSON.stringify(r));
+  return r;
+}
+
 // ============================================================
 // 確定予約の集約（P2・read-only）
 // ============================================================
