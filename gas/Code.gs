@@ -1323,11 +1323,11 @@ function personResolve_(keyOrProps) {
  *   - 冪等: 既に personId(col7) がある行は再採番せず alreadyAssigned に数える（二度流しても同結果）。
  *   - 非破壊: col0〜6・カレンダーには一切触れない（personId は col7、person シートのみ書き込む）。
  *   - 名寄せはしない（Phase 1 は 1 channel 行 = 1 person の 1:1）。同名 channel は「将来の名寄せ候補」として
- *     nameCollisions に報告するだけで自動統合はしない。
+ *     グループ数と行番号だけ報告する（実名は載せない）＝自動統合はしない。
  * ※本関数はどの HTTP ルータ（doGet/doPost）にも配線していない。実行はオーナーが GAS エディタ／clasp run で
- *   手動起動する前提（返り値の氏名はオーナー自身の台帳データで、外部送出はしない）。
+ *   手動起動する前提。返り値は件数・行番号のみで氏名などの個人情報を含まない（読み手側の匿名化）。
  * @param {boolean} dryRun 既定 true。実書き込みは明示的に false を渡したときだけ。
- * @return {{ok:boolean, dryRun:boolean, total:number, alreadyAssigned:number, assigned:number, nameCollisions:Array}}
+ * @return {{ok:boolean, dryRun:boolean, total:number, alreadyAssigned:number, assigned:number, nameCollisionGroups:number, nameCollisionRows:Array}}
  */
 function migrateToPersonModel_(dryRun) {
   dryRun = (dryRun !== false); // 省略・true は dry-run。実書き込みは false を明示したときのみ。
@@ -1358,14 +1358,17 @@ function migrateToPersonModel_(dryRun) {
       });
     }
   }
-  var nameCollisions = [];
+  // 同名グループ（将来の名寄せ候補）は「件数」と「行番号」だけを返す。
+  // 実名(row[2]) は個人情報なので出力に載せない（dry-run 結果を人が読む前提の匿名化）。
+  var nameCollisionRows = [];
   for (var nm in nameMap) {
-    if (nameMap[nm].length > 1) nameCollisions.push({ name: nm, rows: nameMap[nm] });
+    if (nameMap[nm].length > 1) nameCollisionRows.push(nameMap[nm]);
   }
   return {
     ok: true, dryRun: dryRun,
     total: total, alreadyAssigned: already, assigned: assigned,
-    nameCollisions: nameCollisions,
+    nameCollisionGroups: nameCollisionRows.length, // 同名グループの数
+    nameCollisionRows: nameCollisionRows,          // 各グループの行番号のみ（非PII）
   };
 }
 
