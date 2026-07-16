@@ -101,10 +101,11 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         <h3 id="confirmTitle" class="modal__title"></h3>
         <p class="modal__body" id="confirmBody"></p>
         <p class="modal__warn" id="confirmWarn" hidden></p>
-        <div class="modal__actions">
+        <div class="modal__actions" id="confirmActions">
           <button type="button" class="reserve-btn sm" id="confirmYes">実行する</button>
           <button type="button" class="reserve-btn ghost sm" id="confirmNo">やめる</button>
         </div>
+        <div class="modal__busy" id="confirmBusyMsg" hidden><span class="spinner" aria-hidden="true"></span><span>更新中…</span></div>
       </div>
     </div>
 
@@ -202,6 +203,7 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         confirmOnOk = onOk || null;
         confirmBusy = false;
         yes.disabled = false; el('confirmNo').disabled = false;
+        el('confirmBusyMsg').hidden = true; el('confirmActions').hidden = false;   // 「更新中」表示をリセット
         el('confirmModal').hidden = false;
         try { yes.focus({ preventScroll: true }); } catch (_) { yes.focus(); } // 開いたら実行ボタンへ
       }
@@ -215,9 +217,11 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         const fn = confirmOnOk;
         confirmBusy = true;
         el('confirmYes').disabled = true; el('confirmNo').disabled = true;
+        el('confirmActions').hidden = true; el('confirmBusyMsg').hidden = false;   // 「更新中…」を表示（処理中の可視化）
         try { if (fn) await fn(); }        // 実行処理は既存の保存フローそのもの（前段の確認だけ足す）
         finally {                          // 成功・失敗を問わず必ず閉じる（背後の状態表示を見せる）
           confirmBusy = false;
+          el('confirmBusyMsg').hidden = true; el('confirmActions').hidden = false; // 表示をリセット
           el('confirmModal').hidden = true;
           confirmOnOk = null;
         }

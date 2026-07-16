@@ -291,3 +291,4 @@ a.chart:hover { border-color: var(--k); transform: translateY(-1px); transition:
 }
 .modal__actions { display: flex; gap: .6rem; }
 .modal__actions .reserve-btn.sm { flex: 1 1 0; min-height: 46px; }
+.modal__busy { display: flex; align-items: center; justify-content: center; gap: .55rem; min-height: 46px; color: var(--a-ink-soft); font-family: var(--f-sans); font-size: .92rem; font-weight: 600; }
