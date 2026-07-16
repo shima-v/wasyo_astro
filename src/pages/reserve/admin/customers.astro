@@ -92,15 +92,18 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
       <p class="small">富山県高岡市野村1180-1 / <a href={`tel:${tel}`}>{tel}</a></p>
     </footer>
 
-    <!-- 統合の確認ダイアログ（破壊的操作・誤操作防止）。実行前に必ず出す。 -->
-    <div class="modal-overlay" id="mergeConfirm" hidden>
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mergeConfirmTitle">
-        <h3 id="mergeConfirmTitle" class="modal__title">お客様を統合します</h3>
-        <p class="modal__body" id="mergeConfirmBody"></p>
-        <p class="modal__warn">⚠ この操作は「元に戻す」のに手間がかかります。実行前に台帳（スプレッドシート）のバックアップをおすすめします。</p>
+    <!-- 汎用の確認モーダル（保存・統合の前段クッション・誤操作防止）。氏名編集・連絡先追加・統合の
+         3用途で使い回す。開く実体は openConfirm()、中身（見出し／本文／警告／実行ラベル／実行処理）は
+         呼び出し側が渡す。破壊的操作（統合）のときだけ警告文を出す。role="dialog"/aria-modal・Escで
+         閉じる・開いたら実行ボタンへフォーカス・背景クリックで閉じる（実行中は閉じない）。 -->
+    <div class="modal-overlay" id="confirmModal" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+        <h3 id="confirmTitle" class="modal__title"></h3>
+        <p class="modal__body" id="confirmBody"></p>
+        <p class="modal__warn" id="confirmWarn" hidden></p>
         <div class="modal__actions">
-          <button type="button" class="reserve-btn decline sm" id="mergeConfirmYes">統合する</button>
-          <button type="button" class="reserve-btn ghost sm" id="mergeConfirmNo">やめる</button>
+          <button type="button" class="reserve-btn sm" id="confirmYes">実行する</button>
+          <button type="button" class="reserve-btn ghost sm" id="confirmNo">やめる</button>
         </div>
       </div>
     </div>
@@ -175,6 +178,55 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         }
         return s;
       }
+
+      // ============================================================
+      // 汎用確認モーダル（保存・統合の前段クッション）
+      //   氏名編集・連絡先追加・統合の3用途で #confirmModal を1つ使い回す（重複排除＝分割統治）。
+      //   呼び出し側は openConfirm() に「見出し・本文HTML・警告文（任意）・実行ラベル・実行ボタンの
+      //   装い（任意）・実行処理 onOk」を渡すだけ。本文は innerHTML で流し込むため、可変値は必ず
+      //   呼び出し側で esc() 済みにして渡す（属性/HTMLブレイクアウト防止）。
+      //   実行中は両ボタンを無効化して二重送信を防ぎ、onOk 完了後は成否を問わず必ず閉じる。
+      //   Esc・背景クリックで閉じる（実行中は閉じない＝安全側）。開いたら実行ボタンへフォーカス。
+      // ============================================================
+      let confirmOnOk = null;   // いま開いている確認モーダルの実行処理
+      let confirmBusy = false;  // 実行中フラグ（二重送信・閉じ操作の抑止）
+      function openConfirm({ title, bodyHtml, warn, okLabel, okClass, onOk }) {
+        el('confirmTitle').textContent = title || '確認';
+        el('confirmBody').innerHTML = bodyHtml || '';
+        const warnEl = el('confirmWarn');
+        if (warn) { warnEl.textContent = warn; warnEl.hidden = false; }
+        else { warnEl.textContent = ''; warnEl.hidden = true; }
+        const yes = el('confirmYes');
+        yes.textContent = okLabel || '実行する';
+        yes.className = 'reserve-btn sm' + (okClass ? ' ' + okClass : '');
+        confirmOnOk = onOk || null;
+        confirmBusy = false;
+        yes.disabled = false; el('confirmNo').disabled = false;
+        el('confirmModal').hidden = false;
+        try { yes.focus({ preventScroll: true }); } catch (_) { yes.focus(); } // 開いたら実行ボタンへ
+      }
+      function closeConfirm() {
+        if (confirmBusy) return;          // 実行中は閉じない（誤操作の安全側）
+        el('confirmModal').hidden = true;
+        confirmOnOk = null;
+      }
+      el('confirmYes').addEventListener('click', async () => {
+        if (confirmBusy) return;          // 実行中の二重クリックは無視
+        const fn = confirmOnOk;
+        confirmBusy = true;
+        el('confirmYes').disabled = true; el('confirmNo').disabled = true;
+        try { if (fn) await fn(); }        // 実行処理は既存の保存フローそのもの（前段の確認だけ足す）
+        finally {                          // 成功・失敗を問わず必ず閉じる（背後の状態表示を見せる）
+          confirmBusy = false;
+          el('confirmModal').hidden = true;
+          confirmOnOk = null;
+        }
+      });
+      el('confirmNo').addEventListener('click', closeConfirm);
+      // 背景（オーバーレイ余白）クリックで閉じる＝誤タップ時の安全側（実行しない）。既存 mergeConfirm 準拠。
+      el('confirmModal').addEventListener('click', (e) => { if (e.target === el('confirmModal')) closeConfirm(); });
+      // Esc で閉じる（開いている・非実行中のときだけ）。
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !el('confirmModal').hidden) closeConfirm(); });
 
       // ============================================================
       // 顧客一覧
@@ -343,7 +395,7 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
       function exitMergeMode() {
         mergeMode = false; mergeSel = { src: null, tgt: null };
         el('mergeBar').hidden = true;
-        el('mergeConfirm').hidden = true;
+        closeConfirm();
         el('listArea').classList.remove('is-merge');
         el('mergeToggle').textContent = '顧客を統合';
         paintMergeSelection();
@@ -370,14 +422,18 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
       }
       function openMergeConfirm() {
         if (!(mergeSel.src && mergeSel.tgt)) return;
-        el('mergeConfirmBody').textContent =
-          '「' + refName(mergeSel.src) + '」を「' + refName(mergeSel.tgt) + '」に統合します。'
-          + '統合元は統合先にまとめられ、これまでのご来店の記録は統合先に引き継がれます。';
-        el('mergeConfirm').hidden = false;
+        openConfirm({
+          title: 'お客様を統合します',
+          bodyHtml: '「' + esc(refName(mergeSel.src)) + '」を「' + esc(refName(mergeSel.tgt)) + '」に統合します。'
+            + '統合元は統合先にまとめられ、これまでのご来店の記録は統合先に引き継がれます。',
+          warn: '⚠ この操作は「元に戻す」のに手間がかかります。実行前に台帳（スプレッドシート）のバックアップをおすすめします。',
+          okLabel: '統合する',
+          okClass: 'decline', // 破壊的操作＝注意色の実行ボタン（既存 mergeConfirm と同じ装い）
+          onOk: runMerge,
+        });
       }
       async function runMerge() {
         const s = personByRef(mergeSel.src), t = personByRef(mergeSel.tgt);
-        el('mergeConfirm').hidden = true;
         if (!s || !t) return;
         let res;
         try {
@@ -403,10 +459,6 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
       el('mergeCancel').addEventListener('click', exitMergeMode);
       el('mergeSwap').addEventListener('click', () => { const s = mergeSel.src; mergeSel.src = mergeSel.tgt; mergeSel.tgt = s; paintMergeSelection(); });
       el('mergeRun').addEventListener('click', openMergeConfirm);
-      el('mergeConfirmYes').addEventListener('click', runMerge);
-      el('mergeConfirmNo').addEventListener('click', () => { el('mergeConfirm').hidden = true; });
-      // オーバーレイの余白クリックで確認ダイアログを閉じる（誤タップ時の安全側＝実行しない）。
-      el('mergeConfirm').addEventListener('click', (e) => { if (e.target === el('mergeConfirm')) el('mergeConfirm').hidden = true; });
 
       // 並び替えバー：同じキーは方向トグル、違うキーは降順から。
       el('sortBar').addEventListener('click', (e) => {
@@ -650,19 +702,16 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         const closeEdit = () => { editRow.hidden = true; editBtn.hidden = false; setStatus('', ''); };
         editBtn.addEventListener('click', openEdit);
         cancelBtn.addEventListener('click', closeEdit);
-        saveBtn.addEventListener('click', async () => {
-          const v = input.value;
-          saveBtn.disabled = true;
+        // 実行本体＝従来の保存フローそのまま（挙動・エラー処理・成功後処理は不変）。二重送信は確認モーダル側で抑止。
+        const doSaveName = async (v) => {
           setStatus('保存中…', '');
           let res;
           try {
             res = await apiPost('adminSetCustomerName', { key: c.key, name: v }, { silent: true });
           } catch (_) {
-            saveBtn.disabled = false;
             setStatus('保存に失敗しました', 'is-warn');
             return;
           }
-          saveBtn.disabled = false;
           if (res && res.error === 'forbidden') { handleForbidden(); return; }
           if (!res || !res.ok) {
             setStatus(res && res.error === 'too_long' ? '100文字以内で入力してください' : '保存できませんでした', 'is-warn');
@@ -674,6 +723,19 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           applySortAndRender();                        // 一覧の氏名を更新（並び順は氏名非依存で不変）
           setStatus('保存しました', 'is-ok');
           toast('お名前を保存しました');
+        };
+        // 「保存」押下→即 apiPost せず、まず確認モーダルで「何をどう変えるか」を提示する（前段クッション）。
+        saveBtn.addEventListener('click', () => {
+          const v = input.value;
+          const cur = (c.name && c.name.trim()) ? c.name : '';
+          openConfirm({
+            title: 'お名前の保存',
+            bodyHtml: cur
+              ? 'お名前を『' + esc(cur) + '』→『' + esc(v) + '』に変更します。'
+              : 'お名前を『' + esc(v) + '』に登録します。',
+            okLabel: '保存する',
+            onOk: () => doSaveName(v),
+          });
         });
       }
 
@@ -697,21 +759,16 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         const closeEdit = () => { editRow.hidden = true; editBtn.hidden = false; input.value = ''; setStatus('', ''); };
         editBtn.addEventListener('click', openEdit);
         cancelBtn.addEventListener('click', closeEdit);
-        saveBtn.addEventListener('click', async () => {
-          const contactType = typeSel.value;
-          const value = input.value.trim();
-          if (!value) { setStatus('連絡先を入力してください', 'is-warn'); return; }
-          saveBtn.disabled = true;
+        // 実行本体＝従来の保存フローそのまま（挙動・エラー処理・成功後処理は不変）。二重送信は確認モーダル側で抑止。
+        const doSaveContact = async (contactType, value) => {
           setStatus('保存中…', '');
           let res;
           try {
             res = await apiPost('adminSetCustomerContact', { key: c.key, contactType, value }, { silent: true });
           } catch (_) {
-            saveBtn.disabled = false;
             setStatus('保存に失敗しました', 'is-warn');
             return;
           }
-          saveBtn.disabled = false;
           if (res && res.error === 'forbidden') { handleForbidden(); return; }
           if (!res || !res.ok) {
             const msgMap = {
@@ -727,6 +784,20 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           setStatus('保存しました', 'is-ok');
           toast('連絡先を追加しました（過去のご来店履歴は引き継がれます）');
           loadCustomers(); // 新 channel が増える＝台帳の状態が変わるので一覧を最新化（一覧へ戻る）
+        };
+        // 「保存」押下→即 apiPost せず、まず確認モーダルで「何を追加するか」を提示する（前段クッション）。
+        // 空入力は従来どおりモーダルを出さず即エラー表示（追加対象が無いため）。
+        saveBtn.addEventListener('click', () => {
+          const contactType = typeSel.value;
+          const value = input.value.trim();
+          if (!value) { setStatus('連絡先を入力してください', 'is-warn'); return; }
+          const kind = contactType === 'email' ? 'メール' : '電話番号';
+          openConfirm({
+            title: '連絡先の追加',
+            bodyHtml: 'この連絡先を追加します：〔' + esc(kind) + '〕' + esc(value) + '。過去のご来店履歴は引き継がれます。',
+            okLabel: '保存する',
+            onOk: () => doSaveContact(contactType, value),
+          });
         });
       }
 
