@@ -12,7 +12,7 @@ export const prerender = false;
 //   「公開署名ルート」で、message 系（messageInfo/messageSend）と同じく **ブラウザ→GAS へ直送**（Worker を
 //   経由しない）ため、この ALLOWED_ACTIONS には載せない。ここに載せるのは adminToken を要する管理系のみ。
 const ALLOWED_ACTIONS = new Set([
-  'getSlotConfig', 'setSlotConfig', 'getNotifyConfig', 'setNotifyConfig', 'listPending', 'adminListCustomers', 'adminListConfirmed', 'adminSetCustomerNote', 'adminSetCustomerName', 'adminSetCustomerContact', 'adminMergeCustomers', 'getQuota', 'adminDecision',
+  'getSlotConfig', 'setSlotConfig', 'getNotifyConfig', 'setNotifyConfig', 'listPending', 'adminListCustomers', 'adminListConfirmed', 'adminSetCustomerNote', 'adminSetCustomerName', 'adminSetCustomerContact', 'adminDeleteContact', 'adminEditContact', 'adminMergeCustomers', 'getQuota', 'adminDecision',
   'broadcastPreview', 'broadcast', 'broadcastTest', 'setTempSchedule', 'ownerChannelTest',
   'adminCreateBooking',
 ]);

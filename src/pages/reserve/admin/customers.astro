@@ -270,14 +270,18 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
 
       // 連絡先の優先度（詳細・履歴突合の代表 channel を選ぶ）：電話→メール→LINE。
       const chanRank = (r) => (r.type === 'phone' ? 0 : r.type === 'email' ? 1 : 2);
+      // アーカイブ済み channel は代表・表示で後ろへ（有効な連絡先を優先）。
+      const isArch = (r) => (r.status === 'archived' ? 1 : 0);
 
       // 1 person にぶら下がる channel 行群を、表示用の1オブジェクトに畳む。
       function mergePersonRows(ref, rows) {
-        // 代表 channel＝連絡先を持つものを優先（氏名/メモ/連絡先追加・履歴突合の起点キーに使う）。
-        const rep = rows.slice().sort((a, b) => chanRank(a) - chanRank(b))[0];
-        // 連絡先一覧（詳細で全 channel を見せる）。順序は電話→メール→LINE。
-        const channels = rows.slice().sort((a, b) => chanRank(a) - chanRank(b))
-          .map((r) => ({ type: r.type, phone: r.phone, email: r.email, key: r.key }));
+        // 代表 channel＝有効(active)で連絡先を持つものを優先（氏名/メモ・履歴突合の起点キーに使う）。
+        // archived しか無い person（連絡先を全部削除）は archived 行が代表になる（それでも一覧に残す）。
+        const rep = rows.slice().sort((a, b) => (isArch(a) - isArch(b)) || (chanRank(a) - chanRank(b)))[0];
+        // 連絡先一覧（詳細で全 channel を見せる）。順序は 有効→アーカイブ、次に 電話→メール→LINE。
+        // status を持ち回り、詳細では active のみを連絡先として描画する（archived は表示・編集/削除しない）。
+        const channels = rows.slice().sort((a, b) => (isArch(a) - isArch(b)) || (chanRank(a) - chanRank(b)))
+          .map((r) => ({ type: r.type, phone: r.phone, email: r.email, key: r.key, status: r.status || 'active' }));
         // 突合トークンは person の全 channel の和集合（GAS も和集合で返すが念のため union で堅牢化）。履歴 OR 突合用。
         const tokenSet = new Set();
         rows.forEach((r) => (r.matchTokens && r.matchTokens.length ? r.matchTokens : [r.key]).forEach((t) => { if (t) tokenSet.add(t); }));
@@ -486,6 +490,7 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
         wireDetail();
         wireName(c); // お名前のインライン編集（wireMemo と同型・全 type で動かす）
         wireContact(c); // 連絡先の変更・追加（Phase 3・type 非依存＝LINE 客にも足せる）
+        wireContactRows(c); // 各連絡先行の「✎編集（差し替え）」「🗑削除」（複数 channel＝名寄せ後にも各行配線）
         wireMemo(c); // メモ配線は別関数（wireDetail は line 型で早期 return するため全 type で動かす）
         loadVisits(c); // 来店履歴は詳細を開くたびに取りに行く（一覧段階で明細 PII を持たない＝段階開示）
       }
@@ -544,23 +549,31 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
       function contactFields(c) {
         const chans = (c.channels && c.channels.length)
           ? c.channels
-          : [{ type: c.type, phone: c.phone, email: c.email }]; // 旧応答フォールバック
-        const contactChans = chans.filter((ch) => (ch.type === 'phone' && ch.phone) || (ch.type === 'email' && ch.email));
-        const hasLine = chans.some((ch) => !ch.phone && !ch.email); // LINE 等・連絡先を持たない channel の有無
+          : [{ type: c.type, phone: c.phone, email: c.email, key: c.key, status: 'active' }]; // 旧応答フォールバック
+        // 有効(active)な連絡先のみ表示・編集/削除の対象にする（archived＝無効化済みは有効一覧から外す）。
+        const contactChans = chans.filter((ch) => ch.status !== 'archived' && ((ch.type === 'phone' && ch.phone) || (ch.type === 'email' && ch.email)));
+        const hasLine = chans.some((ch) => ch.status !== 'archived' && ch.type === 'line'); // 有効な LINE 連絡先の有無
         if (!contactChans.length) {
-          return '<div class="field"><div class="field__lbl">連絡先</div>'
-            + '<div class="field__note">LINE連携のお客様です（電話・メールは台帳にありません）。</div></div>';
+          // 連絡先が全て archived／LINE のみ。person も来店履歴も残っているので、その旨を出して一覧から消さない。
+          const note = hasLine
+            ? 'LINE連携のお客様です（電話・メールは台帳にありません）。'
+            : '有効な連絡先が登録されていません（過去のご来店履歴は保持されています）。';
+          return '<div class="field"><div class="field__lbl">連絡先</div><div class="field__note">' + note + '</div></div>';
         }
         let html = contactChans.map((ch) => (ch.type === 'phone' && ch.phone)
-          ? piiField('電話番号', maskPhone(ch.phone), fmtPhone(ch.phone))
-          : piiField('メール', maskEmail(ch.email), ch.email)
+          ? contactRow(ch, '電話番号', maskPhone(ch.phone), fmtPhone(ch.phone))
+          : contactRow(ch, 'メール', maskEmail(ch.email), ch.email)
         ).join('');
         if (hasLine) html += '<div class="field"><div class="field__note">このほかに LINE 連携の連絡先があります。</div></div>';
         return html;
       }
-      // 既定マスク→[表示]で開示＋[コピー]表示＋放置で自動再マスク（ADR-0001 決定3）。
-      function piiField(label, masked, full) {
-        return '<div class="field">'
+      // 有効な連絡先1件の行。既存の段階開示（マスク→[表示]→[コピー]／自動再マスク）に、
+      // 「✎ 編集」「🗑 削除」ボタンと、編集用のインラインフォーム（差し替え）を足す。行は data-key（対象 channel の
+      // 突合トークン）・data-type で識別し、wireContactRows がフォーム内要素を .contact-row スコープで配線する。
+      // 表示値はすべて esc()（属性/HTML ブレイクアウト防止）。full（生値）は既存の .pii[data-full] と同レベル
+      // （管理ゲート内でのみ扱う既存設計に一致）。
+      function contactRow(ch, label, masked, full) {
+        return '<div class="field contact-row" data-key="' + esc(ch.key) + '" data-type="' + esc(ch.type) + '">'
           + '<div class="field__lbl">' + esc(label) + '</div>'
           + '<div class="pii-row">'
           +   '<span class="pii masked" data-full="' + esc(full) + '" data-mask="' + esc(masked) + '">' + esc(masked) + '</span>'
@@ -570,6 +583,25 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
           +   '</span>'
           + '</div>'
           + '<div class="reveal-note" hidden>' + CLOCK + '操作がなければ自動で再びマスクします</div>'
+          + '<div class="crow-actions">'
+          +   '<button type="button" class="mini-btn crow-edit" aria-label="この連絡先を編集">✎ 編集</button>'
+          +   '<button type="button" class="mini-btn crow-del" aria-label="この連絡先を削除">🗑 削除</button>'
+          + '</div>'
+          + '<div class="crow-edit__form" hidden>'
+          +   '<div class="field__note">連絡先を差し替えます（旧の連絡先の過去のご来店履歴は保持されます）。</div>'
+          +   '<div class="contact-edit__inputs">'
+          +     '<select class="contact-type crow-edit__type" aria-label="連絡先の種類">'
+          +       '<option value="phone">電話番号</option>'
+          +       '<option value="email">メール</option>'
+          +     '</select>'
+          +     '<input type="text" class="name-input crow-edit__input" maxlength="254" placeholder="例）09012345678 / name@example.com" aria-label="新しい連絡先">'
+          +   '</div>'
+          +   '<div class="name-edit__bar">'
+          +     '<button type="button" class="mini-btn crow-edit__save">保存</button>'
+          +     '<button type="button" class="linkish crow-edit__cancel">やめる</button>'
+          +     '<span class="crow-edit__status memo__status" role="status"></span>'
+          +   '</div>'
+          + '</div>'
           + '</div>';
       }
       function metaField(label, val) {
@@ -799,6 +831,100 @@ const pageTitle = `${ENV_LABEL}顧客管理 | ${salonName}`;
             onOk: () => doSaveContact(contactType, value),
           });
         });
+      }
+
+      // 各連絡先行の「✎編集（差し替え）」「🗑削除」の配線（A案＝過去のご来店履歴を切らさない）。
+      //   削除 → adminDeleteContact（背後に履歴があればアーカイブ・無ければ物理削除。回数は減らない）。
+      //   編集 → adminEditContact（差し替え＝旧をアーカイブ＋新を追加。同一 person に束ね履歴を引き継ぐ）。
+      // 複数 channel（名寄せ後）に対応するため、.contact-row を1件ずつ data-key スコープで配線する。
+      // 実行前に汎用確認モーダル openConfirm を再利用し「何がどうなるか（履歴は保持される）」を明示する。
+      // 成功後は台帳が変わる（アーカイブ／行削除／新 channel 追加）ので loadCustomers() で一覧を最新化する。
+      function wireContactRows(c) {
+        const area = el('detailArea');
+        area.querySelectorAll('.contact-row[data-key]').forEach((field) => {
+          const key = field.getAttribute('data-key');           // 対象 channel の突合トークン
+          const curType = field.getAttribute('data-type') === 'email' ? 'email' : 'phone';
+          const pii = field.querySelector('.pii');
+          const curFull = pii ? pii.getAttribute('data-full') : ''; // 現在の連絡先（電話は整形済／メール）
+          const lblEl = field.querySelector('.field__lbl');
+          const curLabel = lblEl ? lblEl.textContent : '連絡先';
+          const delBtn = field.querySelector('.crow-del');
+          const editBtn = field.querySelector('.crow-edit');
+          const form = field.querySelector('.crow-edit__form');
+          const typeSel = field.querySelector('.crow-edit__type');
+          const input = field.querySelector('.crow-edit__input');
+          const saveBtn = field.querySelector('.crow-edit__save');
+          const cancelBtn = field.querySelector('.crow-edit__cancel');
+          const status = field.querySelector('.crow-edit__status');
+          const setStatus = (msg, cls) => { if (status) { status.textContent = msg; status.className = 'crow-edit__status memo__status' + (cls ? ' ' + cls : ''); } };
+
+          // --- 削除 ---
+          if (delBtn) delBtn.addEventListener('click', () => {
+            openConfirm({
+              title: '連絡先の削除',
+              bodyHtml: 'この連絡先を削除します：〔' + esc(curLabel) + '〕' + esc(curFull) + '。過去のご来店履歴は保持されます（来店回数は変わりません）。',
+              okLabel: '削除する',
+              onOk: () => doDeleteContact(key),
+            });
+          });
+
+          // --- 編集（差し替え）---
+          if (editBtn && form && typeSel && input && saveBtn) {
+            typeSel.value = curType;                            // 既定は現在の連絡先種別に寄せる
+            const openEdit = () => { form.hidden = false; editBtn.hidden = true; input.value = ''; input.focus(); };
+            const closeEdit = () => { form.hidden = true; editBtn.hidden = false; input.value = ''; setStatus('', ''); };
+            editBtn.addEventListener('click', openEdit);
+            if (cancelBtn) cancelBtn.addEventListener('click', closeEdit);
+            saveBtn.addEventListener('click', () => {
+              const contactType = typeSel.value;
+              const value = input.value.trim();
+              if (!value) { setStatus('新しい連絡先を入力してください', 'is-warn'); return; }
+              openConfirm({
+                title: '連絡先の変更',
+                bodyHtml: '連絡先を『' + esc(curFull) + '』→『' + esc(value) + '』に変更します。旧『' + esc(curFull) + '』の過去のご来店履歴は保持されます。',
+                okLabel: '変更する',
+                onOk: () => doEditContact(key, contactType, value, setStatus),
+              });
+            });
+          }
+        });
+
+        // 削除実行＝従来の保存フローと同型（silent・forbidden ハンドリング・成功後 loadCustomers）。
+        async function doDeleteContact(key) {
+          let res;
+          try {
+            res = await apiPost('adminDeleteContact', { key }, { silent: true });
+          } catch (_) { toast('削除に失敗しました'); return; }
+          if (res && res.error === 'forbidden') { handleForbidden(); return; }
+          if (!res || !res.ok) { toast('削除できませんでした'); return; }
+          toast('連絡先を削除しました（過去のご来店履歴は保持されます）');
+          loadCustomers(); // 台帳が変わる（アーカイブ／行削除）ので一覧を最新化して一覧へ戻る
+        }
+        // 編集（差し替え）実行。エラーはインライン status に、成功は一覧最新化＋トースト。
+        async function doEditContact(key, contactType, value, setStatus) {
+          setStatus('保存中…', '');
+          let res;
+          try {
+            res = await apiPost('adminEditContact', { key, contactType, value }, { silent: true });
+          } catch (_) { setStatus('保存に失敗しました', 'is-warn'); return; }
+          if (res && res.error === 'forbidden') { handleForbidden(); return; }
+          if (!res || !res.ok) {
+            const msgMap = {
+              invalid_phone: '電話番号の形式が正しくありません（数字10〜11桁）',
+              invalid_email: 'メールアドレスの形式が正しくありません',
+              too_long: '入力が長すぎます',
+              key_conflict: 'この連絡先は別のお客様が使用中のため変更できません',
+              not_found: 'お客様が見つかりませんでした',
+            };
+            setStatus((res && msgMap[res.error]) || '変更できませんでした', 'is-warn');
+            return;
+          }
+          // 真の無変更（新値＝既にこの person が持つ active な連絡先）＝偽の成功トーストを出さず、その旨を表示。
+          // ※archived エイリアスへの差し替えは GAS が再アクティブ化して res.ok（unchanged なし）で返るので下の成功パス。
+          if (res.unchanged) { setStatus('すでに登録済みの連絡先です（変更はありません）', ''); return; }
+          toast('連絡先を変更しました（過去のご来店履歴は保持されます）');
+          loadCustomers(); // 旧をアーカイブ＋新を確保＝台帳が変わるので一覧を最新化して一覧へ戻る
+        }
       }
 
       // メモ保存の配線。wireDetail と分離＝line 型（連絡先なし）でも動くようにする。
