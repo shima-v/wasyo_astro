@@ -162,6 +162,26 @@ a.chart:hover { border-color: var(--k); transform: translateY(-1px); transition:
 .krt__name { font-family: var(--f-serif); font-size: 1.3rem; font-weight: 700; letter-spacing: .05em; line-height: 1.35; color: var(--a-ink); }
 .tags { display: flex; gap: .35rem; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
 
+/* お名前のインライン編集（✎編集→入力→保存＝機能優先の最小実装。見た目の調整は design 側で後日） */
+.krt__nameblock { display: flex; flex-direction: column; gap: .4rem; min-width: 0; }
+.krt__namerow { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.name-edit { display: flex; flex-direction: column; gap: .45rem; }
+.name-input { width: 100%; max-width: 18rem; box-sizing: border-box; font-family: var(--f-sans); font-size: 1rem; padding: .45rem .6rem; border: 1px solid var(--a-line); border-radius: 8px; background: #fff; color: var(--a-ink); }
+.name-input:focus { outline: none; border-color: var(--a-gold); box-shadow: inset 0 0 0 1px var(--a-gold); }
+.name-edit__bar { display: flex; align-items: center; gap: .6rem; }
+
+/* 連絡先の変更・追加（Phase 3・氏名編集と同型。見た目の調整は design 側で後日） */
+.contact-edit__head { display: flex; }
+.contact-edit__row { display: flex; flex-direction: column; gap: .5rem; margin-top: .55rem; }
+.contact-edit__inputs { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.contact-type { font-family: var(--f-sans); font-size: 1rem; padding: .45rem .55rem; border: 1px solid var(--a-line); border-radius: 8px; background: #fff; color: var(--a-ink); }
+.contact-type:focus { outline: none; border-color: var(--a-gold); box-shadow: inset 0 0 0 1px var(--a-gold); }
+
+/* 各連絡先行の「✎編集（差し替え）」「🗑削除」（A案＝履歴を守る）と、その編集インラインフォーム */
+.crow-actions { display: flex; gap: .4rem; margin-top: .45rem; }
+.crow-del { border-color: #D9C2C7; color: #8E2230; }
+.crow-edit__form { display: flex; flex-direction: column; gap: .5rem; margin-top: .55rem; }
+
 .field { padding: .75rem 1rem; border-bottom: 1px solid var(--a-line); }
 .field:last-child { border-bottom: none; }
 .field__lbl { font-family: var(--f-sans); font-size: .68rem; letter-spacing: .16em; color: var(--a-muted); margin-bottom: .3rem; }
@@ -207,3 +227,68 @@ a.chart:hover { border-color: var(--k); transform: translateY(-1px); transition:
 .memo__status.is-ok { color: var(--a-gold-dp); }
 .memo__status.is-warn { color: #8E2230; }
 .memo__save { margin-left: auto; }
+
+/* ============================================================
+   手動マージ（統合）UI ＋ person 単位の連絡先チップ（Phase 4）
+   ============================================================ */
+/* 一覧見出しの右側アクション（統合／再読み込みを横並び） */
+.sec-head__actions { display: flex; align-items: center; gap: .5rem; flex: none; }
+
+/* 連絡先が複数ある person に添えるチップ（名寄せ後の合図） */
+.clist__chip {
+  font-family: var(--f-sans); font-size: .62rem; letter-spacing: .04em;
+  padding: .1rem .45rem; border-radius: 20px; white-space: nowrap;
+  background: var(--k-customer-bg); color: #6a4a68; border: 1px solid rgba(139,96,128,.3);
+}
+
+/* 統合モードの行アフォーダンス（選択できることを示す） */
+.is-merge .clist__row { cursor: copy; }
+.clist__row.is-src, .clist__row.is-tgt { position: relative; }
+.clist__row.is-src { background: #FBEDEE; box-shadow: inset 3px 0 0 var(--a-seal); }
+.clist__row.is-tgt { background: var(--k-customer-bg); box-shadow: inset 3px 0 0 var(--k-customer); }
+.clist__row.is-src .clist__head::after,
+.clist__row.is-tgt .clist__head::after {
+  font-family: var(--f-sans); font-size: .62rem; font-weight: 700; letter-spacing: .04em;
+  padding: .1rem .45rem; border-radius: 20px; margin-left: auto; flex: none; white-space: nowrap;
+}
+.clist__row.is-src .clist__head::after { content: "統合元"; background: var(--a-seal); color: #fff; }
+.clist__row.is-tgt .clist__head::after { content: "統合先"; background: var(--k-customer); color: #fff; }
+
+/* 統合バー（選択中の2名と実行操作） */
+.merge-bar {
+  background: var(--a-surface); border: 1px solid var(--a-line); border-radius: 12px;
+  padding: .8rem .9rem; margin: 0 0 .8rem;
+}
+.merge-bar__lead { font-family: var(--f-sans); font-size: .82rem; line-height: 1.7; color: var(--a-ink-soft); margin: 0 0 .7rem; }
+.merge-bar__lead b { color: var(--a-seal); font-weight: 700; }
+.merge-bar__slots { display: flex; align-items: center; gap: .5rem; margin-bottom: .7rem; }
+.merge-slot { flex: 1; min-width: 0; border-radius: 9px; padding: .45rem .6rem; border: 1px solid var(--a-line); background: #fff; }
+.merge-slot.is-src { border-color: rgba(176,64,58,.45); }
+.merge-slot.is-tgt { border-color: rgba(139,96,128,.45); }
+.merge-slot__lbl { display: block; font-family: var(--f-sans); font-size: .6rem; font-weight: 700; letter-spacing: .08em; color: var(--a-muted); }
+.merge-slot.is-src .merge-slot__lbl { color: var(--a-seal); }
+.merge-slot.is-tgt .merge-slot__lbl { color: var(--k-customer); }
+.merge-slot__nm { display: block; font-family: var(--f-serif); font-size: .9rem; color: var(--a-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.merge-swap { flex: none; width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--a-line); background: #fff; color: var(--a-muted); font-size: 1.1rem; cursor: pointer; }
+.merge-swap:hover { color: var(--a-ink); border-color: var(--k-customer); }
+.merge-bar__actions { display: flex; align-items: center; gap: .8rem; }
+
+/* 確認ダイアログ（破壊的操作の誤操作防止） */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+  background: rgba(44,31,58,.45); padding: 1.2rem;
+}
+.modal {
+  width: 100%; max-width: 400px; background: var(--a-surface);
+  border: 1px solid var(--a-line); border-radius: 14px; padding: 1.1rem 1.1rem 1.2rem;
+  box-shadow: 0 12px 40px rgba(44,31,58,.28);
+}
+.modal__title { font-family: var(--f-serif); font-size: 1.08rem; color: var(--a-ink); margin: 0 0 .6rem; }
+.modal__body { font-family: var(--f-sans); font-size: .88rem; line-height: 1.75; color: var(--a-ink-soft); margin: 0 0 .7rem; }
+.modal__warn {
+  font-family: var(--f-sans); font-size: .8rem; line-height: 1.7; color: #8a3a1a;
+  background: #FBF0E7; border: 1px solid rgba(176,90,40,.3); border-radius: 8px; padding: .55rem .7rem; margin: 0 0 1rem;
+}
+.modal__actions { display: flex; gap: .6rem; }
+.modal__actions .reserve-btn.sm { flex: 1 1 0; min-height: 46px; }
+.modal__busy { display: flex; align-items: center; justify-content: center; gap: .55rem; min-height: 46px; color: var(--a-ink-soft); font-family: var(--f-sans); font-size: .92rem; font-weight: 600; }

@@ -166,6 +166,11 @@ function doPost(e) {
       // messageInfo=概要プリフェッチ（読み取り専用・連絡先なし） / messageSend=実送信。
       case 'messageInfo': return json_(messageInfoBySig_(body.token, body.sig));
       case 'messageSend': return json_(messageSendBySig_(body.token, body.sig, body.message));
+      // 名寄せ（本人同意の引き継ぎ・front /reserve/handover 経由）。保護は検証済み LINE idToken（=公開ルートの
+      // capability）で行うため requireAdmin_ は付けない。message 系と同じく公開デプロイ①で完結し Worker は経由しない。
+      // handoverCheck=非PIIサマリの照合（read-only） / handoverConfirm=今のLINEを過去personへ結合（mutation）。
+      case 'handoverCheck': return json_(handoverCheck(body));
+      case 'handoverConfirm': return json_(handoverConfirm(body));
       // 管理（front /reserve/admin 経由）。bearer トークン ADMIN_TOKENS で保護＝Googleログイン不要。
       // これにより管理操作も公開デプロイ①（executeAs=オーナー）で完結し、管理デプロイ②を不要にする布石。
       case 'getSlotConfig': return json_(requireAdminToken_(body, adminGetSlotConfig_));
@@ -176,6 +181,11 @@ function doPost(e) {
       case 'adminListCustomers': return json_(requireAdminToken_(body, adminListCustomers_));
       case 'adminListConfirmed': return json_(requireAdminToken_(body, function () { return adminListConfirmed_(body); }));
       case 'adminSetCustomerNote': return json_(requireAdminToken_(body, function () { return adminSetCustomerNote_(body); }));
+      case 'adminSetCustomerName': return json_(requireAdminToken_(body, function () { return adminSetCustomerName_(body); }));
+      case 'adminSetCustomerContact': return json_(requireAdminToken_(body, function () { return adminSetCustomerContact_(body); }));
+      case 'adminDeleteContact': return json_(requireAdminToken_(body, function () { return adminDeleteContact_(body); }));
+      case 'adminEditContact': return json_(requireAdminToken_(body, function () { return adminEditContact_(body); }));
+      case 'adminMergeCustomers': return json_(requireAdminToken_(body, function () { return adminMergeCustomers_(body); }));
       case 'getQuota': return json_(requireAdminToken_(body, adminGetQuota_));
       case 'adminDecision': return json_(requireAdminToken_(body, function () { return adminDecision_(body); }));
       case 'broadcastPreview': return json_(requireAdminToken_(body, function () { return adminBroadcastPreview_(body); }));
@@ -971,8 +981,15 @@ function ledgerUpsert_(props, visitDate) {
     var count = Number(sh.getRange(row, 5).getValue() || 0) + 1;
     sh.getRange(row, 5).setValue(count);
     sh.getRange(row, 6).setValue(dateStr);
+    // person 層（identity 土台・非破壊）: この channel 行の personId を解決（無ければ採番して col7 へ
+    // backfill）し、person シートの集約（来店回数・最終来店・氏名）を channel と同期する。col0〜6 は不変。
+    var pid = personResolve_(key);
+    if (pid) personRowSync_(pid, { displayName: String(props.name || ''), count: count, lastVisit: dateStr });
   } else {
-    sh.appendRow([key, type, props.name || '', dateStr, 1, dateStr, '']);
+    // 新規: person を採番し、channel 行の col7 へ personId を含めて追加（col0〜6 は従来どおり同順・同値）。
+    var newPid = personResolve_(key);
+    sh.appendRow([key, type, props.name || '', dateStr, 1, dateStr, '', newPid]);
+    if (newPid) personRowSync_(newPid, { displayName: String(props.name || ''), firstVisit: dateStr, count: 1, lastVisit: dateStr });
   }
 }
 
@@ -1020,6 +1037,352 @@ function adminSetCustomerNote_(body) {
   return res;
 }
 
+// お客様の表示名（displayName）の最大長。フロント input の maxlength と揃える（超過は too_long で拒否）。
+var CUSTOMER_NAME_MAX = 100;
+
+/**
+ * お客様の表示名（person.displayName）を店主が編集する（P2 Phase 2・identity 層・adminSetCustomerNote_ の雛形）。
+ * requireAdminToken_ で保護。body {action, adminToken, key:<hash>, name:<string>}。
+ *
+ * 【表示名の"正"は person 側（identity 層）に置く — 設計判断】
+ *   - 台帳（channel）の col2=name は「予約時にお客様が入力した生の氏名」で、来店ごとに ledgerUpsert_ が最新の
+ *     予約名で上書きする（channel＝連絡手段ごとの生データ）。ここは一切触らない（channel col0〜6 不変）。
+ *   - 店主が付ける表示名は person.displayName に持たせ、これを表示の"正"とする。adminListCustomers_ は
+ *     person.displayName があればそれを、無ければ channel.name を返す（回帰ゼロのフォールバック）。
+ *   - ※既知の限界: ledgerUpsert_→personRowSync_ は次回来店時に予約名で person.displayName を上書きしうる
+ *     （店主の編集が再予約で戻る）。「編集を sticky にする」は Phase 3/4 の設計判断事項として別途（本 Phase では未対応）。
+ *
+ * 手順:
+ *   ①key（突合トークン＝台帳キーの SHA-256）で channel 行を特定 → 生キー(col0)と personId(col7) を得る。
+ *   ②personId 未採番なら personResolve_(生キー) で採番＋col7 backfill＋person 行を鏡写しで用意（channel col0〜6 不変）。
+ *   ③person シートの displayName（col2）に setValue（person 行のみ・channel/カレンダー/通知/外部 fetch には触れない）。
+ * 100字上限・LockService で排他。空文字は「店主の表示名を消す＝channel.name へ戻す」意味で許可（note と同流儀）。
+ * 監査は nameEdit で1行（氏名本文・生トークンは残さない。target は body.key＝ハッシュを maskId_ に一任）。
+ */
+function adminSetCustomerName_(body) {
+  var key = (body && body.key) || '';
+  var name = (body && body.name != null) ? String(body.name) : '';
+  if (!key) return { ok: false, error: 'bad_request' };
+  if (name.length > CUSTOMER_NAME_MAX) return { ok: false, error: 'too_long' };
+  var sh = ledgerSheet_();
+  if (!sh) return { ok: false, error: 'ledger_unconfigured' };
+
+  var res;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var values = sh.getDataRange().getValues();
+    var rawKey = '';
+    var pid = '';
+    for (var r = 1; r < values.length; r++) {   // r=0 はヘッダ行なのでスキップ
+      if (hashKey_(String(values[r][0] || '')) === key) {
+        rawKey = String(values[r][0] || '');
+        pid = String(values[r][7] || '');       // col7 = personId（未採番なら空）
+        break;
+      }
+    }
+    if (!rawKey) {
+      res = { ok: false, error: 'not_found' };
+    } else {
+      if (!pid) pid = personResolve_(rawKey);    // 未採番なら採番＋col7 backfill＋person 行を用意
+      if (!pid) {
+        res = { ok: false, error: 'person_unresolved' };
+      } else {
+        var psh = personSheet_();                // ledger 設定済み＝psh は非 null（personResolve_ で既に触れている）
+        var prow = personLookup_(pid);
+        if (prow) {
+          psh.getRange(prow, 2).setValue(name);  // person.displayName（col2）を直書き（空文字＝クリアも許可）
+        } else {
+          psh.appendRow([pid, name, '', 0, '', '']); // 念のため（personResolve_ は通常 person 行を作る）
+          prow = personLookup_(pid);
+        }
+        res = prow ? { ok: true } : { ok: false, error: 'person_unresolved' };
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  // 監査はロック解放後。氏名本文は渡さず、target は生の body.key（ハッシュ）を渡して maskId_ に一任する。
+  auditPush_(tokenFp_(body.adminToken), 'nameEdit', body.key, res.ok ? 'ok' : 'ng');
+  return res;
+}
+
+// お客様のメールアドレスの上限長（RFC 5321 の実務上限＝254）。超過は too_long で拒否。
+var CUSTOMER_EMAIL_MAX = 254;
+
+// ------------------------------------------------------------
+// 連絡手段(channel)のアーカイブ状態（A案＝履歴を守る削除・編集の土台）
+//   col0〜7 は identity 層の不変スキーマ（key|type|name|firstVisit|count|lastVisit|note|personId）。
+//   削除・編集で「有効な連絡先」から外したいが履歴照合キーは残したい channel は、既存列を一切変えずに
+//   **col8（追加列）へ status を append する**（非破壊・append-only）。空/未設定＝active（有効）、
+//   'archived'＝無効化。archived は有効一覧・送信先から外れるが、キーは matchTokens に残り続けるため
+//   過去のカレンダー履歴（原本）との突合が切れない（来店回数が減らない）。カレンダーには一切書かない。
+// ------------------------------------------------------------
+var CHANNEL_STATUS_COL = 9;          // 1始まり9列目 = col8（status）。col0〜7 は不変。
+var CHANNEL_ARCHIVED = 'archived';   // col8 が この値なら「無効化（アーカイブ）」済み。
+
+/** 台帳の1行（配列）が archived か。col8（row[8]）が 'archived' のときだけ true。空/未設定は active。 */
+function isArchivedRow_(row) { return String((row && row[8]) || '') === CHANNEL_ARCHIVED; }
+/** 台帳の1行の status 文字列（'active' | 'archived'）。adminListCustomers_ の純追加フィールドに使う。 */
+function channelStatus_(row) { return isArchivedRow_(row) ? CHANNEL_ARCHIVED : 'active'; }
+
+/**
+ * お客様の連絡先（電話／メール）を店主が編集する（P2 Phase 3・identity 層・adminSetCustomerName_ の雛形）。
+ * requireAdminToken_ で保護。body {action, adminToken, key:<hash>, contactType:'phone'|'email', value:<string>}。
+ *
+ * 【設計＝"貼り替え"ではなく"エイリアスとして追加"】
+ *   連絡先は channel（＝台帳の1行・キー col0 が連絡先そのもの）なので、編集は「旧 channel を捨てて新キーへ
+ *   書き換える」のではなく「新しい連絡先で **新 channel 行を追加**し、旧 channel は **履歴エイリアス**として
+ *   残す」。旧キーを消さないのは、過去のカレンダー予定（原本）の props から作られる旧キーとの突合を切らない
+ *   ため。新旧どちらの channel も **同じ personId** にぶら下げるので、adminListCustomers_ が返す matchTokens
+ *   にはその person の全 channel ハッシュ（＝旧キーを含む）が並び、adminListConfirmed_ の OR 突合で新旧
+ *   どちらの来店履歴も引ける（履歴が引き継がれる）。
+ *   ※type 非依存：現在の channel の type（line/phone/email）に関わらず、電話でもメールでも追加できる
+ *     （例：LINE 連携のお客様に電話 channel を足す）。
+ *
+ * 【誤統合防止＝キー衝突チェック】
+ *   変更先キー（例 'phone:0901234…' / 'email:name@example.com'）を **他の person が既に使っていたら拒否**
+ *   （key_conflict）。同一 person が既に持っている場合は何もしない（冪等・unchanged）。これで別人どうしを
+ *   同じ連絡先で誤って束ねてしまう事故を防ぐ。
+ *
+ * 手順（adminSetCustomerName_ と同じ「行特定→（未採番なら）person 解決→書き込み」の流儀）:
+ *   ①key（突合トークン＝台帳キーの SHA-256）で対象 channel 行を特定 → 生キー(col0)・personId(col7)・col2〜6 を得る。
+ *   ②personId 未採番なら personResolve_(生キー) で採番＋col7 backfill＋person 行を用意（channel col0〜6 不変）。
+ *   ③変更先キーの衝突を全 channel 行で確認（別 person が使用中→key_conflict／同一 person→unchanged）。
+ *   ④衝突なし→新 channel 行 [newKey, type, name, firstVisit, count, lastVisit, note, personId] を appendRow。
+ * 入力は電話（数字10〜11桁）・メール（簡易形式・254字以内）をバリデーション。LockService で排他。
+ * カレンダー（来店履歴の原本）・既存 channel 行・person 集約には一切書き込まない（新 channel の追加のみ）。
+ * 監査は contactEdit で1行（連絡先本文・生トークンは残さない。target は body.key＝ハッシュを maskId_ に一任）。
+ */
+// 連絡先の「新しい有効 channel を追加」のコア（ロック・監査を持たない純ロジック）。
+// adminSetCustomerContact_（連絡先の追加）と adminEditContact_（差し替え＝archive 旧＋add 新）の
+// **共有部品**（分割統治：追加ロジックは1箇所＝重複させない）。呼び出し側が LockService で排他してから呼ぶ。
+// 返り値: {ok:true}（追加）／{ok:true,unchanged:true}（変更先が既にこの person の channel＝無操作）／
+//         {ok:false,error:...}（bad_request/too_long/invalid_phone/invalid_email/ledger_unconfigured/
+//         not_found/person_unresolved/key_conflict）。カレンダー・既存行・person 集約には書き込まない。
+function setContactCore_(body) {
+  var key = (body && body.key) || '';
+  var contactType = (body && body.contactType) || '';
+  var value = (body && body.value != null) ? String(body.value) : '';
+  if (!key) return { ok: false, error: 'bad_request' };
+  if (contactType !== 'phone' && contactType !== 'email') return { ok: false, error: 'bad_request' };
+
+  // 変更先キーを組み立て＋形式バリデーション（ledgerKey_ / ledgerUpsert_ と同じ正規化規則で作る）。
+  var newKey = '';
+  if (contactType === 'phone') {
+    if (value.length > 20) return { ok: false, error: 'too_long' };
+    var digits = normalizePhone_(value);               // 数字のみへ正規化（台帳の phone キーと同形式）
+    if (!/^\d{10,11}$/.test(digits)) return { ok: false, error: 'invalid_phone' }; // 日本の電話＝10〜11桁
+    newKey = 'phone:' + digits;
+  } else {
+    var email = value.trim().toLowerCase();            // ledgerKey_ と同じく trim＋小文字化
+    if (email.length > CUSTOMER_EMAIL_MAX) return { ok: false, error: 'too_long' };
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: 'invalid_email' }; // 簡易形式検査
+    newKey = 'email:' + email;
+  }
+
+  var sh = ledgerSheet_();
+  if (!sh) return { ok: false, error: 'ledger_unconfigured' };
+
+  var values = sh.getDataRange().getValues();
+  // ① 対象 channel 行を突合トークンで特定 → 生キー・personId・col2〜6（新 channel へ引き継ぐ表示/stats）を得る。
+  var rawKey = '';
+  var pid = '';
+  var srcVals = null;
+  for (var r = 1; r < values.length; r++) {   // r=0 はヘッダ行なのでスキップ
+    if (hashKey_(String(values[r][0] || '')) === key) {
+      rawKey = String(values[r][0] || '');
+      pid = String(values[r][7] || '');       // col7 = personId（未採番なら空）
+      srcVals = values[r];
+      break;
+    }
+  }
+  if (!rawKey) return { ok: false, error: 'not_found' };
+  // ② personId 未採番なら採番＋col7 backfill＋person 行を用意（channel col0〜6 不変・adminSetCustomerName_ と同流儀）。
+  if (!pid) pid = personResolve_(rawKey);
+  if (!pid) return { ok: false, error: 'person_unresolved' };
+
+  // ③ キー衝突チェック。personResolve_ が col7 を backfill した可能性があるので台帳を読み直してから走査する。
+  //    変更先キーを別 person が使用中なら誤統合防止で拒否。同一 person が既に持つなら（状態で分岐）。
+  var v2 = sh.getDataRange().getValues();
+  var conflict = false;
+  var alreadyMineRow = 0;          // 同一 person が既に持つ newKey 行（1始まり）。0＝無し
+  var alreadyMineArchived = false; // その行が archived（過去に削除した自分のエイリアス）か
+  for (var r2 = 1; r2 < v2.length; r2++) {
+    if (String(v2[r2][0] || '') === newKey) {
+      var owner = String(v2[r2][7] || '');
+      if (owner === pid) { alreadyMineRow = r2 + 1; alreadyMineArchived = isArchivedRow_(v2[r2]); } // 既に自分の channel
+      else conflict = true;                    // 別 person（未採番=空も含む）が使用中＝誤統合防止で拒否
+      break;
+    }
+  }
+  if (conflict) return { ok: false, error: 'key_conflict' };
+  if (alreadyMineRow) {
+    // 変更先が既にこの person の channel。
+    //   - archived（過去に削除した自分のエイリアス）→ **再アクティブ化**（col8→active）で有効な連絡先に復活。
+    //     col0〜7 は不変・matchTokens には元々残っているので履歴は一貫（A案）。編集からの呼び出しでは、この後
+    //     呼び出し側（adminEditContact_）が旧 channel をアーカイブして「正しい差し替え」を完成させる。
+    //   - active → 真の無変更（unchanged・冪等 no-op）。
+    if (alreadyMineArchived) {
+      sh.getRange(alreadyMineRow, CHANNEL_STATUS_COL).setValue(''); // archived → active（col8 クリア）
+      return { ok: true, reactivated: true };
+    }
+    return { ok: true, unchanged: true };
+  }
+
+  // ④ 新 channel 行を追加（同じ personId にぶら下げる）。旧 channel はそのまま履歴エイリアスとして残る。
+  //    col2〜6 は編集元 channel の値を引き継ぎ、表示・stats を保つ。col8(status) は付けない＝active（有効）。
+  //    カレンダー・既存行・person 集約は無改変。
+  sh.appendRow([
+    newKey,                        // col0: 新しい連絡先キー
+    contactType,                   // col1: type（phone|email）
+    String(srcVals[2] || ''),      // col2: name（表示は person.displayName 優先だが channel.name も保持）
+    ledgerDateStr_(srcVals[3]),    // col3: firstVisit（編集元から引き継ぐ）
+    Number(srcVals[4] || 0),       // col4: count（編集元から引き継ぐ）
+    ledgerDateStr_(srcVals[5]),    // col5: lastVisit（編集元から引き継ぐ）
+    String(srcVals[6] || ''),      // col6: note（編集元から引き継ぐ）
+    pid,                           // col7: personId（同一人物にぶら下げる＝matchTokens が新旧を束ねる）
+  ]);
+  return { ok: true };
+}
+
+function adminSetCustomerContact_(body) {
+  var res;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try { res = setContactCore_(body); }        // 追加ロジックは共有部品（差し替え編集と同一・重複なし）
+  finally { lock.releaseLock(); }
+  // 監査はロック解放後。連絡先本文は渡さず、target は生の body.key（ハッシュ）を渡して maskId_ に一任する。
+  auditPush_(tokenFp_(body.adminToken), 'contactEdit', body.key, res.ok ? 'ok' : 'ng');
+  return res;
+}
+
+/**
+ * 連絡手段(channel)の削除（A案＝過去のご来店履歴を絶対に切らさない）。
+ * requireAdminToken_ で保護。body {action, adminToken, key:<hash>}。key は adminListCustomers_ が返す
+ * 対象 channel の突合トークン（col0 の SHA-256）。
+ *
+ * 判定＝「この channel の背後に来店履歴の証跡があるか」を**3条件の OR**で広く取る（A案＝来店回数を絶対に減らさない）:
+ *   (a) 台帳 col4(count) > 0（来店実績が台帳に記録されている）、
+ *   (b) 台帳 col3(firstVisit) が入っている（初来店が記録されている）、
+ *   (c) Calendar 窓に一致 CONFIRMED がある／または判定不能（channelHasHistory_ の安全側 true）。
+ *   - いずれか true（＝履歴あり／判定不能）→ **アーカイブ**（col8 に 'archived' を追加するだけ・col0〜7＋カレンダーは不変）。
+ *     有効一覧・送信先からは外れるが、キーは matchTokens に残り続け、adminListConfirmed_ の OR 突合で
+ *     過去の来店を引ける＝**来店回数が減らない・person も一覧から消えない**。★A案の不変条件はここで担保。
+ *   - 全部ゼロ（count==0/空・firstVisit 空・カレンダー一致なし）＝純粋な打ち間違いだけ → 物理削除（deleteRow）。
+ *     切れる履歴が台帳にもカレンダーにも無いので安全。
+ * ※短絡評価: count>0 か firstVisit があれば Calendar API（channelHasHistory_）を叩かない（コスト削減）。
+ * カレンダー（来店履歴の原本）には一切書き込まない（read-only で参照するだけ）。LockService で排他。
+ * 監査は contactDelete で1行（連絡先本文・生トークンは残さない。target は body.key＝ハッシュを maskId_ に一任）。
+ */
+function adminDeleteContact_(body) {
+  var key = (body && body.key) || '';
+  if (!key) return { ok: false, error: 'bad_request' };
+  var sh = ledgerSheet_();
+  if (!sh) return { ok: false, error: 'ledger_unconfigured' };
+
+  var res;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var values = sh.getDataRange().getValues();
+    var targetRow = 0;   // 1始まり行番号（deleteRow / setValue 用）
+    var rawKey = '';
+    for (var r = 1; r < values.length; r++) {   // r=0 はヘッダ行
+      if (hashKey_(String(values[r][0] || '')) === key) { targetRow = r + 1; rawKey = String(values[r][0] || ''); break; }
+    }
+    if (!targetRow) {
+      res = { ok: false, error: 'not_found' };
+    } else if (isArchivedRow_(values[targetRow - 1])) {
+      res = { ok: true, unchanged: true, archived: true };   // 既にアーカイブ済み＝冪等 no-op
+    } else {
+      // 履歴の証跡を3条件の OR で判定（台帳 count>0 ／ firstVisit 記録あり ／ Calendar 一致 or 判定不能）。
+      var trow = values[targetRow - 1];
+      var ledgerBacked = (Number(trow[4] || 0) > 0) || (String(trow[3] || '') !== '');
+      if (ledgerBacked || channelHasHistory_(rawKey)) {
+        // 履歴あり（or 判定不能） → アーカイブ（col8 に status を追加。col0〜7 不変＝非破壊・append-only）。
+        sh.getRange(targetRow, CHANNEL_STATUS_COL).setValue(CHANNEL_ARCHIVED);
+        res = { ok: true, archived: true };
+      } else {
+        // 全ゼロ（count==0/空・firstVisit 空・カレンダー一致なし）の打ち間違い → 物理削除（切れる履歴が無い）。
+        sh.deleteRow(targetRow);
+        res = { ok: true, archived: false };
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  auditPush_(tokenFp_(body.adminToken), 'contactDelete', body.key, res.ok ? 'ok' : 'ng');
+  return res;
+}
+
+/**
+ * 連絡手段(channel)の編集＝差し替え（A案＝過去のご来店履歴を絶対に切らさない）。
+ * requireAdminToken_ で保護。body {action, adminToken, key:<hash>, contactType:'phone'|'email', value:<string>}。
+ *
+ * 実体＝**archive(旧) ＋ add(新)、同一 personId**:
+ *   ①setContactCore_ で新しい有効 channel を確保（Phase-3 の追加ロジックを共有。normalizePhone_／email 形式検証・
+ *     **キー衝突チェック**＝他 person が使うキーへは変更不可・同一 person の未採番 backfill 込み）。新値が同一 person の
+ *     archived エイリアスと同キーなら、それを **再アクティブ化**（col8→active）して有効な連絡先に復活させる（reactivated）。
+ *   ②新 channel を確保できた（新規追加 or 再アクティブ化＝unchanged でない）ときだけ、**旧 channel をアーカイブ**
+ *     （col8='archived'）。旧キーは matchTokens に残り続けるので、旧値に紐づく過去の来店履歴が新レコードに引き継がれる。
+ * unchanged（新値＝既にこの person が持つ **active** な channel＝真の無変更）のときは旧をアーカイブしない＝無操作。
+ * カレンダーには一切書き込まない。LockService で排他。監査は contactEdit で1行（本文・生トークンは残さない）。
+ */
+function adminEditContact_(body) {
+  var key = (body && body.key) || '';
+  var res;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    res = setContactCore_(body);   // ① 新しい有効 channel を確保（新規追加 or archived エイリアスの再アクティブ化）
+    // ② 有効 channel を確保できた（unchanged=真の無変更 でない）ときだけ、旧 channel をアーカイブ（履歴照合キーは残す）。
+    if (res && res.ok && !res.unchanged && key) {
+      var sh = ledgerSheet_();
+      if (sh) {
+        var values = sh.getDataRange().getValues();
+        for (var r = 1; r < values.length; r++) {   // r=0 はヘッダ行
+          if (hashKey_(String(values[r][0] || '')) === key) {
+            if (!isArchivedRow_(values[r])) sh.getRange(r + 1, CHANNEL_STATUS_COL).setValue(CHANNEL_ARCHIVED);
+            break;
+          }
+        }
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  auditPush_(tokenFp_(body.adminToken), 'contactEdit', body.key, (res && res.ok) ? 'ok' : 'ng');
+  return res;
+}
+
+/**
+ * その channel（生キー rawKey）の背後に確定来店履歴（Calendar 原本）があるか（read-only・カレンダーに書かない）。
+ * adminListConfirmed_ と同じ窓・同じ突合（hashKey_(ledgerKey_(props)) === hashKey_(rawKey)）で
+ * CONFIRMED イベントを1件でも見つけたら true。
+ * ※これは adminDeleteContact_ の削除ゲート3条件のうち (c)（Calendar 側の証跡）。(a)台帳 count>0・(b)firstVisit は
+ *   呼び出し側で OR するので、本関数が false（窓内に一致なし）でも台帳側に証跡があればアーカイブされる。
+ * ★安全側フェイルセーフ: キー不明・カレンダー未設定/取得不可など「履歴の有無を判定できない」ときは true を返す
+ *   （＝削除は物理削除でなくアーカイブへ倒す）。履歴を持つ channel を誤って物理削除してしまう事故を防ぐ。
+ */
+function channelHasHistory_(rawKey) {
+  if (!rawKey) return true;                      // 判定材料が無い＝安全側でアーカイブへ倒す
+  var calId = prop_('CALENDAR_ID');
+  if (!calId) return true;                       // カレンダー未設定＝判定不能→安全側
+  var cal = CalendarApp.getCalendarById(calId);
+  if (!cal) return true;                         // 取得不可＝判定不能→安全側
+  var targetHash = hashKey_(rawKey);
+  var from = startOfDay_(new Date());
+  from.setMonth(from.getMonth() - CONFIRMED_HISTORY_MONTHS);  // 過去 N ヶ月まで遡る（履歴突合と同窓）
+  var to = addDays_(startOfDay_(new Date()), RULES.maxAdvanceDays + 1); // 今後の確定予約も含める
+  var evs = cal.getEvents(from, to);
+  for (var i = 0; i < evs.length; i++) {
+    if (getEventProp_(evs[i], 'status') !== STATUS.CONFIRMED) continue;
+    if (hashKey_(ledgerKey_(getEventProps_(evs[i]))) === targetHash) return true; // 履歴あり
+  }
+  return false;                                  // 走査して確定来店 0 件＝履歴なし（物理削除して安全）
+}
+
 /**
  * 顧客台帳（LEDGER_SHEET）を read-only で一覧化して返す（P2 顧客管理ページ用）。
  * requireAdminToken_ で保護。シートへの書き込み・カレンダー変更・通知・PII の外部送出は一切しない。
@@ -1035,6 +1398,26 @@ function adminListCustomers_() {
   var sh = ledgerSheet_();
   if (!sh) return { ok: true, customers: [] };
   var values = sh.getDataRange().getValues();
+
+  // person 層の join 素材（Phase 2・いずれも read-only）:
+  //   ① personId → displayName（表示名の"正"）。person シートを1回だけ読む。無ければ空マップ。
+  //   ② personId → その person が持つ全 channel の突合トークン matchTokens[]（OR 突合の土台）。
+  // どちらも personId を持つ行にだけ効く。personId 未採番の行は従来どおり channel.name／単一キーになる。
+  // 【回帰ゼロ】Phase 1 は 1 channel=1 person ゆえ matchTokens は実質 [key]、displayName は channel.name の
+  //   鏡写し（personRowSync_）。person シート未作成（未migrate・以降の予約なし）なら nameByPid 空＝全行が
+  //   channel.name にフォールバック＝完全に従来挙動。matchTokens は純追加フィールド。
+  var nameByPid = personDisplayNameMap_();
+  var tokensByPid = {};
+  for (var i = 1; i < values.length; i++) {
+    var k0 = String(values[i][0] || '');
+    if (!k0) continue;
+    var pid0 = String(values[i][7] || '');       // col7 = personId
+    if (!pid0) continue;
+    // ★A案の不変条件: matchTokens は active＋archived の**両方**を含める（アーカイブ済み channel を除外しない）。
+    //   こうしないと削除・編集で無効化した旧キーが OR 突合から漏れ、過去の来店履歴が引けなくなる（回数が減る）。
+    (tokensByPid[pid0] = tokensByPid[pid0] || []).push(hashKey_(k0));
+  }
+
   var list = [];
   for (var r = 1; r < values.length; r++) {
     var row = values[r];
@@ -1042,9 +1425,17 @@ function adminListCustomers_() {
     if (!key) continue;
     var type = String(row[1] || '');
     var count = Number(row[4] || 0);
+    var pid = String(row[7] || '');
+    var hashed = hashKey_(key);
+    // アーカイブ状態（col8・純追加）。'archived' は「無効化された連絡手段」＝有効一覧には連絡先値を出さない。
+    // ただし matchTokens（上で全 channel から構築）・count 集約には残す＝**person も来店回数も消えない**（A案）。
+    var status = channelStatus_(row);
+    // 表示名は person.displayName を"正"に、無ければ channel.name（回帰ゼロのフォールバック）。
+    var displayName = (pid && nameByPid[pid]) ? nameByPid[pid] : String(row[2] || '');
     var c = {
-      name: String(row[2] || ''),
+      name: displayName,
       type: type,
+      status: status,      // 'active' | 'archived'（フロントは active のみ連絡先として表示・編集/削除ボタンを出す）
       count: count,
       firstVisit: ledgerDateStr_(row[3]),
       lastVisit: ledgerDateStr_(row[5]),
@@ -1055,14 +1446,27 @@ function adminListCustomers_() {
       // 来店履歴の突合トークン（adminListConfirmed_ の params.key）。台帳キーを hashKey_ で SHA-256 化した
       // opaque 値＝生の識別子（lineUserId・電話・メール）は突合トークンとして出さない（PII 最小化）。
       // クライアントは中身を解釈せずそのまま echo する（管理ゲート内・HTTPS・no-store）。
-      key: hashKey_(key),
+      key: hashed,
+      // その person が持つ全 channel の突合トークン（Phase 3/4 の複数 channel 名寄せの土台・OR 突合用）。
+      // Phase 1 は 1:1 ゆえ実質 [key]。personId 未採番なら自キーのみ＝従来と同一集合（回帰ゼロ）。
+      matchTokens: (pid && tokensByPid[pid] && tokensByPid[pid].length) ? tokensByPid[pid] : [hashed],
+      // person 単位の突合キー（Phase 4・純追加）。連絡先編集・名寄せで同一 person が複数 channel 行に
+      // なる（1一覧に重複表示）ため、フロントがこの opaque 値で行をグルーピング／dedup して 1 名に見せる。
+      // personId を hashKey_ で SHA-256 化した opaque 値＝生の内部ID（UUID）は出さない（PII 最小化）。
+      // 未採番（pid なし）は自キーのハッシュにフォールバック＝行ごとに一意＝従来の 1 行 1 名（回帰ゼロ）。
+      personRef: pid ? hashKey_(pid) : hashed,
     };
     // 連絡先は key（type:value）の value 部から復元する。整形前の電話は台帳に無いので正規化数字を使う。
-    var idx = key.indexOf(':');
-    var val = idx >= 0 ? key.slice(idx + 1) : '';
-    if (type === 'phone') c.phone = val;       // 正規化（数字のみ）。表示整形はフロント
-    else if (type === 'email') c.email = val;  // 小文字
-    // line 型は連絡先を持たない（phone/email なし）
+    // ★archived（無効化済み）の channel は連絡先値（phone/email）を**出さない**＝有効な連絡先＝active のみ表示。
+    //   archived 行を list に残すのは、その person を一覧から消さない／count 集約を減らさないためだけ
+    //   （連絡先が全て archived の person も「連絡先なし」で一覧に残り、来店回数は保たれる）。
+    if (status !== 'archived') {
+      var idx = key.indexOf(':');
+      var val = idx >= 0 ? key.slice(idx + 1) : '';
+      if (type === 'phone') c.phone = val;       // 正規化（数字のみ）。表示整形はフロント
+      else if (type === 'email') c.email = val;  // 小文字
+      // line 型は連絡先を持たない（phone/email なし）
+    }
     list.push(c);
   }
   // 最終来店日の降順（yyyy-MM-dd の文字列比較で足りる。空は末尾）。
@@ -1073,12 +1477,222 @@ function adminListCustomers_() {
 }
 
 /**
+ * personId → displayName のマップを返す（adminListCustomers_ の表示名 join 用・read-only）。
+ * person シートが無ければ空マップ（＝全行が channel.name にフォールバック＝従来挙動・回帰ゼロ）。
+ * ※personSheet_ と違い getSheetByName を直接使い、シートを"作らない"（一覧は read-only を厳守）。
+ * 空 displayName はマップに入れない（呼び出し側で channel.name にフォールバックさせるため）。
+ */
+function personDisplayNameMap_() {
+  var map = {};
+  var id = prop_('LEDGER_SHEET_ID');
+  if (!id) return map;
+  var sh = SpreadsheetApp.openById(id).getSheetByName('person');
+  if (!sh) return map;                 // person シート未作成＝Phase 1 未migrate＝従来どおり
+  var vals = sh.getDataRange().getValues();
+  for (var r = 1; r < vals.length; r++) {   // r=0 はヘッダ行
+    var pid = String(vals[r][0] || '');
+    var dn = String(vals[r][1] || '');
+    if (pid && dn) map[pid] = dn;      // 空 displayName は入れない（channel.name フォールバックに委ねる）
+  }
+  return map;
+}
+
+/**
  * 台帳の日付セルは Sheets により Date 型で返ることがある（ledgerUpsert_ は yyyy-MM-dd 文字列で
  * 書くが、Sheets が日付として解釈し直すため）。String(Date) の醜い表記を避け yyyy-MM-dd に正規化する。
  */
 function ledgerDateStr_(v) {
   if (v instanceof Date) return fmt_(v, 'yyyy-MM-dd');
   return String(v || '');
+}
+
+// ============================================================
+// person（人・identity 層）— Phase 1: 土台だけ（非破壊・追加のみ・冪等）
+// ------------------------------------------------------------
+// 目的: 連絡先＝主キーの癒着（電話を変えると履歴が切れる／媒体違いで別人扱い）を解くため、
+//       「人（person＝不変の内部背番号 personId）」と「連絡手段（channel＝既存の台帳行）」を層分離する。
+// Phase 1 の約束:
+//   - 既存の表示・挙動は一切変えない（adminListCustomers_ 等は従来どおり channel を表示）。
+//   - channel（台帳＝getSheets()[0]）の col0〜6 は不変。personId は col7 に純追加（append only）。
+//   - person は名前付きシート 'person' として"末尾"に作る（位置0の台帳参照 getSheets()[0] を壊さない）。
+//   - カレンダー（来店履歴の原本）には一切書き込まない。
+//   - 冪等: 既に personId がある行は再採番しない（二度流しても同結果）。
+// 次フェーズ以降で、履歴を personId に紐づけ替え／媒体をまたいだ名寄せ／表示の person 化を行う。
+// ============================================================
+
+/**
+ * person シートを取得（無ければ作成）。列 = personId|displayName|firstVisit|count|lastVisit|note。
+ * 台帳（getSheets()[0]）を末尾以外へずらさないよう、必ず"末尾"の index に挿入する。
+ * 台帳未設定（LEDGER_SHEET_ID なし）なら null（作話しない）。logPush_/auditPush_ と同じ流儀。
+ */
+function personSheet_() {
+  var id = prop_('LEDGER_SHEET_ID');
+  if (!id) return null;
+  var ss = SpreadsheetApp.openById(id);
+  var sh = ss.getSheetByName('person');
+  if (!sh) {
+    sh = ss.insertSheet('person', ss.getSheets().length); // 末尾に追加＝位置0の台帳を動かさない
+    sh.appendRow(['personId', 'displayName', 'firstVisit', 'count', 'lastVisit', 'note']);
+  }
+  return sh;
+}
+
+/** personId に該当する person 行（1始まり）を返す。無ければ 0。 */
+function personLookup_(personId) {
+  if (!personId) return 0;
+  var sh = personSheet_();
+  if (!sh) return 0;
+  var values = sh.getDataRange().getValues();
+  for (var r = 1; r < values.length; r++) {   // r=0 はヘッダ行
+    if (String(values[r][0]) === personId) return r + 1;
+  }
+  return 0;
+}
+
+/**
+ * person 行の集約を upsert（無ければ作成、あれば更新）。
+ * agg = { displayName, firstVisit, count, lastVisit, note }（部分指定可）。
+ * 空文字/未指定のフィールドは"上書きしない"（既存値を保全）。count のみ数値として常に反映。
+ * カレンダー・channel（台帳）には触れない。person シートのみ。
+ */
+function personRowSync_(personId, agg) {
+  if (!personId) return;
+  var sh = personSheet_();
+  if (!sh) return;
+  agg = agg || {};
+  var row = personLookup_(personId);
+  if (row) {
+    if (agg.displayName != null && agg.displayName !== '') sh.getRange(row, 2).setValue(String(agg.displayName));
+    if (agg.firstVisit != null && agg.firstVisit !== '') sh.getRange(row, 3).setValue(String(agg.firstVisit));
+    if (agg.count != null) sh.getRange(row, 4).setValue(Number(agg.count) || 0);
+    if (agg.lastVisit != null && agg.lastVisit !== '') sh.getRange(row, 5).setValue(String(agg.lastVisit));
+    if (agg.note != null && agg.note !== '') sh.getRange(row, 6).setValue(String(agg.note));
+  } else {
+    sh.appendRow([
+      personId,
+      String(agg.displayName || ''),
+      String(agg.firstVisit || ''),
+      Number(agg.count || 0),
+      String(agg.lastVisit || ''),
+      String(agg.note || ''),
+    ]);
+  }
+}
+
+/**
+ * channel キー（type:value 文字列）または予約 props から personId を解決する。
+ *   - 該当 channel 行に personId(col7) が既にあればそれを返す（冪等・再採番しない）。
+ *   - 無ければ Utilities.getUuid() で採番し、channel 行の col7 へ backfill（col0〜6 は不変）。
+ *     このとき person シートへ当該行の集約を鏡写しで作成する。
+ *   - channel 行自体が未作成（新規予約の appendRow 直前）なら、personId のみ採番して最小 person 行を作り
+ *     返す（channel 行の作成＝col7 への書き込みは呼び出し側 ledgerUpsert_ の appendRow が担う）。
+ * 台帳未設定なら '' を返す。カレンダーには一切触れない。
+ */
+function personResolve_(keyOrProps) {
+  var sh = ledgerSheet_();
+  if (!sh) return '';
+  var key = (typeof keyOrProps === 'string') ? keyOrProps : ledgerKey_(keyOrProps || {});
+  if (!key) return '';
+  var row = ledgerLookup_(key);
+  if (row) {
+    var pid = String(sh.getRange(row, 8).getValue() || '');  // col7 = 1始まり8列目
+    if (pid) return pid;                                      // 既に解決済み（冪等）
+    pid = Utilities.getUuid();
+    sh.getRange(row, 8).setValue(pid);                        // channel col7 へ backfill（col0〜6 不変）
+    var vals = sh.getRange(row, 1, 1, 7).getValues()[0];      // col0..6 を読み取り person へ鏡写し
+    personRowSync_(pid, {
+      displayName: String(vals[2] || ''),
+      firstVisit: ledgerDateStr_(vals[3]),
+      count: Number(vals[4] || 0),
+      lastVisit: ledgerDateStr_(vals[5]),
+      note: String(vals[6] || ''),
+    });
+    return pid;
+  }
+  // channel 行が未作成: personId のみ採番し、最小 person 行を用意（channel 行作成は呼び出し側）。
+  var newPid = Utilities.getUuid();
+  var seedName = (typeof keyOrProps === 'object' && keyOrProps) ? String(keyOrProps.name || '') : '';
+  personRowSync_(newPid, { displayName: seedName });
+  return newPid;
+}
+
+/**
+ * 既存の全 channel（台帳）行へ person を割り当てる移行関数。**既定は dry-run（安全側）**。
+ *   - dry-run（引数省略 or true）: 件数と同名衝突を集計して返すだけ。**一切書き込まない**。
+ *   - 実行（migrateToPersonModel_(false)）: personId 未設定の行に採番して col7 へ書き、person 行を作成。
+ * 性質:
+ *   - 冪等: 既に personId(col7) がある行は再採番せず alreadyAssigned に数える（二度流しても同結果）。
+ *   - 非破壊: col0〜6・カレンダーには一切触れない（personId は col7、person シートのみ書き込む）。
+ *   - 名寄せはしない（Phase 1 は 1 channel 行 = 1 person の 1:1）。同名 channel は「将来の名寄せ候補」として
+ *     グループ数と行番号だけ報告する（実名は載せない）＝自動統合はしない。
+ * ※本関数はどの HTTP ルータ（doGet/doPost）にも配線していない。実行はオーナーが GAS エディタ／clasp run で
+ *   手動起動する前提。返り値は件数・行番号のみで氏名などの個人情報を含まない（読み手側の匿名化）。
+ * @param {boolean} dryRun 既定 true。実書き込みは明示的に false を渡したときだけ。
+ * @return {{ok:boolean, dryRun:boolean, total:number, alreadyAssigned:number, assigned:number, nameCollisionGroups:number, nameCollisionRows:Array}}
+ */
+function migrateToPersonModel_(dryRun) {
+  dryRun = (dryRun !== false); // 省略・true は dry-run。実書き込みは false を明示したときのみ。
+  var sh = ledgerSheet_();
+  if (!sh) return { ok: false, error: 'ledger_unconfigured' };
+  var values = sh.getDataRange().getValues();
+  var total = 0, already = 0, assigned = 0;
+  var nameMap = {}; // displayName -> 行番号(1始まり)配列。将来の名寄せ候補（同名）検出用。
+  for (var r = 1; r < values.length; r++) {   // r=0 はヘッダ行
+    var row = values[r];
+    var key = String(row[0] || '');
+    if (!key) continue;
+    total++;
+    var name = String(row[2] || '');
+    if (name) { (nameMap[name] = nameMap[name] || []).push(r + 1); }
+    var existingPid = String(row[7] || ''); // col7
+    if (existingPid) { already++; continue; } // 冪等: 既に personId があれば触らない
+    assigned++;
+    if (!dryRun) {
+      var pid = Utilities.getUuid();
+      sh.getRange(r + 1, 8).setValue(pid); // channel col7 のみ（col0〜6・カレンダー不変）
+      personRowSync_(pid, {
+        displayName: name,
+        firstVisit: ledgerDateStr_(row[3]),
+        count: Number(row[4] || 0),
+        lastVisit: ledgerDateStr_(row[5]),
+        note: String(row[6] || ''),
+      });
+    }
+  }
+  // 同名グループ（将来の名寄せ候補）は「件数」と「行番号」だけを返す。
+  // 実名(row[2]) は個人情報なので出力に載せない（dry-run 結果を人が読む前提の匿名化）。
+  var nameCollisionRows = [];
+  for (var nm in nameMap) {
+    if (nameMap[nm].length > 1) nameCollisionRows.push(nameMap[nm]);
+  }
+  return {
+    ok: true, dryRun: dryRun,
+    total: total, alreadyAssigned: already, assigned: assigned,
+    nameCollisionGroups: nameCollisionRows.length, // 同名グループの数
+    nameCollisionRows: nameCollisionRows,          // 各グループの行番号のみ（非PII）
+  };
+}
+
+/**
+ * dry-run（書き込まない素振り）の結果を実行ログに出す薄いラッパー。
+ * GAS エディタで本関数を選んで Run すると、実行ログに件数(非PII)が出る。
+ * migrateToPersonModel_ は戻り値で返すだけでログに出ないため、観測用に用意。
+ */
+function migrateDryRun() {
+  var r = migrateToPersonModel_(true);
+  console.log(JSON.stringify(r));
+  return r;
+}
+
+/**
+ * 本移行（personId を実際に col7＋person シートへ書き込む）＋結果をログに出すラッパー。
+ * dev で migrateDryRun を確認した後、本人立会いのもとで実行する想定。
+ * col0〜6・カレンダーは不変・冪等（二度流しても assigned は増えない）。
+ */
+function migrateApply() {
+  var r = migrateToPersonModel_(false);
+  console.log(JSON.stringify(r));
+  return r;
 }
 
 // ============================================================
@@ -1130,16 +1744,31 @@ function adminListConfirmed_(params) {
     return { ok: true, count: count };
   }
 
-  // 用途2: 顧客詳細の来店履歴（指定キーに一致する確定イベントのみ）。
-  var key = params.key || '';
-  if (!key) return { ok: true, visits: [] };
+  // 用途2: 顧客詳細の来店履歴。突合は「その person が持つ全 channel キー」の OR（Phase 2 配線）。
+  //   - params.matchTokens（配列・非空）があればその集合で OR 突合（Phase 3/4 の複数 channel 対応の土台）。
+  //   - 無ければ従来どおり単一 params.key で突合（後方互換）。
+  // 【回帰ゼロ】Phase 1 は 1 channel=1 person ゆえ matchTokens は実質 [key]＝単一突合と同結果。空配列や
+  //   未指定は key へフォールバックし、"全部一致 0 件"にならないようガードする。
+  var tokenSet = {};
+  var hasToken = false;
+  if (Array.isArray(params.matchTokens)) {
+    for (var ti = 0; ti < params.matchTokens.length; ti++) {
+      var tk = String(params.matchTokens[ti] || '');
+      if (tk) { tokenSet[tk] = true; hasToken = true; }
+    }
+  }
+  if (!hasToken) {
+    var key = params.key || '';
+    if (!key) return { ok: true, visits: [] };
+    tokenSet[key] = true;
+  }
   var from = startOfDay_(new Date());
   from.setMonth(from.getMonth() - CONFIRMED_HISTORY_MONTHS); // 過去 N ヶ月まで遡る
   var to = addDays_(startOfDay_(new Date()), RULES.maxAdvanceDays + 1); // 今後の確定予約も含める
   var visits = cal.getEvents(from, to).filter(function (ev) {
     if (getEventProp_(ev, 'status') !== STATUS.CONFIRMED) return false;
-    // イベント側の台帳キーも同じ hashKey_ でハッシュ化してから突合（params.key はハッシュ済みトークン）。
-    return hashKey_(ledgerKey_(getEventProps_(ev))) === key; // その顧客の来店だけ（他人の履歴を混ぜない）
+    // イベント側の台帳キーも同じ hashKey_ でハッシュ化してから OR 突合（tokenSet はハッシュ済みトークンの集合）。
+    return tokenSet[hashKey_(ledgerKey_(getEventProps_(ev)))] === true; // その person の来店だけ（他人の履歴は混ぜない）
   }).map(function (ev) {
     var p = getEventProps_(ev);
     var menu = MENU[p.menuId];
@@ -1154,6 +1783,323 @@ function adminListConfirmed_(params) {
     return (b.date + b.time).localeCompare(a.date + a.time);
   });
   return { ok: true, visits: visits };
+}
+
+// ============================================================
+// Phase 4 ③ 名寄せ ＝「本人同意の引き継ぎ」＋（保険）店主の手動マージ
+// ------------------------------------------------------------
+// 目的: 媒体をまたいだ同一人物を person（不変の背番号）に束ねる。
+//   - 主導線＝本人同意の自動引き継ぎ（handoverCheck / handoverConfirm）: お客様自身が「これは自分」と
+//     同意したときにだけ、今の LINE channel を過去 person に結合する（誤統合が原理的に起きない・店主の手間ゼロ）。
+//   - 保険＝店主の手動マージ（adminMergeCustomers_）: 本人確認材料が無いケースのフォールバック。
+//
+// 【credential ＝ 検証済み LINE idToken（＝"署名付きトークン"の実体）— 設計判断】
+//   handoverCheck / handoverConfirm は adminToken では保護しない（公開デプロイ①で完結）。保護は「お客様
+//   自身が持つ capability」＝ LINE の idToken（JWT・LINE が RS256 署名）で行う。verifyLineIdToken_ が
+//   LINE の /verify で署名検証し、改竄・未署名・期限切れの idToken は null で弾く（＝"未署名/改竄トークンを拒否"）。
+//   検証済み claims から currentChannel（line:sub）と照合材料（email）を"同時に"得られるため:
+//     ・照合材料 email が第三者に詐称されない（＝任意メール列挙で他人の要約を覗けない）
+//     ・今束ねる channel（自分の LINE）も同じ idToken で確証される
+//   の両方が1回の検証で担保される。電話は idToken から取れず誤統合しやすいため同定に使わない（プラン方針）。
+//   ※message 系の HMAC token+sig と"公開ルートの capability 保護"という役割は同じ。idToken を選ぶ理由は
+//     照合材料 email の attested 性が必須（自由入力メールは列挙リスク）だから。詳細は docs/log 参照。
+// ============================================================
+
+/**
+ * handover の credential 抽出。body.idToken を LINE の /verify で検証し、
+ *   { lineKey:'line:'+sub, email:'<lowercased>', emailKey:'email:'+email }
+ * を返す。検証失敗（改竄/未署名/期限切れ）→ null（呼び出し側は bad_token＝要約を一切出さない）。
+ * email 未取得（LINE で email スコープ未同意）→ emailKey:'' で返す（呼び出し側は no_email）。
+ */
+function handoverExtractCred_(body) {
+  var verified = verifyLineIdToken_((body && body.idToken) || '');
+  if (!verified || !verified.userId) return null;
+  var email = String(verified.email || '').trim().toLowerCase();
+  return { lineKey: 'line:' + verified.userId, email: email, emailKey: email ? 'email:' + email : '' };
+}
+
+/**
+ * emailKey に一致する channel を持つ「過去 person」を read-only で照合する（書き込まない・person シートも作らない）。
+ * 返り値:
+ *   { found:false }                         … 該当 channel なし
+ *   { ambiguous:true }                      … 複数 person が該当（誤統合防止・拒否。email キーは通常一意だが防御的に）
+ *   { found:true, pid, count, lastVisit }   … 一意に該当。count/lastVisit は person 集約優先、無ければ channel 行の値
+ * 氏名・連絡先・生キーは返さない（呼び出し側で非PIIサマリだけを組み立てる）。
+ */
+function handoverLookupByEmail_(emailKey) {
+  var sh = ledgerSheet_();
+  if (!sh || !emailKey) return { found: false };
+  var values = sh.getDataRange().getValues();
+  var realPids = {};
+  var chanRow = null;
+  for (var r = 1; r < values.length; r++) {
+    if (String(values[r][0] || '') === emailKey) {
+      chanRow = values[r];
+      var pid = String(values[r][7] || '');
+      if (pid) realPids[pid] = true;
+    }
+  }
+  if (!chanRow) return { found: false };
+  var pidList = Object.keys(realPids);
+  if (pidList.length > 1) return { ambiguous: true }; // 別 person が同一 email キーを持つ＝異常。安全側で拒否
+  var pid = pidList.length === 1 ? pidList[0] : '';
+  var count = Number(chanRow[4] || 0);
+  var lastVisit = ledgerDateStr_(chanRow[5]);
+  if (pid) {
+    var agg = handoverPersonAgg_(pid);          // person 集約（あれば）を優先
+    if (agg.hit) { count = agg.count; lastVisit = agg.lastVisit; }
+  }
+  return { found: true, pid: pid, count: count, lastVisit: lastVisit };
+}
+
+/**
+ * person 行の集約（displayName/firstVisit/count/lastVisit/note）を read-only で返す（person シートは作らない）。
+ * hit:true=行が見つかった。無ければ hit:false＋空値。
+ */
+function handoverPersonAgg_(pid) {
+  var out = { hit: false, displayName: '', firstVisit: '', count: 0, lastVisit: '', note: '' };
+  if (!pid) return out;
+  var id = prop_('LEDGER_SHEET_ID');
+  var psh = id ? SpreadsheetApp.openById(id).getSheetByName('person') : null;
+  if (!psh) return out;
+  var pv = psh.getDataRange().getValues();
+  for (var r = 1; r < pv.length; r++) {
+    if (String(pv[r][0] || '') === pid) {
+      out.hit = true;
+      out.displayName = String(pv[r][1] || '');
+      out.firstVisit = ledgerDateStr_(pv[r][2]);
+      out.count = Number(pv[r][3] || 0);
+      out.lastVisit = ledgerDateStr_(pv[r][4]);
+      out.note = String(pv[r][5] || '');
+      break;
+    }
+  }
+  return out;
+}
+
+/**
+ * 台帳（channel）で col0===key の行の personId(col7) を read-only で返す（書き込まない・採番しない）。
+ * 見つからない／未採番なら ''。
+ */
+function personIdForKey_(key) {
+  var sh = ledgerSheet_();
+  if (!sh || !key) return '';
+  var values = sh.getDataRange().getValues();
+  for (var r = 1; r < values.length; r++) {
+    if (String(values[r][0] || '') === key) return String(values[r][7] || '');
+  }
+  return '';
+}
+
+/**
+ * 【公開ルート・idToken 保護】お客様の引き継ぎ確認（read-only）。verifyLineIdToken_ で検証済みの
+ * LINE idToken を credential とし、その idToken 由来の email に一致する「過去 person」の**非PIIサマリだけ**返す。
+ * body: { action:'handoverCheck', idToken:<LINE id_token> }
+ * 応答:
+ *   該当あり:                { ok:true, found:true, summary:{ visitCount:N, lastVisitYm:'YYYY-MM' } }
+ *   該当なし:                { ok:true, found:false }
+ *   既に今のLINEが同一person: { ok:true, found:false, alreadyLinked:true }（引き継ぎ不要）
+ *   idToken 不正/未署名/改竄: { ok:false, error:'bad_token' }（要約は一切返さない＝他人PII漏れない）
+ *   email 未取得:            { ok:false, error:'no_email' }
+ *   複数該当（防御的）:       { ok:false, error:'ambiguous' }
+ * 【非PII厳守】応答に氏名・電話・メール・personId・生キーは一切含めない（visitCount と lastVisitYm のみ）。
+ * カレンダー・シートには一切書き込まない（純 read・person シートも作らない）。
+ */
+function handoverCheck(body) {
+  var cred = handoverExtractCred_(body);
+  if (!cred) return { ok: false, error: 'bad_token' };
+  if (!cred.email) return { ok: false, error: 'no_email' };
+  var hit = handoverLookupByEmail_(cred.emailKey);
+  if (hit.ambiguous) return { ok: false, error: 'ambiguous' };
+  if (!hit.found) return { ok: true, found: false };
+  // 今の LINE が既にこの person に紐づいているなら引き継ぎ不要（found:false + alreadyLinked）。
+  var curPid = personIdForKey_(cred.lineKey);
+  if (curPid && hit.pid && curPid === hit.pid) return { ok: true, found: false, alreadyLinked: true };
+  var lastVisit = String(hit.lastVisit || '');
+  return {
+    ok: true, found: true,
+    summary: { visitCount: Number(hit.count || 0), lastVisitYm: lastVisit ? lastVisit.slice(0, 7) : '' },
+  };
+}
+
+/**
+ * 【公開ルート・idToken 保護】お客様の引き継ぎ同意を受けて、今の LINE channel を過去 person に結合する（mutation）。
+ * body: { action:'handoverConfirm', idToken:<LINE id_token> }
+ * credential は handoverCheck と同じ（検証済み idToken）。照合材料 email に一致する過去 person に**のみ**結合し、
+ * 該当なし・複数該当・不一致は結合しない（＝誤統合ゼロ）。冪等（既に同一 person なら no-op）。
+ * 結合の実体＝「今の LINE channel 行の personId(col7) を過去 person に向ける」:
+ *   - LINE channel 行が既にある → col7 を pastPid へ付け替え（既に pastPid なら no-op）。
+ *   - LINE channel 行がまだ無い（LINE 予約前に引き継ぎ）→ pastPid にぶら下がる LINE channel 行を新設
+ *     （col2〜6 は person 集約を鏡写し＝Phase 3 の連絡先追加と同流儀。以後の LINE 予約は isFirst=false になる）。
+ * カレンダー（来店履歴の原本）には一切書き込まない。col0〜6 不変。LockService 排他・auditPush_('handover')。
+ * 応答: { ok:true, linked:true } / { ok:true, alreadyLinked:true }（冪等） / { ok:true, found:false }（過去personなし）
+ *       / { ok:false, error:'bad_token'|'no_email'|'ambiguous'|'ledger_unconfigured'|'person_unresolved' }
+ */
+function handoverConfirm(body) {
+  var cred = handoverExtractCred_(body);
+  if (!cred) return { ok: false, error: 'bad_token' };
+  if (!cred.email) return { ok: false, error: 'no_email' };
+  var sh = ledgerSheet_();
+  if (!sh) return { ok: false, error: 'ledger_unconfigured' };
+
+  var res;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    // ① 過去 person を email で一意特定（複数該当は誤統合防止で拒否）。
+    var hit = handoverLookupByEmail_(cred.emailKey);
+    if (hit.ambiguous) {
+      res = { ok: false, error: 'ambiguous' };
+    } else if (!hit.found) {
+      res = { ok: true, found: false };                         // 過去 person が無い＝引き継ぐ対象なし
+    } else {
+      var pastPid = hit.pid || personResolve_(cred.emailKey);   // email channel の personId（未採番なら採番＋backfill）
+      if (!pastPid) {
+        res = { ok: false, error: 'person_unresolved' };
+      } else {
+        // ② 今の LINE channel 行を探して結合する。
+        var lineRow = ledgerLookup_(cred.lineKey);
+        if (lineRow) {
+          var curPid = String(sh.getRange(lineRow, 8).getValue() || '');
+          if (curPid === pastPid) {
+            res = { ok: true, alreadyLinked: true };            // 冪等 no-op（既に同一 person）
+          } else {
+            sh.getRange(lineRow, 8).setValue(pastPid);          // col7 を過去 person へ付け替え（col0〜6・カレンダー不変）
+            res = { ok: true, linked: true };
+          }
+        } else {
+          // LINE channel 行がまだ無い＝pastPid にぶら下がる LINE 行を新設（stats は person 集約を鏡写し）。
+          var agg = handoverPersonAgg_(pastPid);
+          sh.appendRow([
+            cred.lineKey, 'line', String(agg.displayName || ''),
+            String(agg.firstVisit || ''), Number(agg.count || 0), String(agg.lastVisit || ''), '', pastPid,
+          ]);
+          res = { ok: true, linked: true };
+        }
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  // 監査。生トークン・連絡先は残さない（operator は 'via:line' ラベル・target は LINE キーを maskId_ に一任）。
+  auditPush_('via:line', 'handover', cred.lineKey, (res && res.ok) ? (res.alreadyLinked ? 'noop' : (res.linked ? 'ok' : 'none')) : 'ng');
+  return res;
+}
+
+/**
+ * 【店主の手動マージ・保険】2 person を統合する（本人確認材料が無いケースのフォールバック）。
+ * requireAdminToken_ で保護。body: { action:'adminMergeCustomers', adminToken, sourceKey:<hash>, targetKey:<hash> }
+ * sourceKey/targetKey は adminListCustomers_ が返す突合トークン（channel キーの SHA-256）。source を target へ寄せる。
+ *
+ * 【破壊的操作・要バックアップ／巻き戻しの考え方（可逆寄り設計）】
+ *   本操作は target の集約（count/firstVisit/lastVisit/note/displayName）を"上書き"し、source の channel を
+ *   target へ付け替える。上書きと付け替えは情報損失を伴うため、**実行前にスプレッドシートのバックアップ必須**。
+ *   巻き戻し（rollback）の設計:
+ *     ・削除は一切しない。source の person 行は残し、col7 に mergedInto=targetPid を立てて tombstone 化する
+ *       （＝無効フラグ。source の元集約 col1〜6 は保持するので source 単体は復元可能）。
+ *     ・target 集約は元値を保存しないため、target 側の完全復元は"バックアップからの復元"に依る（だから要バックアップ）。
+ *     ・channel の付け替えは col7(personId) を書き換えるだけ（col0〜6・カレンダーは不変）。
+ *   統合規則: count=合算 / firstVisit=最小 / lastVisit=最大 / note=連結（重複除外・上限で切詰め）/
+ *            displayName=target 優先（空なら source）。カレンダーには一切書き込まない。auditPush_('merge')。
+ * 応答: { ok:true, merged:true, count:N } / { ok:true, unchanged:true }（既に同一 person）
+ *       / { ok:false, error:'bad_request'|'same_customer'|'not_found'|'person_unresolved'|'ledger_unconfigured' }
+ */
+function adminMergeCustomers_(body) {
+  var sourceKey = (body && body.sourceKey) || '';
+  var targetKey = (body && body.targetKey) || '';
+  if (!sourceKey || !targetKey) return { ok: false, error: 'bad_request' };
+  if (sourceKey === targetKey) return { ok: false, error: 'same_customer' };
+  var sh = ledgerSheet_();
+  if (!sh) return { ok: false, error: 'ledger_unconfigured' };
+
+  var res;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    // ① 突合トークン→生キー→personId を解決（未採番なら personResolve_ で採番＋col7 backfill＋person 行を用意）。
+    var srcRaw = rawKeyForHash_(sh, sourceKey);
+    var tgtRaw = rawKeyForHash_(sh, targetKey);
+    if (!srcRaw || !tgtRaw) {
+      res = { ok: false, error: 'not_found' };
+    } else {
+      var srcPid = personResolve_(srcRaw);
+      var tgtPid = personResolve_(tgtRaw);
+      if (!srcPid || !tgtPid) {
+        res = { ok: false, error: 'person_unresolved' };
+      } else if (srcPid === tgtPid) {
+        res = { ok: true, unchanged: true };                    // 既に同一 person＝何もしない
+      } else {
+        // ② 集約を統合して target person 行へ反映（合算・最小・最大・連結）。
+        var s = handoverPersonAgg_(srcPid);
+        var t = handoverPersonAgg_(tgtPid);
+        var mergedCount = Number(s.count || 0) + Number(t.count || 0);
+        var mergedFirst = minDate_(s.firstVisit, t.firstVisit);
+        var mergedLast = maxDate_(s.lastVisit, t.lastVisit);
+        var mergedName = t.displayName || s.displayName;        // target 優先
+        var mergedNote = joinNotes_(t.note, s.note);            // target→source の順で連結
+        var psh = personSheet_();
+        var trow = personLookup_(tgtPid);
+        if (trow) {
+          psh.getRange(trow, 2).setValue(mergedName);
+          psh.getRange(trow, 3).setValue(mergedFirst);
+          psh.getRange(trow, 4).setValue(mergedCount);
+          psh.getRange(trow, 5).setValue(mergedLast);
+          psh.getRange(trow, 6).setValue(mergedNote);
+        }
+        // ③ source を指す channel を全て target へ付け替え（col7 のみ・col0〜6/カレンダー不変）。
+        //    Phase 3 のエイリアス（連絡先追加で増えた行）も含め、source の全 channel が target に寄る。
+        var values = sh.getDataRange().getValues();
+        for (var r = 1; r < values.length; r++) {
+          if (String(values[r][0] || '') && String(values[r][7] || '') === srcPid) {
+            sh.getRange(r + 1, 8).setValue(tgtPid);
+          }
+        }
+        // ④ source person 行を tombstone 化（削除せず col7 に mergedInto=tgtPid を立てる＝可逆寄り）。
+        var srow = personLookup_(srcPid);
+        if (srow) psh.getRange(srow, 7).setValue(tgtPid); // person col7 = mergedInto マーカー（元集約 col1〜6 は保持）
+        res = { ok: true, merged: true, count: mergedCount };
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  // 監査。生トークンは残さない（operator は adminToken の指紋・target は source->target のハッシュを maskId_ に一任）。
+  auditPush_(tokenFp_(body.adminToken), 'merge', (body.sourceKey || '') + '->' + (body.targetKey || ''), (res && res.ok) ? 'ok' : 'ng');
+  return res;
+}
+
+/** 台帳（channel）で hashKey_(col0)===hash の行の生キー(col0) を返す（無ければ ''）。突合トークン→生キーの逆引き。 */
+function rawKeyForHash_(sh, hash) {
+  var values = sh.getDataRange().getValues();
+  for (var r = 1; r < values.length; r++) {
+    var k = String(values[r][0] || '');
+    if (k && hashKey_(k) === hash) return k;
+  }
+  return '';
+}
+
+/** yyyy-MM-dd 文字列の最小（空は無視）。firstVisit の統合に使う。 */
+function minDate_(a, b) {
+  a = String(a || ''); b = String(b || '');
+  if (!a) return b; if (!b) return a;
+  return a < b ? a : b;
+}
+
+/** yyyy-MM-dd 文字列の最大（空は無視）。lastVisit の統合に使う。 */
+function maxDate_(a, b) {
+  a = String(a || ''); b = String(b || '');
+  if (!a) return b; if (!b) return a;
+  return a > b ? a : b;
+}
+
+/** メモ連結（target→source の順・空は除外・同一は1つ・CUSTOMER_NOTE_MAX で切詰め）。 */
+function joinNotes_(a, b) {
+  a = String(a || '').trim(); b = String(b || '').trim();
+  var parts = [];
+  if (a) parts.push(a);
+  if (b && b !== a) parts.push(b);
+  var joined = parts.join('\n---\n');
+  return joined.length > CUSTOMER_NOTE_MAX ? joined.slice(0, CUSTOMER_NOTE_MAX) : joined;
 }
 
 // ============================================================
@@ -1857,6 +2803,7 @@ function broadcastRecipients_(scope) {
   var unreachable = 0;
   for (var r = 1; r < values.length; r++) { // 0行目はヘッダ
     var row = values[r];
+    if (isArchivedRow_(row)) continue;        // ★アーカイブ済み channel は送信先から外す（履歴照合には残すが配信しない）
     if (Number(row[4]) < threshold) continue; // 5列目=来店回数
     var type = row[1];
     if (type === 'line') lineUserIds.push(String(row[0]).replace(/^line:/, ''));
